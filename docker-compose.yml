@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Frontend Service
+  frontend:
+    image: node:20
+    working_dir: /app
+    volumes:
+      - ./Frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:8080"
+    command: sh -c "npm install && npm run dev"
+    restart: unless-stopped
+    networks:
+      - xencrypt-network
+    depends_on:
+      - crypto-scanner
+      - db-service
+
+  # Crypto Scanner Service
+  crypto-scanner:
+    build:
+      context: ./scan-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./scan-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_SERVICE_URL=http://db-service:8001
+    networks:
+      - xencrypt-network
+    depends_on:
+      db-service:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Database Service
+  db-service:
+    build:
+      context: ./db-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./db-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/scandb
+    networks:
+      - xencrypt-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: scanuser
+      POSTGRES_PASSWORD: scanpass
+      POSTGRES_DB: scandb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    networks:
+      - xencrypt-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanuser -d scandb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Adminer Web UI (for viewing the database)
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8080:8080"
+    networks:
+      - xencrypt-network
+
+networks:
+  xencrypt-network:
+    driver: bridge
+    name: xencrypt-network
+
+volumes:
+  postgres-data:
+    driver: local
