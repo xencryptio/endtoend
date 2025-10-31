@@ -164,9 +164,19 @@ const CryptoAuditDashboard: React.FC = () => {
   const refreshAll = useCallback(async () => {
     setLoading(true);
     await Promise.all([fetchStats(), fetchAgents(), fetchTasks()]);
-    
-    setTriggeredScans(new Set());
-    
+
+    // Conditionally clear triggeredScans: only remove if task is no longer pending/in_progress
+    setTriggeredScans(prev => {
+      const newSet = new Set(prev);
+      const activeTasks = tasks.filter(t =>
+        t.status === 'pending' || t.status === 'in_progress'
+      ).map(t => t.agent_id);
+      prev.forEach(agentId => {
+        if (!activeTasks.includes(agentId)) newSet.delete(agentId);
+      });
+      return newSet;
+    });
+
     const expandedAgentIds = Array.from(expandedAgents);
     await Promise.all(expandedAgentIds.map(id => fetchAgentResults(id)));
     
@@ -208,7 +218,10 @@ const CryptoAuditDashboard: React.FC = () => {
       });
       const data = await response.json();
       if (data.success) {
-        await fetchTasks();
+        await Promise.all([fetchTasks(), fetchAgents()]); // Refresh agents to update status badges
+        setTimeout(async () => { // Add a delay then refresh again to catch status change
+          await Promise.all([fetchTasks(), fetchAgents()]);
+        }, 1000);
       }
     } catch (error) {
       console.error('Error triggering scan:', error);
@@ -228,6 +241,7 @@ const CryptoAuditDashboard: React.FC = () => {
       newExpanded.add(agentId);
       if (!agentResults.has(agentId)) {
         setLoadingResults(prev => new Set(prev).add(agentId));
+        await fetchStats(); // Refresh stats to update counts after getting results
         await fetchAgentResults(agentId);
         setLoadingResults(prev => {
           const newSet = new Set(prev);
@@ -313,6 +327,18 @@ const CryptoAuditDashboard: React.FC = () => {
     if (hours < 24) return `${hours}h ago`;
     return `${days}d ago`;
   };
+
+  const formatTimeSince = (minutes: number): string => {
+    if (minutes < 1) return '<1 min ago';
+    if (minutes === 1) return '1 min ago';
+    if (minutes < 60) return `${minutes} mins ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours === 1) return '1 hour ago';
+    if (hours < 24) return `${hours} hours ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+  };
+
 
   const handleTabChange = (tab: 'dashboard' | 'downloads' | 'docs') => {
     setTabTransition(true);
@@ -404,15 +430,16 @@ const CryptoAuditDashboard: React.FC = () => {
         {activeTab === 'dashboard' && (
           <div className="space-y-6 animate-fadeIn">
             {isInitialLoad ? (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {[...Array(4)].map((_, i) => (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                {[...Array(5)].map((_, i) => (
                   <SkeletonStatCard key={i} />
                 ))}
               </div>
             ) : stats && (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                 <StatCard title="Total Agents" value={stats.agents.total} icon={<Server size={20} />} color="indigo" />
                 <StatCard title="Active" value={stats.agents.active} icon={<CheckCircle size={20} />} color="green" />
+                <StatCard title="Inactive" value={stats.agents.inactive} icon={<AlertCircle size={20} />} color="red" />
                 <StatCard title="Pending" value={stats.tasks.pending} icon={<Clock size={20} />} color="amber" />
                 <StatCard title="Completed" value={stats.tasks.completed} icon={<CheckCircle size={20} />} color="emerald" />
               </div>
@@ -498,9 +525,11 @@ const CryptoAuditDashboard: React.FC = () => {
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Hostname</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">IP Address</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">OS</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Activity</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Scans</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Action</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Last Seen</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Time Since Contact</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 w-24">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -518,6 +547,8 @@ const CryptoAuditDashboard: React.FC = () => {
                           expandedResults={expandedResults}
                           toggleResultDetails={toggleResultDetails}
                           loadingResults={loadingResults.has(agent.agent_id)}
+                          formatDateTime={formatDateTime}
+                          formatTimeSince={formatTimeSince}
                           getRelativeTime={getRelativeTime}
                         />
                       ))}
@@ -543,6 +574,8 @@ const CryptoAuditDashboard: React.FC = () => {
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Results</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Created</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Started At</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Completed At</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -563,14 +596,19 @@ const CryptoAuditDashboard: React.FC = () => {
                               <Badge status={task.status} />
                             </td>
                             <td className="px-4 py-3">
-                              {allResults.some(r => r.task_id === task.task_id) ? (
-                                <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
-                              ) : task.status === 'completed' ? (
-                                <Clock size={18} className="text-amber-500 dark:text-amber-400" />
-                              ) : null}
+                              {allResults.some(r => r.task_id === task.task_id) 
+                                ? <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
+                                : <span className="text-xs text-slate-400">-</span>
+                              }
                             </td>
                             <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
                               {formatDateTime(task.created_at)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
+                              {task.started_at ? formatDateTime(task.started_at) : '-'}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
+                              {task.completed_at ? formatDateTime(task.completed_at) : '-'}
                             </td>
                           </tr>
                         );
@@ -702,6 +740,7 @@ const StatCard: React.FC<{ title: string; value: number; icon: React.ReactNode; 
     green: 'from-green-500 to-emerald-600',
     amber: 'from-amber-500 to-orange-600',
     emerald: 'from-emerald-500 to-teal-600',
+    red: 'from-red-500 to-rose-600',
   }[color];
 
   return (
@@ -759,8 +798,10 @@ const AgentRow: React.FC<{
   expandedResults: Set<string>;
   toggleResultDetails: (id: string) => void;
   loadingResults: boolean;
+  formatDateTime: (date: string) => string;
+  formatTimeSince: (minutes: number) => string;
   getRelativeTime: (date: string) => string;
-}> = ({ agent, info, expanded, onToggle, onTriggerScan, isScanTriggered, results, tasks, expandedResults, toggleResultDetails, loadingResults, getRelativeTime }) => {
+}> = ({ agent, info, expanded, onToggle, onTriggerScan, isScanTriggered, results, tasks, expandedResults, toggleResultDetails, loadingResults, formatDateTime, formatTimeSince, getRelativeTime }) => {
   const isScanning = isScanTriggered && (info?.in_progress_tasks ?? 0) > 0;
 
   return (
@@ -785,7 +826,7 @@ const AgentRow: React.FC<{
         <td className="px-4 py-3 text-slate-900 dark:text-slate-100">{agent.ip_address}</td>
         <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-sm">{agent.os_info}</td>
         <td className="px-4 py-3">
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             {info && info.total_scans > 0 && (
               <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">
                 {info.total_scans} scan{info.total_scans !== 1 ? 's' : ''}
@@ -800,15 +841,22 @@ const AgentRow: React.FC<{
             {info && info.pending_tasks > 0 && (
               <Badge status="pending" />
             )}
-            {info?.last_scan && (
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Last: {getRelativeTime(info.last_scan)}
-              </div>
-            )}
           </div>
         </td>
         <td className="px-4 py-3">
           <Badge status={agent.status} />
+        </td>
+        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
+          {formatDateTime(agent.last_seen)}
+        </td>
+        <td className="px-4 py-3">
+          <span className={`text-xs ${
+            agent.minutes_since_last_seen < 2 ? 'text-green-600 dark:text-green-400 font-semibold' : 
+            agent.minutes_since_last_seen > 5 ? 'text-red-600 dark:text-red-400 font-semibold' : 
+            'text-slate-600 dark:text-slate-400'
+          }`}>
+            {formatTimeSince(agent.minutes_since_last_seen)}
+          </span>
         </td>
         <td className="px-4 py-3">
           <button
@@ -823,7 +871,7 @@ const AgentRow: React.FC<{
       </tr>
       {expanded && (
         <tr className="bg-slate-50 dark:bg-slate-800/30">
-          <td colSpan={7} className="px-4 py-4">
+          <td colSpan={9} className="px-4 py-4">
             {loadingResults ? (
               <LoadingState />
             ) : (
