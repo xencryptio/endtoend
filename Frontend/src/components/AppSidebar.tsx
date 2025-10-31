@@ -8,6 +8,7 @@ import {
   Menu,
   ScanLine,
   User,
+  Computer,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ const menuItems = [
   { title: "Vulnerabilities", url: "/vulnerabilities", icon: Shield },
   { title: "Profile", url: "/profile", icon: User },
   { title: "Scan", url: "/scan", icon: ScanLine },
+  { title: "System Scan", url: "/system-scan", icon: Computer },
   { title: "Migration Assist", url: "/migrationAssist", icon: ArrowRightLeft },
   { title: "Integration", url: "/integration", icon: Link2 },
   { title: "Settings", url: "/settings", icon: Settings },

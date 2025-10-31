@@ -1,115 +1,20 @@
 version: '3.8'
 
+# =============================================================================
+# CRYPTO AUDIT SYSTEM - COMPLETE DOCKER COMPOSE
+# =============================================================================
+# Cross-platform (Windows, macOS, Linux)
+# All agents are containerized with real crypto configurations
+# One command to rule them all: docker-compose up
+# =============================================================================
+
 services:
-  # ======================
-  # FRONTEND SERVICE
-  # ======================
-  frontend:
-    build: ./Frontend
-    ports:
-      - "3000:8080"
-    networks:
-      - xencrypt-network
-    depends_on:
-      - crypto-scanner
-      - db-service
-    restart: unless-stopped
-
-  # ======================
-  # CRYPTO SCANNER SERVICE
-  # ======================
-  crypto-scanner:
-    build:
-      context: ./scan-service
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./scan-service:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DB_SERVICE_URL=http://db-service:8001
-    networks:
-      - xencrypt-network
-    depends_on:
-      db-service:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # ======================
-  # DATABASE SERVICE
-  # ======================
-  db-service:
-    build:
-      context: ./db-service
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./db-service:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/scandb
-    networks:
-      - xencrypt-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  # ======================
-  # POSTGRES DATABASE
-  # ======================
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: scanuser
-      POSTGRES_PASSWORD: scanpass
-      POSTGRES_DB: scandb
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./postgres-init:/docker-entrypoint-initdb.d
-    networks:
-      - xencrypt-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U scanuser -d scandb"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-
-  # ======================
-  # ADMINER (DB WEB UI)
-  # ======================
-  adminer:
-    image: adminer
-    restart: always
-    ports:
-      - "8080:8080"
-    networks:
-      - xencrypt-network
-
-  # =============================================================================
-  # CRYPTO AUDIT SYSTEM SERVICES (inside system-scaner)
-  # =============================================================================
-
   # ---------------------------------------------------------------------------
   # CENTRAL API SERVER
   # ---------------------------------------------------------------------------
   system-scan:
     build:
-      context: ./system-scaner
+      context: .
       dockerfile: Dockerfile
     container_name: system-scan
     ports:
@@ -119,7 +24,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     networks:
-      - xencrypt-network
+      - crypto-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/api/v1/admin/stats"]
@@ -130,9 +35,10 @@ services:
   # ---------------------------------------------------------------------------
   # LINUX AGENT #1 - MODERN CONFIGURATION
   # ---------------------------------------------------------------------------
+  # Profile: Ubuntu 22.04 + OpenSSL 3.0 + Modern ciphers
   linux-agent-modern:
     build:
-      context: ./system-scaner/agents/linux
+      context: ./agents/linux
       dockerfile: Dockerfile.modern
       args:
         API_SERVER: http://system-scan:9000
@@ -146,20 +52,21 @@ services:
       - POLL_INTERVAL=10
       - AGENT_NAME=ubuntu-modern-agent
     networks:
-      - xencrypt-network
+      - crypto-network
     restart: unless-stopped
     privileged: false
     cap_add:
-      - SYS_ADMIN
+      - SYS_ADMIN  # For systemd operations
     volumes:
       - agent-modern-data:/var/lib/crypto_agent
 
   # ---------------------------------------------------------------------------
   # LINUX AGENT #2 - LEGACY CONFIGURATION
   # ---------------------------------------------------------------------------
+  # Profile: Debian 10 + OpenSSL 1.1 + Legacy ciphers + Weak protocols
   linux-agent-legacy:
     build:
-      context: ./system-scaner/agents/linux
+      context: ./agents/linux
       dockerfile: Dockerfile.legacy
       args:
         API_SERVER: http://system-scan:9000
@@ -173,7 +80,7 @@ services:
       - POLL_INTERVAL=10
       - AGENT_NAME=debian-legacy-agent
     networks:
-      - xencrypt-network
+      - crypto-network
     restart: unless-stopped
     privileged: false
     cap_add:
@@ -184,9 +91,10 @@ services:
   # ---------------------------------------------------------------------------
   # LINUX AGENT #3 - MIXED CONFIGURATION
   # ---------------------------------------------------------------------------
+  # Profile: Alpine Linux + OpenSSL 1.1.1 + Mixed modern/legacy settings
   linux-agent-mixed:
     build:
-      context: ./system-scaner/agents/linux
+      context: ./agents/linux
       dockerfile: Dockerfile.mixed
       args:
         API_SERVER: http://system-scan:9000
@@ -200,7 +108,7 @@ services:
       - POLL_INTERVAL=10
       - AGENT_NAME=alpine-mixed-agent
     networks:
-      - xencrypt-network
+      - crypto-network
     restart: unless-stopped
     privileged: false
     cap_add:
@@ -208,20 +116,20 @@ services:
     volumes:
       - agent-mixed-data:/var/lib/crypto_agent
 
-# ======================
+# =============================================================================
 # NETWORKS
-# ======================
+# =============================================================================
 networks:
-  xencrypt-network:
+  crypto-network:
     driver: bridge
-    name: xencrypt-network
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
-# ======================
-# VOLUMES
-# ======================
+# =============================================================================
+# VOLUMES (Persistent storage)
+# =============================================================================
 volumes:
-  postgres-data:
-    driver: local
   server-data:
     driver: local
   agent-modern-data:
@@ -230,3 +138,30 @@ volumes:
     driver: local
   agent-mixed-data:
     driver: local
+
+# =============================================================================
+# USAGE INSTRUCTIONS
+# =============================================================================
+# 
+# Start everything:
+#   docker-compose up -d
+#
+# View logs:
+#   docker-compose logs -f
+#   docker-compose logs system-scan
+#   docker-compose logs linux-agent-modern
+#
+# Stop everything:
+#   docker-compose down
+#
+# Reset (clean start):
+#   docker-compose down -v
+#   docker-compose up -d --build
+#
+# Access Dashboard:
+#   http://localhost:9000
+#
+# Trigger scans:
+#   Open dashboard → Admin Dashboard → Click "Trigger Scan" next to any agent
+#
+# =============================================================================

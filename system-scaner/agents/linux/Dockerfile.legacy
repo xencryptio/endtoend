@@ -1,0 +1,134 @@
+# =============================================================================
+# LEGACY LINUX AGENT - Debian 10 (Buster) + OpenSSL 1.1.1 + Legacy Crypto
+# =============================================================================
+# This image simulates legacy cryptographic environments for testing
+# purposes. It uses intentionally weak algorithms and protocols.
+# =============================================================================
+
+FROM debian:buster
+
+# --- FIX: Redirect sources to Debian Archive (since Buster is EOL) ---
+RUN sed -i 's|deb.debian.org/debian|archive.debian.org/debian|g' /etc/apt/sources.list && \
+    sed -i 's|security.debian.org|archive.debian.org/debian-security|g' /etc/apt/sources.list && \
+    echo "Acquire::Check-Valid-Until false;" > /etc/apt/apt.conf.d/99no-check-valid-until
+
+# Build argument for API server URL
+ARG API_SERVER=http://system-scan:9000
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# =============================================================================
+# INSTALL LEGACY SYSTEM DEPENDENCIES
+# =============================================================================
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    openssl \
+    openssh-server \
+    curl \
+    ca-certificates \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# PYTHON DEPENDENCIES
+# =============================================================================
+RUN pip3 install requests
+
+# =============================================================================
+# DIRECTORY STRUCTURE
+# =============================================================================
+RUN mkdir -p /opt/crypto-agent \
+    /var/lib/crypto_agent \
+    /var/log \
+    /etc/ssh
+
+# =============================================================================
+# COPY AGENT FILES
+# =============================================================================
+COPY crypto_agent_service.py /opt/crypto-agent/
+COPY linux_server.py /opt/crypto-agent/
+COPY entrypoint.sh /opt/crypto-agent/
+RUN chmod +x /opt/crypto-agent/entrypoint.sh
+
+# =============================================================================
+# LEGACY CRYPTO CONFIGURATION (OpenSSL + SSH)
+# =============================================================================
+
+# --- Configure OpenSSL to allow legacy algorithms ---
+RUN echo "# Legacy OpenSSL Configuration" > /etc/ssl/openssl.cnf.legacy && \
+    echo "openssl_conf = openssl_init" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "[openssl_init]" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "ssl_conf = ssl_sect" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "[ssl_sect]" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "system_default = system_default_sect" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "[system_default_sect]" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "MinProtocol = TLSv1" >> /etc/ssl/openssl.cnf.legacy && \
+    echo "CipherString = DEFAULT:@SECLEVEL=0" >> /etc/ssl/openssl.cnf.legacy
+
+# --- Configure SSH with legacy settings (weak ciphers, old protocols) ---
+RUN mkdir -p /run/sshd && \
+    echo "# Legacy SSH Configuration" > /etc/ssh/sshd_config && \
+    echo "Port 22" >> /etc/ssh/sshd_config && \
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "" >> /etc/ssh/sshd_config && \
+    echo "# Legacy Cryptographic Settings" >> /etc/ssh/sshd_config && \
+    echo "Protocol 2" >> /etc/ssh/sshd_config && \
+    echo "Ciphers 3des-cbc,aes128-cbc,aes256-cbc,aes128-ctr" >> /etc/ssh/sshd_config && \
+    echo "MACs hmac-md5,hmac-sha1,hmac-sha2-256" >> /etc/ssh/sshd_config && \
+    echo "KexAlgorithms diffie-hellman-group1-sha1,diffie-hellman-group14-sha1" >> /etc/ssh/sshd_config && \
+    echo "HostKeyAlgorithms ssh-rsa,ssh-dss" >> /etc/ssh/sshd_config
+
+# =============================================================================
+# LEGACY CERTIFICATE GENERATION
+# =============================================================================
+
+# Generate legacy certificates (RSA-1024 with MD5 - intentionally weak)
+# Note: Added -y to force overwrite existing files without prompting
+RUN openssl req -x509 -newkey rsa:1024 -md5 -nodes \
+    -keyout /etc/ssl/private/legacy-server.key \
+    -out /etc/ssl/certs/legacy-server.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Legacy/CN=debian-legacy-agent" \
+    -days 365 -nodes -batch 2>/dev/null || \
+    openssl req -x509 -newkey rsa:1024 -sha1 -nodes \
+    -keyout /etc/ssl/private/legacy-server.key \
+    -out /etc/ssl/certs/legacy-server.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Legacy/CN=debian-legacy-agent" \
+    -days 365 -nodes -batch
+
+# Generate legacy RSA-2048 with SHA-1 certificate
+RUN openssl req -x509 -newkey rsa:2048 -sha1 -nodes \
+    -keyout /etc/ssl/private/legacy-sha1.key \
+    -out /etc/ssl/certs/legacy-sha1.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Legacy/CN=debian-legacy-sha1" \
+    -days 365 -nodes -batch
+
+# --- FIX: Force removal before generating SSH host keys ---
+# Generate SSH host keys (legacy algorithms)
+RUN rm -f /etc/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key.pub /etc/ssh/ssh_host_dsa_key /etc/ssh/ssh_host_dsa_key.pub && \
+    ssh-keygen -t rsa -b 1024 -f /etc/ssh/ssh_host_rsa_key -N "" && \
+    ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key -N ""
+
+# =============================================================================
+# ENVIRONMENT & HEALTHCHECK
+# =============================================================================
+
+ENV OPENSSL_CONF=/etc/ssl/openssl.cnf.legacy
+ENV CRYPTO_API_BASE_URL=${API_SERVER}
+ENV CRYPTO_POLL_INTERVAL=10
+ENV CRYPTO_LOG_FILE=/var/log/crypto_agent.log
+ENV CRYPTO_AGENT_ID_FILE=/var/lib/crypto_agent/agent_id
+
+EXPOSE 22
+
+WORKDIR /opt/crypto-agent
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python3 -c "import requests; requests.get('${CRYPTO_API_BASE_URL}/api/v1/admin/stats', timeout=5)" || exit 1
+
+ENTRYPOINT ["/opt/crypto-agent/entrypoint.sh"]

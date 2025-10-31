@@ -1,0 +1,112 @@
+# =============================================================================
+# MODERN LINUX AGENT - Ubuntu 22.04 + OpenSSL 3.0 + Modern Crypto
+# =============================================================================
+
+FROM ubuntu:22.04
+
+# Build argument for API server URL
+ARG API_SERVER=http://system-scan:9000
+
+# Prevent interactive prompts during apt install
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    openssl \
+    openssh-server \
+    curl \
+    ca-certificates \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install requests
+
+# Create directories
+RUN mkdir -p /opt/crypto-agent \
+    /var/lib/crypto_agent \
+    /var/log \
+    /etc/ssh
+
+# Copy agent files
+COPY crypto_agent_service.py /opt/crypto-agent/
+COPY linux_server.py /opt/crypto-agent/
+COPY entrypoint.sh /opt/crypto-agent/
+
+# Make entrypoint executable
+RUN chmod +x /opt/crypto-agent/entrypoint.sh
+
+# =============================================================================
+# MODERN CRYPTO CONFIGURATION PROFILE
+# =============================================================================
+
+# Configure OpenSSL for modern ciphers (OpenSSL 3.0 defaults are already modern)
+RUN echo "# Modern OpenSSL Configuration" > /etc/ssl/openssl.cnf.modern && \
+    echo "openssl_conf = openssl_init" >> /etc/ssl/openssl.cnf.modern && \
+    echo "" >> /etc/ssl/openssl.cnf.modern && \
+    echo "[openssl_init]" >> /etc/ssl/openssl.cnf.modern && \
+    echo "providers = provider_sect" >> /etc/ssl/openssl.cnf.modern && \
+    echo "" >> /etc/ssl/openssl.cnf.modern && \
+    echo "[provider_sect]" >> /etc/ssl/openssl.cnf.modern && \
+    echo "default = default_sect" >> /etc/ssl/openssl.cnf.modern && \
+    echo "" >> /etc/ssl/openssl.cnf.modern && \
+    echo "[default_sect]" >> /etc/ssl/openssl.cnf.modern && \
+    echo "activate = 1" >> /etc/ssl/openssl.cnf.modern
+
+# Configure SSH with modern settings
+RUN mkdir -p /run/sshd && \
+    echo "# Modern SSH Configuration" > /etc/ssh/sshd_config && \
+    echo "Port 22" >> /etc/ssh/sshd_config && \
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "" >> /etc/ssh/sshd_config && \
+    echo "# Modern Cryptographic Settings" >> /etc/ssh/sshd_config && \
+    echo "Protocol 2" >> /etc/ssh/sshd_config && \
+    echo "Ciphers aes256-gcm@openssh.com,chacha20-poly1305@openssh.com,aes256-ctr" >> /etc/ssh/sshd_config && \
+    echo "MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com" >> /etc/ssh/sshd_config && \
+    echo "KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512" >> /etc/ssh/sshd_config && \
+    echo "HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256" >> /etc/ssh/sshd_config
+
+# Generate modern certificates (RSA-4096 with SHA-256)
+# Added -batch to suppress interactive prompts
+RUN openssl req -x509 -newkey rsa:4096 -sha256 -nodes -batch \
+    -keyout /etc/ssl/private/modern-server.key \
+    -out /etc/ssl/certs/modern-server.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Modern/CN=ubuntu-modern-agent" \
+    -days 365
+
+# Generate ED25519 certificate (modern elliptic curve)
+# Added -batch to suppress interactive prompts
+RUN openssl genpkey -algorithm ED25519 -out /etc/ssl/private/modern-ed25519.key && \
+    openssl req -new -x509 -key /etc/ssl/private/modern-ed25519.key -batch \
+    -out /etc/ssl/certs/modern-ed25519.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Modern/CN=ubuntu-modern-ed25519" \
+    -days 365
+
+# Generate SSH host keys (modern algorithms)
+# FIX: Added rm -f to remove auto-generated keys and prevent "Overwrite (y/n)?" prompt
+RUN rm -f /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key.pub && \
+    ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" && \
+    ssh-keygen -t rsa -b 4096 -f /etc/ssh/ssh_host_rsa_key -N ""
+
+# Set environment variables
+ENV OPENSSL_CONF=/etc/ssl/openssl.cnf.modern
+ENV CRYPTO_API_BASE_URL=${API_SERVER}
+ENV CRYPTO_POLL_INTERVAL=10
+ENV CRYPTO_LOG_FILE=/var/log/crypto_agent.log
+ENV CRYPTO_AGENT_ID_FILE=/var/lib/crypto_agent/agent_id
+
+# Expose SSH port (for demonstration)
+EXPOSE 22
+
+WORKDIR /opt/crypto-agent
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python3 -c "import requests; requests.get('${CRYPTO_API_BASE_URL}/api/v1/admin/stats', timeout=5)" || exit 1
+
+# Run the agent
+ENTRYPOINT ["/opt/crypto-agent/entrypoint.sh"]

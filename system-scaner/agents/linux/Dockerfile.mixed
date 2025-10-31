@@ -1,0 +1,113 @@
+# =============================================================================
+# MIXED LINUX AGENT - Alpine Linux 3.18 + OpenSSL 3.1 + Mixed Crypto
+# =============================================================================
+
+FROM alpine:3.18
+
+# Build argument for API server URL
+ARG API_SERVER=http://system-scan:9000
+
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    openssl \
+    openssh-server \
+    curl \
+    ca-certificates \
+    sudo \
+    bash
+
+# Install Python dependencies
+RUN pip3 install --break-system-packages requests
+
+# Create directories
+RUN mkdir -p /opt/crypto-agent \
+    /var/lib/crypto_agent \
+    /var/log \
+    /etc/ssh
+
+# Copy agent files
+COPY crypto_agent_service.py /opt/crypto-agent/
+COPY linux_server.py /opt/crypto-agent/
+COPY entrypoint.sh /opt/crypto-agent/
+
+RUN chmod +x /opt/crypto-agent/entrypoint.sh
+
+# =============================================================================
+# MIXED CRYPTO CONFIGURATION PROFILE
+# =============================================================================
+
+# Configure OpenSSL with mixed settings (some modern, some legacy)
+RUN echo "# Mixed OpenSSL Configuration" > /etc/ssl/openssl.cnf.mixed && \
+    echo "openssl_conf = openssl_init" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "[openssl_init]" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "ssl_conf = ssl_sect" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "[ssl_sect]" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "system_default = system_default_sect" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "[system_default_sect]" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "MinProtocol = TLSv1.1" >> /etc/ssl/openssl.cnf.mixed && \
+    echo "CipherString = DEFAULT:@SECLEVEL=1" >> /etc/ssl/openssl.cnf.mixed
+
+# Configure SSH with mixed settings
+RUN mkdir -p /run/sshd && \
+    echo "# Mixed SSH Configuration" > /etc/ssh/sshd_config && \
+    echo "Port 22" >> /etc/ssh/sshd_config && \
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "" >> /etc/ssh/sshd_config && \
+    echo "# Mixed Cryptographic Settings" >> /etc/ssh/sshd_config && \
+    echo "Protocol 2" >> /etc/ssh/sshd_config && \
+    echo "Ciphers aes256-ctr,aes192-ctr,aes128-ctr,aes128-cbc" >> /etc/ssh/sshd_config && \
+    echo "MACs hmac-sha2-512,hmac-sha2-256,hmac-sha1" >> /etc/ssh/sshd_config && \
+    echo "KexAlgorithms diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha1" >> /etc/ssh/sshd_config && \
+    echo "HostKeyAlgorithms ssh-rsa,ecdsa-sha2-nistp256" >> /etc/ssh/sshd_config
+
+# Generate mixed certificates
+# Certificate 1: RSA-2048 with SHA-256 (moderate)
+RUN openssl req -x509 -newkey rsa:2048 -sha256 -nodes -batch \
+    -keyout /etc/ssl/private/mixed-rsa2048.key \
+    -out /etc/ssl/certs/mixed-rsa2048.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Mixed/CN=alpine-mixed-rsa2048" \
+    -days 365
+
+# Certificate 2: RSA-3072 with SHA-384 (stronger)
+RUN openssl req -x509 -newkey rsa:3072 -sha384 -nodes -batch \
+    -keyout /etc/ssl/private/mixed-rsa3072.key \
+    -out /etc/ssl/certs/mixed-rsa3072.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Mixed/CN=alpine-mixed-rsa3072" \
+    -days 365
+
+# Certificate 3: ECDSA P-256 (modern elliptic curve)
+RUN openssl ecparam -name prime256v1 -genkey -noout -out /etc/ssl/private/mixed-ecdsa.key && \
+    openssl req -new -x509 -key /etc/ssl/private/mixed-ecdsa.key -batch \
+    -out /etc/ssl/certs/mixed-ecdsa.crt \
+    -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Mixed/CN=alpine-mixed-ecdsa" \
+    -days 365
+
+# Generate SSH host keys (mixed algorithms)
+# FIX: Added rm -f to remove auto-generated keys and prevent "Overwrite (y/n)?" prompt
+RUN rm -f /etc/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key.pub /etc/ssh/ssh_host_ecdsa_key /etc/ssh/ssh_host_ecdsa_key.pub && \
+    ssh-keygen -t rsa -b 2048 -f /etc/ssh/ssh_host_rsa_key -N "" && \
+    ssh-keygen -t ecdsa -b 256 -f /etc/ssh/ssh_host_ecdsa_key -N ""
+
+# Set environment variables
+ENV OPENSSL_CONF=/etc/ssl/openssl.cnf.mixed
+ENV CRYPTO_API_BASE_URL=${API_SERVER}
+ENV CRYPTO_POLL_INTERVAL=10
+ENV CRYPTO_LOG_FILE=/var/log/crypto_agent.log
+ENV CRYPTO_AGENT_ID_FILE=/var/lib/crypto_agent/agent_id
+
+EXPOSE 22
+
+WORKDIR /opt/crypto-agent
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python3 -c "import requests; requests.get('${CRYPTO_API_BASE_URL}/api/v1/admin/stats', timeout=5)" || exit 1
+
+ENTRYPOINT ["/opt/crypto-agent/entrypoint.sh"]

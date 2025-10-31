@@ -1,0 +1,30 @@
+[Unit]
+Description=Crypto Agent Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/crypto-agent
+ExecStart=/usr/bin/python3 /opt/crypto-agent/crypto_agent_service.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Configuration - Change these values as needed
+Environment="CRYPTO_API_BASE_URL=http://nipunnegi:9000"
+Environment="CRYPTO_AUDIT_USER=kali"
+Environment="CRYPTO_AUDIT_SUDO=kali"
+Environment="CRYPTO_POLL_INTERVAL=5"
+Environment="CRYPTO_LOG_FILE=/var/log/crypto_agent.log"
+Environment="CRYPTO_AGENT_ID_FILE=/var/lib/crypto_agent/agent_id"
+
+# Security settings
+NoNewPrivileges=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
