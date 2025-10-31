@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Moon, Sun, Search, Filter, X } from 'lucide-react';
+import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen } from 'lucide-react';
 
 // API Configuration
 const API_BASE_URL = 'http://localhost:9000';
@@ -62,6 +62,12 @@ interface AgentTaskInfo {
   pending_tasks: number;
   in_progress_tasks: number;
   last_scan: string | null;
+  total_scans: number;
+}
+
+interface TaskResultPair {
+  task: Task;
+  result: AuditResult | null;
 }
 
 const CryptoAuditDashboard: React.FC = () => {
@@ -80,17 +86,22 @@ const CryptoAuditDashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [triggeredScans, setTriggeredScans] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [error, setError] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [loadingResults, setLoadingResults] = useState<Set<string>>(new Set());
+  const [tabTransition, setTabTransition] = useState(false);
 
-  // Fetch functions with error handling
   const fetchStats = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/admin/stats`);
       const data = await response.json();
       if (data.success) {
         setStats(data);
+        setError(null);
       }
     } catch (error) {
       console.error('Error fetching stats:', error);
+      setError('Failed to fetch statistics');
     }
   }, []);
 
@@ -100,9 +111,11 @@ const CryptoAuditDashboard: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setAgents(data.agents);
+        setError(null);
       }
     } catch (error) {
       console.error('Error fetching agents:', error);
+      setError('Failed to fetch agents');
     }
   }, []);
 
@@ -112,9 +125,11 @@ const CryptoAuditDashboard: React.FC = () => {
       const data = await response.json();
       if (data.success) {
         setTasks(data.tasks);
+        setError(null);
       }
     } catch (error) {
       console.error('Error fetching tasks:', error);
+      setError('Failed to fetch tasks');
     }
   }, []);
 
@@ -149,9 +164,16 @@ const CryptoAuditDashboard: React.FC = () => {
   const refreshAll = useCallback(async () => {
     setLoading(true);
     await Promise.all([fetchStats(), fetchAgents(), fetchTasks()]);
+    
+    setTriggeredScans(new Set());
+    
+    const expandedAgentIds = Array.from(expandedAgents);
+    await Promise.all(expandedAgentIds.map(id => fetchAgentResults(id)));
+    
     setLastUpdate(new Date());
     setLoading(false);
-  }, [fetchStats, fetchAgents, fetchTasks]);
+    setIsInitialLoad(false);
+  }, [fetchStats, fetchAgents, fetchTasks, expandedAgents, fetchAgentResults]);
   
   const agentTaskInfo = useMemo<Map<string, AgentTaskInfo>>(() => {
     const info = new Map<string, AgentTaskInfo>();
@@ -172,6 +194,7 @@ const CryptoAuditDashboard: React.FC = () => {
         pending_tasks: agentTasks.filter(t => t.status === 'pending').length,
         in_progress_tasks: agentTasks.filter(t => t.status === 'in_progress').length,
         last_scan: lastScan,
+        total_scans: agentTasks.length,
       });
     });
     return info;
@@ -185,11 +208,15 @@ const CryptoAuditDashboard: React.FC = () => {
       });
       const data = await response.json();
       if (data.success) {
-        // The task will show up on the next refresh
         await fetchTasks();
       }
     } catch (error) {
       console.error('Error triggering scan:', error);
+      setTriggeredScans(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(agentId);
+        return newSet;
+      });
     }
   };
 
@@ -200,7 +227,13 @@ const CryptoAuditDashboard: React.FC = () => {
     } else {
       newExpanded.add(agentId);
       if (!agentResults.has(agentId)) {
+        setLoadingResults(prev => new Set(prev).add(agentId));
         await fetchAgentResults(agentId);
+        setLoadingResults(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(agentId);
+          return newSet;
+        });
       }
     }
     setExpandedAgents(newExpanded);
@@ -220,7 +253,6 @@ const CryptoAuditDashboard: React.FC = () => {
     return Array.from(agentResults.values()).flat();
   }, [agentResults]);
 
-  // Filtered agents
   const filteredAgents = useMemo(() => {
     return agents.filter(agent => {
       const info = agentTaskInfo.get(agent.agent_id);
@@ -251,7 +283,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
       return matchesSearch && matchesStatus;
     });
-  }, [agents, searchQuery, statusFilter]);
+  }, [agents, searchQuery, statusFilter, agentTaskInfo]);
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -261,11 +293,35 @@ const CryptoAuditDashboard: React.FC = () => {
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
   };
 
-  const formatDate = (dateString: string): string => {
-    return new Date(dateString).toLocaleString();
+  const formatDateTime = (dateString: string): string => {
+    return new Date(dateString).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
-  // Auto-refresh effect
+  const getRelativeTime = (dateString: string): string => {
+    const diff = Date.now() - new Date(dateString).getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  };
+
+  const handleTabChange = (tab: 'dashboard' | 'downloads' | 'docs') => {
+    setTabTransition(true);
+    setTimeout(() => {
+      setActiveTab(tab);
+      setTabTransition(false);
+    }, 150);
+  };
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (autoRefresh) {
@@ -276,119 +332,134 @@ const CryptoAuditDashboard: React.FC = () => {
     };
   }, [autoRefresh, refreshAll]);
 
-  // Initial load
   useEffect(() => {
     refreshAll();
     fetchFiles();
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLastUpdate(new Date());
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div className="min-h-screen transition-colors duration-200 bg-slate-50 dark:bg-slate-900">
-      {/* Header */}
-      <div className="border-b transition-colors bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+            <div className="flex items-center gap-3 animate-slideIn">
+              <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg">
                 <Activity className="text-white" size={24} />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">
                   Crypto Audit Manager
                 </h1>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
                   Enterprise Security Dashboard
                 </p>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Navigation */}
-      <div className="border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-        <div className="max-w-7xl mx-auto px-6">
+      <nav className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex gap-1">
             {(['dashboard', 'downloads', 'docs'] as const).map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
-                className="px-6 py-3 font-medium transition-all relative"
-                style={{ color: activeTab === tab ? '#6366f1' : 'var(--text-secondary)' }}
+                onClick={() => handleTabChange(tab)}
+                className={`px-4 sm:px-6 py-3 font-medium text-sm sm:text-base transition-all relative ${
+                  activeTab === tab 
+                    ? 'text-indigo-600 dark:text-indigo-400' 
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
               >
                 {tab === 'dashboard' && 'Dashboard'}
                 {tab === 'downloads' && 'Downloads'}
                 {tab === 'docs' && 'Documentation'}
                 {activeTab === tab && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-purple-500" />
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-indigo-500 to-purple-500 animate-slideInX" />
                 )}
               </button>
             ))}
           </div>
         </div>
-      </div>
+      </nav>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <main className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 transition-opacity duration-300 ${tabTransition ? 'opacity-0' : 'opacity-100'}`}>
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg animate-slideInDown">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="text-red-600 dark:text-red-400" size={20} />
+              <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'dashboard' && (
-          <>
-            {/* Stats Grid */}
-            {stats && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
-                <StatCard title="Total Agents" value={stats.agents.total} gradient='linear-gradient(135deg, #667eea 0%, #764ba2 100%)' icon={<Server size={20} />} />
-                <StatCard title="Active" value={stats.agents.active} gradient='linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)' icon={<CheckCircle size={20} />} />
-                <StatCard title="Inactive" value={stats.agents.inactive} gradient='linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' icon={<AlertCircle size={20} />} />
-                <StatCard title="Pending" value={stats.tasks.pending} gradient='linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' icon={<Clock size={20} />} />
-                <StatCard title="In Progress" value={stats.tasks.in_progress} gradient='linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' icon={<Loader size={20} />} />
-                <StatCard title="Completed" value={stats.tasks.completed} gradient='linear-gradient(135deg, #10b981 0%, #059669 100%)' icon={<CheckCircle size={20} />} />
+          <div className="space-y-6 animate-fadeIn">
+            {isInitialLoad ? (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[...Array(4)].map((_, i) => (
+                  <SkeletonStatCard key={i} />
+                ))}
+              </div>
+            ) : stats && (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard title="Total Agents" value={stats.agents.total} icon={<Server size={20} />} color="indigo" />
+                <StatCard title="Active" value={stats.agents.active} icon={<CheckCircle size={20} />} color="green" />
+                <StatCard title="Pending" value={stats.tasks.pending} icon={<Clock size={20} />} color="amber" />
+                <StatCard title="Completed" value={stats.tasks.completed} icon={<CheckCircle size={20} />} color="emerald" />
               </div>
             )}
 
-            {/* Controls */}
-            <div className="rounded-xl p-6 mb-8 shadow-lg bg-white dark:bg-slate-800">
-              <div className="flex flex-wrap items-center gap-4">
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                 <button
                   onClick={refreshAll}
                   disabled={loading}
-                  className="px-4 py-2 rounded-lg font-medium transition-all hover:scale-105 disabled:opacity-50 flex items-center gap-2"
-                  style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}
+                  className="px-4 py-2 rounded-lg font-medium text-sm bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2 shadow-md hover:shadow-lg"
                 >
                   <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
                   {loading ? 'Refreshing...' : 'Refresh'}
                 </button>
                 <button
                   onClick={() => setAutoRefresh(!autoRefresh)}
-                  className={`px-4 py-2 rounded-lg font-medium transition-all hover:scale-105 flex items-center gap-2 ${
-                    autoRefresh ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-gradient-to-r from-amber-500 to-orange-500'
+                  className={`px-4 py-2 rounded-lg font-medium text-sm text-white transition-all flex items-center gap-2 shadow-md hover:shadow-lg ${
+                    autoRefresh 
+                      ? 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700' 
+                      : 'bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800'
                   }`}
-                  style={{ color: 'white' }}
                 >
-                  <Activity size={16} />
+                  <Activity size={16} className={autoRefresh ? 'animate-pulse' : ''} />
                   Auto-Refresh {autoRefresh ? 'ON' : 'OFF'}
                 </button>
-                <div className="ml-auto text-sm text-slate-600 dark:text-slate-400">
+                <div className="ml-auto text-xs sm:text-sm text-slate-600 dark:text-slate-400">
                   Last Updated: {lastUpdate.toLocaleTimeString()}
                 </div>
               </div>
             </div>
 
-            {/* Search and Filter */}
-            <div className="rounded-xl p-6 mb-8 shadow-lg bg-white dark:bg-slate-800">
-              <div className="flex flex-wrap gap-4">
-                <div className="flex-1 min-w-[200px] relative">
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
                   <input
                     type="text"
                     placeholder="Search agents..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2 rounded-lg border-2 transition-all focus:outline-none focus:border-blue-500 bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100"
+                    className="w-full pl-10 pr-10 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                   />
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                      style={{ color: 'var(--text-secondary)' }}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                     >
                       <X size={20} />
                     </button>
@@ -397,7 +468,7 @@ const CryptoAuditDashboard: React.FC = () => {
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-4 py-2 rounded-lg border-2 transition-all focus:outline-none focus:border-blue-500 bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100"
+                  className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 >
                   <option value="all">All Status</option>
                   <option value="active">Active</option>
@@ -408,183 +479,127 @@ const CryptoAuditDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Agents */}
-            <div className="rounded-xl shadow-lg overflow-hidden bg-white dark:bg-slate-800">
-              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+              <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
+                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
                   Registered Agents ({filteredAgents.length})
                 </h3>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 dark:bg-slate-900">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400"></th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Hostname</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">IP Address</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">OS</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Activity</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Last Seen</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredAgents.map((agent, idx) => (
-                      <React.Fragment key={agent.agent_id}>{(() => {
-                        const info = agentTaskInfo.get(agent.agent_id);
-                        const isScanTriggered = triggeredScans.has(agent.agent_id) && (info?.in_progress_tasks ?? 0) > 0;
-                        return (
-                        <tr 
-                          className="border-b transition-colors hover:bg-opacity-50 border-slate-200 dark:border-slate-700 even:bg-transparent odd:bg-slate-50/50 dark:odd:bg-slate-800/50"
-                        >
-                          <td className="px-6 py-4">
-                            <button
-                              onClick={() => toggleAgentResults(agent.agent_id)}
-                              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-slate-900 dark:text-slate-100"
-                            >
-                              {expandedAgents.has(agent.agent_id) ? (
-                                <ChevronDown size={18} />
-                              ) : (
-                                <ChevronRight size={18} />
-                              )}
-                            </button>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-medium text-slate-900 dark:text-slate-100">{agent.hostname}</div>
-                            <div className="text-xs text-slate-600 dark:text-slate-400">{agent.agent_id}</div>
-                          </td>
-                          <td className="px-6 py-4 text-slate-900 dark:text-slate-100">{agent.ip_address}</td>
-                          <td className="px-6 py-4 text-slate-600 dark:text-slate-400">{agent.os_info}</td>
-                          <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
-                            <div className="flex flex-col gap-1.5">
-                              {info && info.completed_scans > 0 && (
-                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                  {info.completed_scans} completed
-                                </span>
-                              )}
-                              {info && info.pending_tasks > 0 && (
-                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                                  {info.pending_tasks} pending
-                                </span>
-                              )}
-                              {info?.last_scan && (
-                                <div className="text-xs mt-1">Last scan: {new Date(info.last_scan).toLocaleDateString()}</div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
-                            <div className="text-sm">{agent.minutes_since_last_seen} min ago</div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                              agent.status === 'active' 
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
-                                : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                            }`}>
-                              {agent.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <button
-                              onClick={() => !isScanTriggered && triggerScan(agent.agent_id)}
-                              disabled={isScanTriggered}
-                              className="px-3 py-1 rounded-lg text-xs font-medium transition-all hover:scale-105 flex items-center gap-1"
-                              style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}
-                            >
-                              {isScanTriggered ? <Loader size={12} className="animate-spin" /> : <Play size={12} />}
-                              {isScanTriggered ? 'Pending...' : 'Scan'}
-                            </button>
-                          </td>
-                        </tr>
-                        );
-                      })()}
-                        {expandedAgents.has(agent.agent_id) && (
-                          <tr className="bg-slate-50 dark:bg-slate-900">
-                            <td colSpan={7} className="px-6 py-4">
-                              <AgentResultsView
-                                agentId={agent.agent_id}
-                                tasks={tasks}
-                                results={agentResults.get(agent.agent_id) || []}
-                                expandedResults={expandedResults}
-                                toggleResultDetails={toggleResultDetails}
-                              />
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {isInitialLoad ? (
+                <LoadingState />
+              ) : filteredAgents.length === 0 ? (
+                <EmptyState message="No agents found" />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 w-12"></th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Hostname</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">IP Address</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">OS</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Activity</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {filteredAgents.map((agent) => (
+                        <AgentRow
+                          key={agent.agent_id}
+                          agent={agent}
+                          info={agentTaskInfo.get(agent.agent_id)}
+                          expanded={expandedAgents.has(agent.agent_id)}
+                          onToggle={() => toggleAgentResults(agent.agent_id)}
+                          onTriggerScan={() => triggerScan(agent.agent_id)}
+                          isScanTriggered={triggeredScans.has(agent.agent_id)}
+                          results={agentResults.get(agent.agent_id) || []}
+                          tasks={tasks}
+                          expandedResults={expandedResults}
+                          toggleResultDetails={toggleResultDetails}
+                          loadingResults={loadingResults.has(agent.agent_id)}
+                          getRelativeTime={getRelativeTime}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
-            {/* Recent Tasks */}
-            <div className="rounded-xl shadow-lg overflow-hidden mt-8 bg-white dark:bg-slate-800">
-              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Recent Tasks</h3>
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+              <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
+                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">Recent Tasks</h3>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 dark:bg-slate-900">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Task ID</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Agent</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Results</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tasks.slice(0, 10).map((task, idx) => (
-                      <tr key={task.task_id} className="border-b transition-colors border-slate-200 dark:border-slate-700 even:bg-transparent odd:bg-slate-50/50 dark:odd:bg-slate-800/50">
-                        <td className="px-6 py-4">
-                          <code className="text-xs text-slate-600 dark:text-slate-400">{task.task_id}</code>
-                        </td>
-                        <td className="px-6 py-4">
-                          <code className="text-xs text-slate-600 dark:text-slate-400">{task.agent_id}</code>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            task.status === 'completed' 
-                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                              : task.status === 'in_progress'
-                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                              : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                          }`}>
-                            {task.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          {allResults.some(r => r.task_id === task.task_id) && (
-                            <CheckCircle size={18} className="text-green-500" />
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
-                          {formatDate(task.created_at)}
-                        </td>
+              {tasks.length === 0 ? (
+                <EmptyState message="No tasks found" />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Task ID</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Agent</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Results</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Created</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {tasks.slice(0, 10).map((task) => {
+                        const agent = agents.find(a => a.agent_id === task.agent_id);
+                        return (
+                          <tr key={task.task_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="px-4 py-3">
+                              <code className="text-xs text-slate-600 dark:text-slate-400">{task.task_id.substring(0, 8)}...</code>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col">
+                                {agent && <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{agent.hostname}</span>}
+                                <code className="text-xs text-slate-500 dark:text-slate-400">{task.agent_id.substring(0, 8)}...</code>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge status={task.status} />
+                            </td>
+                            <td className="px-4 py-3">
+                              {allResults.some(r => r.task_id === task.task_id) ? (
+                                <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
+                              ) : task.status === 'completed' ? (
+                                <Clock size={18} className="text-amber-500 dark:text-amber-400" />
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
+                              {formatDateTime(task.created_at)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          </>
+          </div>
         )}
 
         {activeTab === 'downloads' && (
-          <div className="space-y-6">
-            <div className="rounded-xl shadow-lg p-6 bg-white dark:bg-slate-800">
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Agent Downloads</h2>
-                <p className="mt-2 text-slate-600 dark:text-slate-400">Download the agent files for your operating system. Extract and run the agent to connect to the audit system.</p>
-                <div className="mt-4">
-                    <button
-                        className="px-4 py-2 rounded-lg font-medium transition-all hover:scale-105 flex items-center gap-2 bg-green-500 text-white"
-                        onClick={fetchFiles}
-                    >
-                        <RefreshCw size={16} /> Refresh File List
-                    </button>
+          <div className="space-y-6 animate-fadeIn">
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div className="flex items-start gap-3">
+                <FileDown className="text-indigo-600 dark:text-indigo-400 flex-shrink-0 mt-1" size={24} />
+                <div className="flex-1">
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">Agent Downloads</h2>
+                  <p className="text-slate-600 dark:text-slate-400 mb-4">Download the agent files for your operating system. Extract and run the agent to connect to the audit system.</p>
+                  <button
+                    className="px-4 py-2 rounded-lg font-medium text-sm bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center gap-2 shadow-md hover:shadow-lg"
+                    onClick={fetchFiles}
+                  >
+                    <RefreshCw size={16} />
+                    Refresh File List
+                  </button>
                 </div>
+              </div>
             </div>
             <FileDownloadSection
               title="Linux Agent"
@@ -602,25 +617,233 @@ const CryptoAuditDashboard: React.FC = () => {
         )}
 
         {activeTab === 'docs' && (
-          <div className="rounded-xl shadow-lg p-8 bg-white dark:bg-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm animate-fadeIn">
             <DocumentationSection />
           </div>
         )}
-      </div>
+      </main>
+
+      <style>{`
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateX(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        
+        @keyframes slideInDown {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        @keyframes slideInX {
+          from {
+            transform: scaleX(0);
+          }
+          to {
+            transform: scaleX(1);
+          }
+        }
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out;
+        }
+        
+        .animate-slideIn {
+          animation: slideIn 0.4s ease-out;
+        }
+        
+        .animate-slideInDown {
+          animation: slideInDown 0.3s ease-out;
+        }
+        
+        .animate-slideInX {
+          animation: slideInX 0.3s ease-out;
+          transform-origin: left;
+        }
+      `}</style>
     </div>
   );
 };
 
 // Helper Components
-const StatCard: React.FC<{ title: string; value: number; gradient: string; icon: React.ReactNode }> = ({ title, value, gradient, icon }) => (
-  <div className="rounded-xl p-6 shadow-lg transform transition-all hover:scale-105" style={{ background: gradient }}>
-    <div className="flex items-center justify-between mb-2">
-      <div className="text-white opacity-80">{icon}</div>
-    </div>
-    <div className="text-3xl font-bold text-white mb-1">{value}</div>
-    <div className="text-sm text-white opacity-90">{title}</div>
+const SkeletonStatCard: React.FC = () => (
+  <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm animate-pulse">
+    <div className="h-10 w-10 bg-slate-200 dark:bg-slate-800 rounded-lg mb-3"></div>
+    <div className="h-8 bg-slate-200 dark:bg-slate-800 rounded w-16 mb-2"></div>
+    <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-24"></div>
   </div>
 );
+
+const StatCard: React.FC<{ title: string; value: number; icon: React.ReactNode; color: string }> = ({ title, value, icon, color }) => {
+  const colorClasses = {
+    indigo: 'from-indigo-500 to-purple-600',
+    green: 'from-green-500 to-emerald-600',
+    amber: 'from-amber-500 to-orange-600',
+    emerald: 'from-emerald-500 to-teal-600',
+  }[color];
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all">
+      <div className={`inline-flex p-2 rounded-lg bg-gradient-to-br ${colorClasses} mb-3`}>
+        <div className="text-white">{icon}</div>
+      </div>
+      <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-1">{value}</div>
+      <div className="text-sm text-slate-600 dark:text-slate-400">{title}</div>
+    </div>
+  );
+};
+
+const Badge: React.FC<{ status: string }> = ({ status }) => {
+  const styles = {
+    completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+    in_progress: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+    pending: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+    active: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+    inactive: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+  }[status] || 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400';
+
+  return (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles}`}>
+      {status.replace('_', ' ')}
+    </span>
+  );
+};
+
+const LoadingState: React.FC = () => (
+  <div className="flex flex-col items-center justify-center py-12">
+    <Loader className="animate-spin text-indigo-600 dark:text-indigo-400 mb-4" size={32} />
+    <p className="text-slate-600 dark:text-slate-400">Loading data...</p>
+  </div>
+);
+
+const EmptyState: React.FC<{ message: string }> = ({ message }) => (
+  <div className="flex flex-col items-center justify-center py-12">
+    <div className="p-3 rounded-full bg-slate-100 dark:bg-slate-800 mb-4">
+      <AlertCircle className="text-slate-400" size={32} />
+    </div>
+    <p className="text-slate-600 dark:text-slate-400">{message}</p>
+  </div>
+);
+
+const AgentRow: React.FC<{
+  agent: Agent;
+  info?: AgentTaskInfo;
+  expanded: boolean;
+  onToggle: () => void;
+  onTriggerScan: () => void;
+  isScanTriggered: boolean;
+  results: AuditResult[];
+  tasks: Task[];
+  expandedResults: Set<string>;
+  toggleResultDetails: (id: string) => void;
+  loadingResults: boolean;
+  getRelativeTime: (date: string) => string;
+}> = ({ agent, info, expanded, onToggle, onTriggerScan, isScanTriggered, results, tasks, expandedResults, toggleResultDetails, loadingResults, getRelativeTime }) => {
+  const isScanning = isScanTriggered && (info?.in_progress_tasks ?? 0) > 0;
+
+  return (
+    <>
+      <tr className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200 ${expanded ? 'bg-slate-50 dark:bg-slate-800/30' : ''}`}>
+        <td className="px-4 py-3">
+          <button
+            onClick={onToggle}
+            className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200"
+          >
+            {expanded ? (
+              <ChevronDown size={18} className="text-slate-700 dark:text-slate-300 transition-transform" />
+            ) : (
+              <ChevronRight size={18} className="text-slate-700 dark:text-slate-300 transition-transform" />
+            )}
+          </button>
+        </td>
+        <td className="px-4 py-3">
+          <div className="font-medium text-slate-900 dark:text-slate-100">{agent.hostname}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{agent.agent_id.substring(0, 16)}...</div>
+        </td>
+        <td className="px-4 py-3 text-slate-900 dark:text-slate-100">{agent.ip_address}</td>
+        <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-sm">{agent.os_info}</td>
+        <td className="px-4 py-3">
+          <div className="flex flex-col gap-1.5">
+            {info && info.total_scans > 0 && (
+              <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                {info.total_scans} scan{info.total_scans !== 1 ? 's' : ''}
+              </div>
+            )}
+            {info && info.completed_scans > 0 && (
+              <Badge status="completed" />
+            )}
+            {info && info.in_progress_tasks > 0 && (
+              <Badge status="in_progress" />
+            )}
+            {info && info.pending_tasks > 0 && (
+              <Badge status="pending" />
+            )}
+            {info?.last_scan && (
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Last: {getRelativeTime(info.last_scan)}
+              </div>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          <Badge status={agent.status} />
+        </td>
+        <td className="px-4 py-3">
+          <button
+            onClick={onTriggerScan}
+            disabled={isScanning}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shadow-sm hover:shadow-md"
+          >
+            {isScanning ? <Loader size={14} className="animate-spin" /> : <Play size={14} />}
+            {isScanning ? 'Scanning...' : 'Scan'}
+          </button>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="bg-slate-50 dark:bg-slate-800/30">
+          <td colSpan={7} className="px-4 py-4">
+            {loadingResults ? (
+              <LoadingState />
+            ) : (
+              <div className="animate-slideInDown">
+                <AgentResultsView
+                  agentId={agent.agent_id}
+                  tasks={tasks}
+                  results={results}
+                  expandedResults={expandedResults}
+                  toggleResultDetails={toggleResultDetails}
+                  getRelativeTime={getRelativeTime}
+                />
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+};
 
 const AgentResultsView: React.FC<{
   agentId: string;
@@ -628,67 +851,103 @@ const AgentResultsView: React.FC<{
   results: AuditResult[];
   expandedResults: Set<string>;
   toggleResultDetails: (id: string) => void;
-}> = ({ agentId, tasks, results, expandedResults, toggleResultDetails }) => {
-  if (results.length === 0) {
+  getRelativeTime: (date: string) => string;
+}> = ({ agentId, tasks, results, expandedResults, toggleResultDetails, getRelativeTime }) => {
+  const agentTasks = tasks.filter(t => t.agent_id === agentId);
+  
+  const taskResultPairs: TaskResultPair[] = agentTasks.map(task => ({
+    task,
+    result: results.find(r => r.task_id === task.task_id) || null
+  }));
+  
+  taskResultPairs.sort((a, b) => 
+    new Date(b.task.created_at).getTime() - new Date(a.task.created_at).getTime()
+  );
+
+  if (taskResultPairs.length === 0) {
     return (
-      <div className="text-center py-8 text-slate-600 dark:text-slate-400">
-        No audit results found
+      <div className="text-center py-8 text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
+        <div className="inline-flex p-3 rounded-full bg-slate-100 dark:bg-slate-800 mb-3">
+          <AlertCircle className="text-slate-400" size={24} />
+        </div>
+        <p>No scans found for this agent</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <h4 className="text-lg font-bold mb-4 text-slate-900 dark:text-slate-100">
-        Audit Results ({results.length})
+    <div className="space-y-3">
+      <h4 className="text-base font-bold mb-4 text-slate-900 dark:text-slate-100">
+        Scan History ({taskResultPairs.length} total)
       </h4>
-      {results.map(result => {
-        const task = tasks.find(t => t.task_id === result.task_id);
+      {taskResultPairs.map(({ task, result }) => {
+        const isExpanded = result && expandedResults.has(result.result_id);
+        
         return (
-        <div 
-          key={result.result_id} 
-          className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700"
-        >
-          <div
-            onClick={() => toggleResultDetails(result.result_id)}
-            className="p-4 cursor-pointer flex flex-wrap items-center justify-between gap-4 transition-colors hover:opacity-80 bg-slate-50/50 dark:bg-slate-800/50"
+          <div 
+            key={task.task_id} 
+            className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200"
           >
-            <div className="flex items-center gap-4">
-              {task && (
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  task.status === 'completed' 
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                    : task.status === 'in_progress'
-                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                    : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                }`}>
-                  {task.status}
-                </span>
-              )}
-              <div>
-                <span className="font-medium text-slate-900 dark:text-slate-100">Task: </span>
-                <code className="text-sm text-slate-600 dark:text-slate-400">{result.task_id}</code>
+            <div
+              onClick={() => result && toggleResultDetails(result.result_id)}
+              className={`p-4 flex flex-wrap items-center justify-between gap-4 transition-colors ${
+                result ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''
+              }`}
+            >
+              <div className="flex items-center gap-3 flex-wrap">
+                <Badge status={task.status} />
+                <div>
+                  <span className="font-medium text-slate-900 dark:text-slate-100 text-sm">Task: </span>
+                  <code className="text-xs text-slate-600 dark:text-slate-400">{task.task_id.substring(0, 16)}...</code>
+                </div>
+                {result && (
+                  <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
+                    <CheckCircle size={16} />
+                    Results Available
+                  </div>
+                )}
+                {!result && task.status === 'completed' && (
+                  <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium">
+                    <Clock size={16} />
+                    Awaiting Results
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+                  {task.completed_at 
+                    ? `Completed ${getRelativeTime(task.completed_at)}` 
+                    : task.started_at
+                    ? `Started ${getRelativeTime(task.started_at)}`
+                    : `Created ${getRelativeTime(task.created_at)}`}
+                </div>
+                {result && (
+                  isExpanded ? (
+                    <ChevronDown size={20} className="text-slate-700 dark:text-slate-300" />
+                  ) : (
+                    <ChevronRight size={20} className="text-slate-700 dark:text-slate-300" />
+                  )
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-slate-600 dark:text-slate-400">
-                {task?.completed_at ? `Completed ${new Date(task.completed_at).toLocaleString()}` : `Received ${new Date(result.received_at).toLocaleString()}`}
-              </span>
-              {expandedResults.has(result.result_id) ? (
-                <ChevronDown size={20} className="text-slate-900 dark:text-slate-100" />
-              ) : (
-                <ChevronRight size={20} className="text-slate-900 dark:text-slate-100" />
-              )}
-            </div>
+            {isExpanded && result && (
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 animate-slideInDown">
+                <div className="mb-3 flex flex-wrap gap-4 text-sm">
+                  <div>
+                    <span className="text-slate-600 dark:text-slate-400">Submitted: </span>
+                    <span className="text-slate-900 dark:text-slate-100">{new Date(result.submitted_at).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-600 dark:text-slate-400">Received: </span>
+                    <span className="text-slate-900 dark:text-slate-100">{new Date(result.received_at).toLocaleString()}</span>
+                  </div>
+                </div>
+                <pre className="rounded-lg p-4 overflow-auto text-xs max-h-96 bg-slate-900 dark:bg-slate-950 text-green-400 font-mono border border-slate-700">
+                  {JSON.stringify(result.audit_results, null, 2)}
+                </pre>
+              </div>
+            )}
           </div>
-          {expandedResults.has(result.result_id) && (
-            <div className="p-4 bg-white dark:bg-slate-800">
-              <pre className="rounded-lg p-4 overflow-auto text-xs max-h-96 bg-slate-50 dark:bg-slate-900 text-green-600 dark:text-green-400">
-                {JSON.stringify(result.audit_results, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
         );
       })}
     </div>
@@ -700,162 +959,154 @@ const FileDownloadSection: React.FC<{
   folderType: string;
   files: FileInfo[];
   formatBytes: (bytes: number) => string;
-}> = ({ title, folderType, files, formatBytes }) => (
-  <div className="rounded-xl shadow-lg overflow-hidden bg-white dark:bg-slate-800">
-    <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">{title}</h3>
-        <a
-          href={`${API_BASE_URL}/api/v1/files/download-zip/${folderType}`}
-          download
-          className="px-4 py-2 rounded-lg font-medium transition-all hover:scale-105 flex items-center gap-2"
-          style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', textDecoration: 'none' }}
-        >
-          <Download size={16} />
-          Download ZIP
-        </a>
+}> = ({ title, folderType, files, formatBytes }) => {
+  const icon = folderType === 'linux' ? <Terminal size={24} /> : <Server size={24} />;
+  const color = folderType === 'linux' ? 'text-blue-600 dark:text-blue-400' : 'text-purple-600 dark:text-purple-400';
+  
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className={color}>{icon}</div>
+            <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">{title}</h3>
+          </div>
+          <a
+            href={`${API_BASE_URL}/api/v1/files/download-zip/${folderType}`}
+            download
+            className="px-4 py-2 rounded-lg font-medium text-sm bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
+          >
+            <Download size={16} />
+            Download ZIP
+          </a>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const DocumentationSection: React.FC = () => (
   <div>
-    <h2 className="text-3xl font-bold mb-8 text-slate-900 dark:text-slate-100">
-      Setup Documentation
-    </h2>
-    
-    <div className="space-y-8">
-      {/* Linux Section */}
-      <div className="p-6 rounded-lg border-l-4 border-blue-500 bg-slate-50 dark:bg-slate-900">
-        <h3 className="text-xl font-bold mb-4 text-blue-500">Linux Agent Setup</h3>
-        <ol className="space-y-3 text-slate-900 dark:text-slate-100">
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold">1</span>
-            <span>Download the Linux Agent ZIP file from the downloads section</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold">2</span>
-            <span>Extract the ZIP file: <code className="px-2 py-1 rounded text-sm bg-slate-100 dark:bg-slate-950 text-green-600 dark:text-green-400">unzip Linux_Agent.zip</code></span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold">3</span>
-            <span>Navigate to folder: <code className="px-2 py-1 rounded text-sm bg-slate-100 dark:bg-slate-950 text-green-600 dark:text-green-400">cd "Linux Agent"</code></span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold">4</span>
-            <span>Make executable: <code className="px-2 py-1 rounded text-sm bg-slate-100 dark:bg-slate-950 text-green-600 dark:text-green-400">chmod +x install_crypto_agent.sh</code></span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold">5</span>
-            <span>Run installer: <code className="px-2 py-1 rounded text-sm bg-slate-100 dark:bg-slate-950 text-green-600 dark:text-green-400">sudo ./install_crypto_agent.sh</code></span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-bold">6</span>
-            <span>Agent will automatically start and register with the server</span>
-          </li>
-        </ol>
-        <div className="mt-4 p-4 rounded-lg bg-white dark:bg-slate-800">
-          <p className="text-sm font-semibold mb-2 text-slate-600 dark:text-slate-400">Expected Files:</p>
-          <p className="text-sm text-slate-900 dark:text-slate-100">crypto_agent.py, install_crypto_agent.sh, config.json</p>
-        </div>
-      </div>
-
-      {/* Windows Section */}
-      <div className="p-6 rounded-lg border-l-4 border-purple-500 bg-slate-50 dark:bg-slate-900">
-        <h3 className="text-xl font-bold mb-4 text-purple-500">Windows Agent Setup</h3>
-        <ol className="space-y-3 text-slate-900 dark:text-slate-100">
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs font-bold">1</span>
-            <span>Download the Windows Agent ZIP file from the downloads section</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs font-bold">2</span>
-            <span>Extract the ZIP file to a directory (e.g., C:\CryptoAgent)</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs font-bold">3</span>
-            <span>Open Command Prompt or PowerShell as Administrator</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs font-bold">4</span>
-            <span>Navigate to the extracted folder</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs font-bold">5</span>
-            <span>Run installer: <code className="px-2 py-1 rounded text-sm bg-slate-100 dark:bg-slate-950 text-green-600 dark:text-green-400">python install.py</code></span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-500 text-white flex items-center justify-center text-xs font-bold">6</span>
-            <span>The agent will be installed as a Windows service and start automatically</span>
-          </li>
-        </ol>
-        <div className="mt-4 p-4 rounded-lg bg-white dark:bg-slate-800">
-          <p className="text-sm font-semibold mb-2 text-slate-600 dark:text-slate-400">Expected Files:</p>
-          <p className="text-sm text-slate-900 dark:text-slate-100">crypto_agent.py, install.py, config.json</p>
-        </div>
-      </div>
-
-      {/* Configuration Section */}
-      <div className="p-6 rounded-lg border-l-4 border-green-500 bg-slate-50 dark:bg-slate-900">
-        <h3 className="text-xl font-bold mb-4 text-green-500">Configuration</h3>
-        <p className="mb-4 text-slate-900 dark:text-slate-100">
-          Edit the <code className="px-2 py-1 rounded text-sm bg-slate-100 dark:bg-slate-950 text-green-600 dark:text-green-400">config.json</code> file to configure:
+    <div className="flex items-start gap-3 mb-8">
+      <BookOpen className="text-indigo-600 dark:text-indigo-400 flex-shrink-0 mt-1" size={28} />
+      <div>
+        <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-2">
+          Setup Documentation
+        </h2>
+        <p className="text-slate-600 dark:text-slate-400">
+          Follow these steps to install and configure the crypto audit agents on your systems.
         </p>
-        <ul className="space-y-2 text-slate-900 dark:text-slate-100">
-          <li className="flex items-start gap-2">
-            <CheckCircle size={20} className="flex-shrink-0 text-green-500 mt-0.5" />
-            <div>
-              <strong>server_url:</strong> API server address (default: http://localhost:9000)
-            </div>
-          </li>
-          <li className="flex items-start gap-2">
-            <CheckCircle size={20} className="flex-shrink-0 text-green-500 mt-0.5" />
-            <div>
-              <strong>poll_interval:</strong> How often the agent checks for tasks (default: 30 seconds)
-            </div>
-          </li>
-          <li className="flex items-start gap-2">
-            <CheckCircle size={20} className="flex-shrink-0 text-green-500 mt-0.5" />
-            <div>
-              <strong>agent_id:</strong> Auto-generated unique identifier for the agent
-            </div>
-          </li>
+      </div>
+    </div>
+    
+    <div className="space-y-6">
+      <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/10 p-6">
+        <h3 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-400">Linux Agent Setup</h3>
+        <ol className="space-y-4">
+          {[
+            { num: 1, text: 'Download the Linux Agent ZIP file from the downloads section' },
+            { num: 2, text: 'Extract the ZIP file:', code: 'unzip Linux_Agent.zip' },
+            { num: 3, text: 'Navigate to folder:', code: 'cd "Linux Agent"' },
+            { num: 4, text: 'Make executable:', code: 'chmod +x install_crypto_agent.sh' },
+            { num: 5, text: 'Run installer:', code: 'sudo ./install_crypto_agent.sh' },
+            { num: 6, text: 'Agent will automatically start and register with the server' },
+          ].map(step => (
+            <li key={step.num} className="flex gap-3">
+              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 dark:bg-blue-500 text-white flex items-center justify-center text-sm font-bold">
+                {step.num}
+              </span>
+              <div className="flex-1">
+                <span className="text-slate-900 dark:text-slate-100">{step.text}</span>
+                {step.code && (
+                  <code className="block mt-1 px-3 py-2 rounded-lg text-sm bg-slate-900 dark:bg-slate-950 text-green-400 font-mono border border-slate-700">
+                    {step.code}
+                  </code>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-6 p-4 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800">
+          <p className="text-sm font-semibold mb-2 text-slate-700 dark:text-slate-300">Expected Files:</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">crypto_agent.py, install_crypto_agent.sh, config.json</p>
+        </div>
+      </div>
+
+      <div className="rounded-xl border-l-4 border-purple-500 bg-purple-50 dark:bg-purple-900/10 p-6">
+        <h3 className="text-xl font-bold mb-4 text-purple-700 dark:text-purple-400">Windows Agent Setup</h3>
+        <ol className="space-y-4">
+          {[
+            { num: 1, text: 'Download the Windows Agent ZIP file from the downloads section' },
+            { num: 2, text: 'Extract the ZIP file to a directory (e.g., C:\\CryptoAgent)' },
+            { num: 3, text: 'Open Command Prompt or PowerShell as Administrator' },
+            { num: 4, text: 'Navigate to the extracted folder' },
+            { num: 5, text: 'Run installer:', code: 'python install.py' },
+            { num: 6, text: 'The agent will be installed as a Windows service and start automatically' },
+          ].map(step => (
+            <li key={step.num} className="flex gap-3">
+              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 dark:bg-purple-500 text-white flex items-center justify-center text-sm font-bold">
+                {step.num}
+              </span>
+              <div className="flex-1">
+                <span className="text-slate-900 dark:text-slate-100">{step.text}</span>
+                {step.code && (
+                  <code className="block mt-1 px-3 py-2 rounded-lg text-sm bg-slate-900 dark:bg-slate-950 text-green-400 font-mono border border-slate-700">
+                    {step.code}
+                  </code>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-6 p-4 rounded-lg bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800">
+          <p className="text-sm font-semibold mb-2 text-slate-700 dark:text-slate-300">Expected Files:</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">crypto_agent.py, install.py, config.json</p>
+        </div>
+      </div>
+
+      <div className="rounded-xl border-l-4 border-green-500 bg-green-50 dark:bg-green-900/10 p-6">
+        <h3 className="text-xl font-bold mb-4 text-green-700 dark:text-green-400">Configuration</h3>
+        <p className="mb-4 text-slate-900 dark:text-slate-100">
+          Edit the <code className="px-2 py-1 rounded text-sm bg-slate-900 dark:bg-slate-950 text-green-400 font-mono">config.json</code> file to configure:
+        </p>
+        <ul className="space-y-3">
+          {[
+            { label: 'server_url', desc: 'API server address (default: http://localhost:9000)' },
+            { label: 'poll_interval', desc: 'How often the agent checks for tasks (default: 30 seconds)' },
+            { label: 'agent_id', desc: 'Auto-generated unique identifier for the agent' },
+          ].map((item, idx) => (
+            <li key={idx} className="flex items-start gap-3">
+              <CheckCircle size={20} className="flex-shrink-0 text-green-600 dark:text-green-400 mt-0.5" />
+              <div>
+                <strong className="text-slate-900 dark:text-slate-100">{item.label}:</strong>
+                <span className="text-slate-700 dark:text-slate-300"> {item.desc}</span>
+              </div>
+            </li>
+          ))}
         </ul>
       </div>
 
-      {/* Monitoring Section */}
-      <div className="p-6 rounded-lg border-l-4 border-orange-500 bg-slate-50 dark:bg-slate-900">
-        <h3 className="text-xl font-bold mb-4 text-orange-500">Monitoring & Management</h3>
-        <ul className="space-y-2 text-slate-900 dark:text-slate-100">
-          <li className="flex items-start gap-2">
-            <Activity size={20} className="flex-shrink-0 text-orange-500 mt-0.5" />
-            <span>Agents automatically send heartbeats every poll interval</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <Play size={20} className="flex-shrink-0 text-orange-500 mt-0.5" />
-            <span>Use the "Trigger Scan" button to manually initiate a crypto audit</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <ChevronRight size={20} className="flex-shrink-0 text-orange-500 mt-0.5" />
-            <span>View audit results by clicking the arrow next to each agent</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <AlertCircle size={20} className="flex-shrink-0 text-orange-500 mt-0.5" />
-            <span>Agents are marked inactive if no heartbeat is received for 1 minute</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <RefreshCw size={20} className="flex-shrink-0 text-orange-500 mt-0.5" />
-            <span>Enable auto-refresh to automatically update the dashboard every 10 seconds</span>
-          </li>
+      <div className="rounded-xl border-l-4 border-orange-500 bg-orange-50 dark:bg-orange-900/10 p-6">
+        <h3 className="text-xl font-bold mb-4 text-orange-700 dark:text-orange-400">Monitoring & Management</h3>
+        <ul className="space-y-3">
+          {[
+            { icon: <Activity size={20} />, text: 'Agents automatically send heartbeats every poll interval' },
+            { icon: <Play size={20} />, text: 'Use the "Scan" button to manually initiate a crypto audit' },
+            { icon: <ChevronRight size={20} />, text: 'View audit results by clicking the arrow next to each agent' },
+            { icon: <AlertCircle size={20} />, text: 'Agents are marked inactive if no heartbeat is received for 1 minute' },
+            { icon: <RefreshCw size={20} />, text: 'Enable auto-refresh to automatically update the dashboard every 10 seconds' },
+          ].map((item, idx) => (
+            <li key={idx} className="flex items-start gap-3">
+              <div className="flex-shrink-0 text-orange-600 dark:text-orange-400 mt-0.5">
+                {item.icon}
+              </div>
+              <span className="text-slate-900 dark:text-slate-100">{item.text}</span>
+            </li>
+          ))}
         </ul>
       </div>
     </div>
   </div>
 );
-
-const formatDate = (dateString: string): string => {
-  return new Date(dateString).toLocaleString();
-};
 
 export default CryptoAuditDashboard;
