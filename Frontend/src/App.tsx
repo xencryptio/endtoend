@@ -16,6 +16,7 @@ import MigrationAssist from "./pages/migrationassist";
 import Integration from "./pages/integration";
 import Scan from "./pages/scan";
 import SystemScan from "./pages/system-scan";
+import Readinessanalysis from "./pages/Readinessanalysis";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -35,6 +36,7 @@ const AnimatedRoutes = () => {
         <Route path="/profile" element={<Profile />} />
         <Route path="/scan" element={<Scan />} />
         <Route path="/system-scan" element={<SystemScan />} />
+        <Route path="/Readinessanalysis" element={<Readinessanalysis />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/migrationAssist" element={<MigrationAssist />} />
