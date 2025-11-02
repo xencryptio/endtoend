@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive } from 'lucide-react';
 
 // API Configuration
 const API_BASE_URL = 'http://localhost:9000';
@@ -70,6 +70,533 @@ interface TaskResultPair {
   result: AuditResult | null;
 }
 
+// 1. Data Structure Organization
+interface SectionData {
+  title: string;
+  icon: React.ReactNode;
+  color: string;
+  data: any;
+  subsections?: {
+    title: string;
+    data: any;
+  }[];
+}
+
+interface ProcessedAuditResult {
+  result_id: string;
+  agent_id: string;
+  task_id: string;
+  submitted_at: string;
+  received_at: string;
+  sections: SectionData[];
+  rawJson: any;
+}
+
+// Visual indicator component for status
+const StatusIndicator: React.FC<{ status: boolean; trueText?: string; falseText?: string }> = ({ 
+  status, 
+  trueText = 'Yes', 
+  falseText = 'No' 
+}) => (
+  <div className={`inline-flex items-center gap-1 text-sm font-medium ${status ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+    {status ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+    <span>{status ? trueText : falseText}</span>
+  </div>
+);
+
+// Status Badge Component
+const StatusBadge: React.FC<{ status: boolean | string; label?: string }> = ({ status, label }) => {
+  if (status === true || status === 'enabled') {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full text-sm font-medium">
+        <CheckCircle size={14} />
+        {label || 'Enabled'}
+      </div>
+    );
+  }
+  if (status === false || status === 'disabled') {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full text-sm font-medium">
+        <AlertCircle size={14} />
+        {label || 'Disabled'}
+      </div>
+    );
+  }
+  return (
+    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-full text-sm font-medium">
+      <AlertCircle size={14} />
+      {label || 'Warning'}
+    </div>
+  );
+};
+
+// 2. Data Processing Function
+const processAuditResults = (auditResults: any): SectionData[] => { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const sections: SectionData[] = [];
+
+  // System Context Section
+  if (auditResults.system_context) {
+    sections.push({
+      title: 'System Context',
+      icon: <Server size={18} />,
+      color: 'blue',
+      data: {
+        'Operating System': auditResults.system_context.os_info, // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+        'Kernel Version': auditResults.system_context.kernel_version,
+        'Crypto Modules Loaded': auditResults.system_context.crypto_modules?.length || 0
+      }
+    });
+  }
+
+  // OpenSSL Crypto Section
+  if (auditResults.openssl_crypto) {
+    const openssl = auditResults.openssl_crypto;
+    
+    // Build Available Algorithms subsection with cleaner format
+    const availableAlgos: any[] = [];
+    if (openssl.available_algorithms) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      Object.entries(openssl.available_algorithms).forEach(([key, value]: [string, any]) => {
+        if (value.available) {
+          availableAlgos.push({
+            'Algorithm': key.toUpperCase(),
+            'Status': '✓ Available'
+          });
+        }
+      });
+    }
+
+    // Build Cipher Distribution
+    const cipherDist: any[] = [];
+    if (openssl.cipher_information?.cipher_type_distribution) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      Object.entries(openssl.cipher_information.cipher_type_distribution).forEach(([key, value]) => {
+        const readableKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        cipherDist.push({
+          'Type': readableKey,
+          'Count': `${value} ciphers`
+        });
+      });
+    }
+
+    // Build Protocol Support
+    const protocols: any[] = [];
+    if (openssl.protocol_support) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      openssl.protocol_support
+        .filter((proto: any) => proto.available)
+        .forEach((proto: any) => {
+          protocols.push({
+            'Protocol': proto.protocol.toUpperCase().replace('_', '.'),
+            'Status': '✓ Enabled',
+            'Cipher Count': proto.cipher_count
+          });
+      });
+    }
+
+    // Build Cipher Details
+    const cipherDetails: any[] = [];
+    if (openssl.cipher_information?.cipher_details) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      openssl.cipher_information.cipher_details.slice(0, 10).forEach((cipher: any) => {
+        cipherDetails.push({
+          'Cipher Name': cipher.name,
+          'Type': cipher.type.replace(/_/g, ' ')
+        });
+      });
+    }
+
+    sections.push({
+      title: 'OpenSSL Configuration',
+      icon: <Lock size={18} />,
+      color: 'green',
+      data: {
+        'OpenSSL Version': openssl.version_details?.split('\n')[0] || 'N/A', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+        'FIPS Mode': openssl.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled',
+        'Total Ciphers': openssl.cipher_information?.total_ciphers || 0,
+        'Platform': openssl.version_details?.split('\n').find((l: string) => l.includes('platform:'))?.split(':')[1]?.trim() || 'N/A'
+      },
+      subsections: [
+        {
+          title: 'Available Hash & Cipher Algorithms',
+          data: availableAlgos
+        },
+        {
+          title: 'Cipher Type Distribution',
+          data: cipherDist
+        },
+        {
+          title: 'Available Protocol Support',
+          data: protocols
+        },
+        {
+          title: 'Cipher Details (Top 10)',
+          data: cipherDetails
+        }
+      ]
+    });
+  }
+
+  // SSH Configuration Section
+  if (auditResults.ssh_crypto) {
+    const ssh = auditResults.ssh_crypto;
+    
+    // Build Configured Ciphers
+    const ciphers: any[] = [];
+    if (ssh.configuration?.configured_ciphers) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      ssh.configuration.configured_ciphers.ciphers?.forEach((cipher: string) => {
+        ciphers.push({ 'Cipher': cipher });
+      });
+    }
+
+    // Build MACs
+    const macs: any[] = [];
+    if (ssh.configuration?.configured_macs) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      ssh.configuration.configured_macs.macs?.forEach((mac: string) => {
+        macs.push({ 'MAC': mac });
+      });
+    }
+
+    // Build Key Exchange
+    const kex: any[] = [];
+    if (ssh.configuration?.configured_kex) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      ssh.configuration.configured_kex.kex_algorithms?.forEach((algo: string) => {
+        kex.push({ 'Algorithm': algo });
+      });
+    }
+
+    // Build Host Key Algorithms
+    const hostKeys: any[] = [];
+    if (ssh.configuration?.host_key_algorithms) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      ssh.configuration.host_key_algorithms.algorithms?.forEach((algo: string) => {
+        hostKeys.push({ 'Algorithm': algo });
+      });
+    }
+
+    sections.push({
+      title: 'SSH Configuration',
+      icon: <Network size={18} />,
+      color: 'purple',
+      data: {
+        'SSH Version': ssh.version_info || 'Not Available', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+        'Protocol Version': ssh.configuration?.protocol_version || 'N/A',
+        'Distribution': ssh.version_details?.distribution || 'N/A',
+        'Total Ciphers': ssh.configuration?.configured_ciphers?.count || 0,
+        'Total MACs': ssh.configuration?.configured_macs?.count || 0
+      },
+      subsections: [
+        {
+          title: `Configured Ciphers (${ciphers.length})`,
+          data: ciphers
+        },
+        {
+          title: `Message Authentication Codes (${macs.length})`,
+          data: macs
+        },
+        {
+          title: `Key Exchange Algorithms (${kex.length})`,
+          data: kex
+        },
+        {
+          title: `Host Key Algorithms (${hostKeys.length})`,
+          data: hostKeys
+        }
+      ]
+    });
+  }
+
+  // Certificates Section
+  if (auditResults.certificates) {
+    const certSummary: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
+      'Total Certificates Found': auditResults.certificates.certificates?.length || 0,
+      'Search Paths Used': auditResults.certificates.search_paths_used?.length || 0
+    };
+
+    const certSubsections = auditResults.certificates.certificates?.map((cert: any, idx: number) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+      const certName = cert.path.split('/').pop() || `Certificate ${idx + 1}`;
+      return {
+          title: `${idx + 1}. ${certName}`,
+          data: {
+            'File Path': cert.path,
+            'Key Algorithm': cert.crypto_information.key_algorithm,
+            'Key Size': `${cert.crypto_information.key_size} bits`,
+            'Signature Algorithm': cert.crypto_information.signature_algorithm,
+            'Uses SHA-1': cert.crypto_information.characteristics?.includes('uses_sha1_signature') ? '⚠️ Yes' : '✓ No',
+            'Uses SHA-256': cert.crypto_information.characteristics?.includes('uses_sha256_signature') ? '✓ Yes' : 'No',
+            'RSA Algorithm': cert.crypto_information.characteristics?.includes('rsa_algorithm') ? '✓ Yes' : 'No'
+          }
+      };
+    }) || [];
+
+    sections.push({
+      title: 'Certificates',
+      icon: <FileText size={18} />,
+      color: 'amber',
+      data: certSummary,
+      subsections: certSubsections
+    });
+  }
+
+  // Hardware Crypto Features Section
+  if (auditResults.hardware_crypto) {
+    const hw = auditResults.hardware_crypto;
+    
+    // Build CPU Features with readable names
+    const cpuFeatures: any[] = [];
+    if (hw.cpu_crypto_features) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      const featureNames: any = {
+        'aes_instructions': 'AES-NI',
+        'random_number_generator': 'Hardware RNG',
+        'secure_random_seed': 'Secure Random Seed',
+        'sha_extensions': 'SHA Extensions',
+        'advanced_vector_extensions': 'AVX Support',
+        'advanced_vector_extensions_2': 'AVX2 Support',
+        'carry_less_multiplication': 'CLMUL Support'
+      };
+      
+      Object.entries(hw.cpu_crypto_features).forEach(([key, value]) => {
+        const readableName = featureNames[key] || key;
+        if (value) {
+          cpuFeatures.push({
+            'Feature': readableName,
+            'Status': '✓ Supported'
+          });
+        }
+      });
+    }
+
+    // Build Devices Info
+    const devices: any[] = [];
+    if (hw.random_devices && hw.random_devices.length > 0) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      devices.push({ 'Device Type': 'Random Devices', 'Devices': hw.random_devices.join(', ') });
+    }
+    if (hw.tpm_devices && hw.tpm_devices.length > 0) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      devices.push({ 'Device Type': 'TPM Devices', 'Devices': hw.tpm_devices.join(', ') });
+    } else {
+      devices.push({ 'Device Type': 'TPM Devices', 'Devices': 'None Found' });
+    }
+    if (hw.crypto_devices && hw.crypto_devices.length > 0) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      devices.push({ 'Device Type': 'Crypto Devices', 'Devices': hw.crypto_devices.join(', ') });
+    } else {
+      devices.push({ 'Device Type': 'Crypto Devices', 'Devices': 'None Found' });
+    }
+
+    sections.push({
+      title: 'Hardware Crypto Features',
+      icon: <Cpu size={18} />,
+      color: 'indigo',
+      data: {
+        'CPU Model': hw.cpu_information || 'N/A', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+        'Total Crypto Features': hw.crypto_feature_count || 0
+      },
+      subsections: [
+        {
+          title: 'Enabled CPU Cryptographic Features',
+          data: cpuFeatures
+        },
+        {
+          title: 'Hardware Devices',
+          data: devices
+        }
+      ]
+    });
+  }
+
+  // System Security Section
+  if (auditResults.system_security) {
+    const security = auditResults.system_security;
+    
+    // Build Crypto Libraries list
+    const libraries: any[] = [];
+    if (security.crypto_libraries) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      (security.crypto_libraries as string[]).forEach((lib: string) => {
+        const libName = lib.split('=>')[0]?.trim() || lib;
+        libraries.push({ 'Library': libName });
+      });
+    }
+
+    // Build Kernel Algorithms
+    const kernelAlgos: { Algorithm: string; Category: string; }[] = [];
+    if (security.kernel_crypto_algorithms) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      (security.kernel_crypto_algorithms as string[]).forEach((algo: string) => {
+        const algoName = algo.split(':')[1]?.trim() || algo;
+        let category = 'Other';
+        if (algoName.includes('hmac')) category = 'HMAC'; // eslint-disable-line no-param-reassign
+        else if (algoName.includes('gcm')) category = 'GCM';
+        else if (algoName.includes('aes')) category = 'AES';
+        
+        kernelAlgos.push({
+          'Algorithm': algoName,
+          'Category': category
+        });
+      });
+    }
+
+    sections.push({ // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+      title: 'System Security',
+      icon: <Shield size={18} />,
+      color: 'red',
+      data: {
+        'FIPS Kernel Mode': security.fips_kernel_mode ? '✓ Enabled' : '✗ Disabled', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+        'System Entropy': `${security.system_entropy} bits`,
+        'Crypto Libraries': security.crypto_libraries?.length || 0,
+        'Kernel Algorithms': security.kernel_crypto_algorithms?.length || 0
+      },
+      subsections: [
+        {
+          title: 'Cryptographic Libraries',
+          data: libraries
+        },
+        {
+          title: 'Kernel Crypto Algorithms',
+          data: kernelAlgos
+        }
+      ]
+    });
+  }
+
+  return sections; // eslint-disable-line @typescript-eslint/no-unsafe-return
+};
+
+// 3. Component for Section Display with Document 2 styling
+const CollapsibleSection: React.FC<{
+  section: SectionData;
+  isExpanded: boolean;
+  onToggle: () => void;
+}> = ({ section, isExpanded, onToggle }) => {
+  const [expandedSubsections, setExpandedSubsections] = useState<Set<number>>(new Set());
+
+  const colorClasses = {
+    blue: 'from-blue-500 to-blue-600',
+    green: 'from-green-500 to-emerald-600',
+    purple: 'from-purple-500 to-pink-600',
+    amber: 'from-amber-500 to-orange-600',
+    indigo: 'from-indigo-500 to-purple-600',
+    red: 'from-red-500 to-rose-600',
+  }[section.color] || 'from-slate-500 to-slate-600';
+
+  const toggleSubsection = (idx: number) => {
+    setExpandedSubsections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(idx)) {
+        newSet.delete(idx);
+      } else {
+        newSet.add(idx);
+      }
+      return newSet;
+    });
+  };
+
+  const InfoRow = ({ label, value }: { label: string; value: any }) => (
+    <div className="flex flex-col sm:flex-row py-3 border-b border-slate-200 dark:border-slate-700 last:border-0 gap-2">
+      <span className="text-sm font-medium text-slate-600 dark:text-slate-400 flex-shrink-0">{label}</span>
+      <span className="text-sm text-slate-900 dark:text-slate-100 font-mono break-words min-w-0 flex-1">
+        {String(value)}
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+      <button // eslint-disable-line @typescript-eslint/no-misused-promises
+        onClick={onToggle}
+        className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`p-2 bg-gradient-to-br ${colorClasses} rounded-lg text-white`}>
+            {section.icon}
+          </div>
+          <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{section.title}</h3>
+        </div>
+        <div className={`transition-transform duration-500 ease-in-out ${isExpanded ? 'rotate-180' : ''}`}>
+          <ChevronDown size={20} className="text-slate-400" />
+        </div>
+      </button>
+      
+      <div 
+        className={`transition-all duration-500 ease-in-out ${
+          isExpanded ? 'max-h-[8000px] opacity-100' : 'max-h-0 opacity-0'
+        }`}
+        style={{ overflow: isExpanded ? 'visible' : 'hidden' }}
+      >
+        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700">
+          {/* Main Data */}
+          <div className="bg-white dark:bg-slate-900 rounded-lg p-4 mb-4">
+            {Object.entries(section.data).map(([key, value]) => (
+              <InfoRow key={key} label={key} value={value} />
+            ))}
+          </div>
+
+          {/* Subsections */}
+          {section.subsections && section.subsections.length > 0 && (
+            <div className="space-y-3">
+              {section.subsections.map((subsection, idx) => (
+                <div key={idx} className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  <button // eslint-disable-line @typescript-eslint/no-misused-promises
+                    onClick={() => toggleSubsection(idx)}
+                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={`transition-transform duration-500 ease-in-out ${expandedSubsections.has(idx) ? 'rotate-90' : ''}`}>
+                        <ChevronRight size={18} className="text-slate-600 dark:text-slate-400" />
+                      </div>
+                      <h4 className="font-semibold text-slate-800 dark:text-slate-100">{subsection.title}</h4>
+                    </div>
+                  </button>
+                  
+                  <div 
+                    className={`transition-all duration-500 ease-in-out ${
+                      expandedSubsections.has(idx) ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0'
+                    }`}
+                    style={{ overflow: expandedSubsections.has(idx) ? 'visible' : 'hidden' }}
+                  >
+                    <div className="px-4 py-3 bg-slate-50 dark:bg-slate-900/50">
+                      {Array.isArray(subsection.data) ? (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {subsection.data.map((item: any, itemIdx: number) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+                            <div key={itemIdx} className="bg-white dark:bg-slate-900 rounded p-3 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 transition-colors">
+                          <div className="grid grid-cols-1">
+                                {Object.entries(item).map(([key, value]) => (
+                              <div key={key} className="flex flex-col sm:flex-row gap-2 py-1">
+                                <span className="text-xs text-slate-500 dark:text-slate-400 flex-shrink-0 sm:min-w-[100px]">{key}:</span>
+                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100 font-mono break-words min-w-0 flex-1">
+                                      {String(value)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="bg-white dark:bg-slate-900 rounded p-3">
+                          {Object.entries(subsection.data).map(([key, value]) => (
+                            <InfoRow key={key} label={key} value={value} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RawJsonSection: React.FC<{ auditResults: any }> = ({ auditResults }) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden animate-slideInDown mt-4">
+    <div className="p-4 bg-slate-800 dark:bg-slate-900 border-b border-slate-700"> // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+      <h4 className="font-semibold text-white flex items-center gap-2">
+        <FileText size={18} />
+        Complete Raw JSON Data
+      </h4>
+    </div>
+    <pre className="p-4 overflow-auto max-h-96 text-xs bg-slate-900 dark:bg-slate-950 text-green-400 font-mono max-w-full w-full break-words whitespace-pre-wrap"> // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+      {JSON.stringify(auditResults, null, 2)}
+    </pre> // eslint-disable-line @typescript-eslint/no-unsafe-argument
+  </div>
+);
+
 const CryptoAuditDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'downloads' | 'docs'>('dashboard');
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -89,59 +616,68 @@ const CryptoAuditDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [loadingResults, setLoadingResults] = useState<Set<string>>(new Set());
+  const [retryingResults, setRetryingResults] = useState<Set<string>>(new Set());
   const [tabTransition, setTabTransition] = useState(false);
 
+  const processedCompletionsRef = useRef<Set<string>>(new Set());
+  const prevTasksRef = useRef<Task[]>([]);
+  
   const fetchStats = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/admin/stats`);
       const data = await response.json();
-      if (data.success) {
+      if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setStats(data);
-        setError(null);
+        return data;
       }
     } catch (error) {
       console.error('Error fetching stats:', error);
       setError('Failed to fetch statistics');
     }
+    return null;
   }, []);
 
   const fetchAgents = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/admin/agents`);
       const data = await response.json();
-      if (data.success) {
+      if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setAgents(data.agents);
-        setError(null);
+        return data.agents;
       }
     } catch (error) {
       console.error('Error fetching agents:', error);
       setError('Failed to fetch agents');
     }
+    return [];
   }, []);
 
   const fetchTasks = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/admin/tasks`);
       const data = await response.json();
-      if (data.success) {
+      if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setTasks(data.tasks);
-        setError(null);
+        return data.tasks;
       }
     } catch (error) {
       console.error('Error fetching tasks:', error);
       setError('Failed to fetch tasks');
     }
+    return [];
   }, []);
 
   const fetchAgentResults = useCallback(async (agentId: string) => {
     try {
+      setError(null);
       const response = await fetch(`${API_BASE_URL}/api/v1/admin/agent/${agentId}/results`);
       const data = await response.json();
-      if (data.success) {
+      if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setAgentResults(prev => new Map(prev).set(agentId, data.results));
       }
     } catch (error) {
       console.error('Error fetching agent results:', error);
+      setError(`Failed to fetch results for agent ${agentId}`);
     }
   }, []);
 
@@ -154,8 +690,8 @@ const CryptoAuditDashboard: React.FC = () => {
       const linuxData = await linuxResponse.json();
       const windowsData = await windowsResponse.json();
       
-      if (linuxData.success) setLinuxFiles(linuxData.files);
-      if (windowsData.success) setWindowsFiles(windowsData.files);
+      if (linuxData.success) setLinuxFiles(linuxData.files); // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+      if (windowsData.success) setWindowsFiles(windowsData.files); // eslint-disable-line @typescript-eslint/no-unsafe-member-access
     } catch (error) {
       console.error('Error fetching files:', error);
     }
@@ -163,12 +699,11 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchStats(), fetchAgents(), fetchTasks()]);
+    const [, , newTasks] = await Promise.all([fetchStats(), fetchAgents(), fetchTasks()]);
 
-    // Conditionally clear triggeredScans: only remove if task is no longer pending/in_progress
     setTriggeredScans(prev => {
       const newSet = new Set(prev);
-      const activeTasks = tasks.filter(t =>
+      const activeTasks = (newTasks || []).filter(t =>
         t.status === 'pending' || t.status === 'in_progress'
       ).map(t => t.agent_id);
       prev.forEach(agentId => {
@@ -217,17 +752,56 @@ const CryptoAuditDashboard: React.FC = () => {
         method: 'POST'
       });
       const data = await response.json();
-      if (data.success) {
-        await Promise.all([fetchTasks(), fetchAgents()]); // Refresh agents to update status badges
-        setTimeout(async () => { // Add a delay then refresh again to catch status change
-          await Promise.all([fetchTasks(), fetchAgents()]);
-        }, 1000);
+      if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+        const poll = async (retries: number, delay: number) => {
+          if (retries === 0) return;
+          
+          const tasksResponse = await fetch(`${API_BASE_URL}/api/v1/admin/tasks`);
+          const tasksData = await tasksResponse.json();
+          
+          if (tasksData.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+            setTasks(tasksData.tasks);
+            await fetchAgents();
+
+            const agentTask = tasksData.tasks.find((t: Task) => 
+              t.agent_id === agentId && 
+              (t.status === 'pending' || t.status === 'in_progress')
+            );
+
+            if (agentTask) {
+              setTimeout(() => poll(retries - 1, delay * 1.5), delay); // eslint-disable-line @typescript-eslint/no-misused-promises
+            } else {
+              setTriggeredScans(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(agentId);
+                return newSet;
+              });
+            }
+          }
+        };
+        poll(5, 1500);
       }
     } catch (error) {
       console.error('Error triggering scan:', error);
       setTriggeredScans(prev => {
         const newSet = new Set(prev);
         newSet.delete(agentId);
+        return newSet;
+      });
+    }
+  };
+
+  const retryFetchResult = async (agentId: string, taskId: string) => {
+    setRetryingResults(prev => new Set(prev).add(taskId));
+    try {
+      await fetchAgentResults(agentId);
+      await fetchTasks();
+    } catch (e) {
+      console.error("Retry fetch failed", e);
+    } finally {
+      setRetryingResults(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(taskId);
         return newSet;
       });
     }
@@ -241,7 +815,6 @@ const CryptoAuditDashboard: React.FC = () => {
       newExpanded.add(agentId);
       if (!agentResults.has(agentId)) {
         setLoadingResults(prev => new Set(prev).add(agentId));
-        await fetchStats(); // Refresh stats to update counts after getting results
         await fetchAgentResults(agentId);
         setLoadingResults(prev => {
           const newSet = new Set(prev);
@@ -339,7 +912,6 @@ const CryptoAuditDashboard: React.FC = () => {
     return `${days} day${days > 1 ? 's' : ''} ago`;
   };
 
-
   const handleTabChange = (tab: 'dashboard' | 'downloads' | 'docs') => {
     setTabTransition(true);
     setTimeout(() => {
@@ -369,6 +941,31 @@ const CryptoAuditDashboard: React.FC = () => {
     }, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const previousTasks = prevTasksRef.current;
+    if (previousTasks.length > 0 && tasks.length > 0) {
+      tasks.forEach(newTask => {
+        const oldTask = previousTasks.find(t => t.task_id === newTask.task_id);
+        if (oldTask && oldTask.status === 'in_progress' && newTask.status === 'completed') {
+          const completionKey = `${newTask.agent_id}_${newTask.task_id}`;
+          if (processedCompletionsRef.current.has(completionKey)) {
+            return;
+          }
+          processedCompletionsRef.current.add(completionKey);
+
+          console.log(`Task ${newTask.task_id} for agent ${newTask.agent_id} just completed. Fetching results.`);          
+          
+          const fetchAndExpand = async () => {
+            await fetchAgentResults(newTask.agent_id);
+            await fetchStats();
+          };
+          fetchAndExpand();
+        }
+      });
+    }
+    prevTasksRef.current = tasks;
+  }, [tasks, fetchAgentResults, fetchStats]);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
@@ -527,8 +1124,12 @@ const CryptoAuditDashboard: React.FC = () => {
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">OS</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Scans</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Created</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Last Seen</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Time Since Contact</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 min-w-[120px]">
+                          <span className="hidden sm:inline">Time Since Contact</span>
+                          <span className="sm:hidden">Last Contact</span>
+                        </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 w-24">Action</th>
                       </tr>
                     </thead>
@@ -549,70 +1150,11 @@ const CryptoAuditDashboard: React.FC = () => {
                           loadingResults={loadingResults.has(agent.agent_id)}
                           formatDateTime={formatDateTime}
                           formatTimeSince={formatTimeSince}
+                          onRetryFetch={retryFetchResult}
+                          retryingResults={retryingResults}
                           getRelativeTime={getRelativeTime}
                         />
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-              <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
-                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">Recent Tasks</h3>
-              </div>
-              {tasks.length === 0 ? (
-                <EmptyState message="No tasks found" />
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-50 dark:bg-slate-800/50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Task ID</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Agent</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Results</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Created</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Started At</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Completed At</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                      {tasks.slice(0, 10).map((task) => {
-                        const agent = agents.find(a => a.agent_id === task.agent_id);
-                        return (
-                          <tr key={task.task_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                            <td className="px-4 py-3">
-                              <code className="text-xs text-slate-600 dark:text-slate-400">{task.task_id.substring(0, 8)}...</code>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col">
-                                {agent && <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{agent.hostname}</span>}
-                                <code className="text-xs text-slate-500 dark:text-slate-400">{task.agent_id.substring(0, 8)}...</code>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <Badge status={task.status} />
-                            </td>
-                            <td className="px-4 py-3">
-                              {allResults.some(r => r.task_id === task.task_id) 
-                                ? <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
-                                : <span className="text-xs text-slate-400">-</span>
-                              }
-                            </td>
-                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
-                              {formatDateTime(task.created_at)}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
-                              {task.started_at ? formatDateTime(task.started_at) : '-'}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
-                              {task.completed_at ? formatDateTime(task.completed_at) : '-'}
-                            </td>
-                          </tr>
-                        );
-                      })}
                     </tbody>
                   </table>
                 </div>
@@ -800,8 +1342,10 @@ const AgentRow: React.FC<{
   loadingResults: boolean;
   formatDateTime: (date: string) => string;
   formatTimeSince: (minutes: number) => string;
+  onRetryFetch: (agentId: string, taskId: string) => void;
+  retryingResults: Set<string>;
   getRelativeTime: (date: string) => string;
-}> = ({ agent, info, expanded, onToggle, onTriggerScan, isScanTriggered, results, tasks, expandedResults, toggleResultDetails, loadingResults, formatDateTime, formatTimeSince, getRelativeTime }) => {
+}> = ({ agent, info, expanded, onToggle, onTriggerScan, isScanTriggered, results, tasks, expandedResults, toggleResultDetails, loadingResults, formatDateTime, formatTimeSince, onRetryFetch, retryingResults, getRelativeTime }) => {
   const isScanning = isScanTriggered && (info?.in_progress_tasks ?? 0) > 0;
 
   return (
@@ -847,6 +1391,9 @@ const AgentRow: React.FC<{
           <Badge status={agent.status} />
         </td>
         <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
+          {formatDateTime(agent.registered_at)}
+        </td>
+        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
           {formatDateTime(agent.last_seen)}
         </td>
         <td className="px-4 py-3">
@@ -871,7 +1418,7 @@ const AgentRow: React.FC<{
       </tr>
       {expanded && (
         <tr className="bg-slate-50 dark:bg-slate-800/30">
-          <td colSpan={9} className="px-4 py-4">
+          <td colSpan={10} className="px-4 py-4">
             {loadingResults ? (
               <LoadingState />
             ) : (
@@ -882,6 +1429,8 @@ const AgentRow: React.FC<{
                   results={results}
                   expandedResults={expandedResults}
                   toggleResultDetails={toggleResultDetails}
+                  onRetryFetch={onRetryFetch}
+                  retryingResults={retryingResults}
                   getRelativeTime={getRelativeTime}
                 />
               </div>
@@ -893,111 +1442,175 @@ const AgentRow: React.FC<{
   );
 };
 
+// 4. Update AgentResultsView Component with Document 2 styling
 const AgentResultsView: React.FC<{
   agentId: string;
   tasks: Task[];
   results: AuditResult[];
   expandedResults: Set<string>;
   toggleResultDetails: (id: string) => void;
+  onRetryFetch: (agentId: string, taskId: string) => void;
+  retryingResults: Set<string>;
   getRelativeTime: (date: string) => string;
-}> = ({ agentId, tasks, results, expandedResults, toggleResultDetails, getRelativeTime }) => {
-  const agentTasks = tasks.filter(t => t.agent_id === agentId);
-  
-  const taskResultPairs: TaskResultPair[] = agentTasks.map(task => ({
-    task,
-    result: results.find(r => r.task_id === task.task_id) || null
-  }));
-  
-  taskResultPairs.sort((a, b) => 
-    new Date(b.task.created_at).getTime() - new Date(a.task.created_at).getTime()
-  );
+}> = ({ agentId, tasks, results, expandedResults, toggleResultDetails, onRetryFetch, retryingResults, getRelativeTime }) => {
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set()); // eslint-disable-line @typescript-eslint/no-unused-vars
+  const [showRawJson, setShowRawJson] = useState(false);
 
-  if (taskResultPairs.length === 0) {
+  // Get only the latest completed result
+  const latestResult = useMemo(() => {
+    const completedResults = results
+      .filter(r => r.audit_results)
+      .sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+    
+    return completedResults.length > 0 ? completedResults[0] : null;
+  }, [results]);
+
+  const processedSections = useMemo(() => {
+    if (!latestResult) return []; // eslint-disable-line @typescript-eslint/no-unsafe-return
+    
+    const auditData = latestResult.audit_results.with_sudo || 
+                      latestResult.audit_results.without_sudo || 
+                      latestResult.audit_results;
+    
+    return processAuditResults(auditData);
+  }, [latestResult]);
+
+  const toggleSection = (sectionTitle: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    setExpandedSections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(sectionTitle)) {
+        newSet.delete(sectionTitle);
+      } else {
+        newSet.add(sectionTitle);
+      }
+      return newSet;
+    });
+  };
+
+  if (!latestResult) {
     return (
-      <div className="text-center py-8 text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
-        <div className="inline-flex p-3 rounded-full bg-slate-100 dark:bg-slate-800 mb-3">
-          <AlertCircle className="text-slate-400" size={24} />
-        </div>
-        <p>No scans found for this agent</p>
+      <div className="text-center py-8 text-slate-600 dark:text-slate-400">
+        <AlertCircle className="mx-auto mb-3" size={32} />
+        <p>No audit results available for this agent</p>
       </div>
     );
   }
 
+  const auditData = latestResult.audit_results.with_sudo ||  // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+                    latestResult.audit_results.without_sudo || 
+                    latestResult.audit_results;
+
   return (
-    <div className="space-y-3">
-      <h4 className="text-base font-bold mb-4 text-slate-900 dark:text-slate-100">
-        Scan History ({taskResultPairs.length} total)
-      </h4>
-      {taskResultPairs.map(({ task, result }) => {
-        const isExpanded = result && expandedResults.has(result.result_id);
-        
-        return (
-          <div 
-            key={task.task_id} 
-            className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm hover:shadow-md transition-all duration-200"
-          >
-            <div
-              onClick={() => result && toggleResultDetails(result.result_id)}
-              className={`p-4 flex flex-wrap items-center justify-between gap-4 transition-colors ${
-                result ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''
-              }`}
-            >
-              <div className="flex items-center gap-3 flex-wrap">
-                <Badge status={task.status} />
-                <div>
-                  <span className="font-medium text-slate-900 dark:text-slate-100 text-sm">Task: </span>
-                  <code className="text-xs text-slate-600 dark:text-slate-400">{task.task_id.substring(0, 16)}...</code>
-                </div>
-                {result && (
-                  <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
-                    <CheckCircle size={16} />
-                    Results Available
-                  </div>
-                )}
-                {!result && task.status === 'completed' && (
-                  <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium">
-                    <Clock size={16} />
-                    Awaiting Results
-                  </div>
-                )}
+    <div className="space-y-4">
+      {/* Header with metadata */}
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 mb-2">
+              Latest Audit Result
+            </h4>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Submitted: </span>
+                <span className="text-slate-900 dark:text-slate-100">
+                  {new Date(latestResult.submitted_at).toLocaleString()}
+                </span>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-                  {task.completed_at 
-                    ? `Completed ${getRelativeTime(task.completed_at)}` 
-                    : task.started_at
-                    ? `Started ${getRelativeTime(task.started_at)}`
-                    : `Created ${getRelativeTime(task.created_at)}`}
-                </div>
-                {result && (
-                  isExpanded ? (
-                    <ChevronDown size={20} className="text-slate-700 dark:text-slate-300" />
-                  ) : (
-                    <ChevronRight size={20} className="text-slate-700 dark:text-slate-300" />
-                  )
-                )}
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Task ID: </span>
+                <code className="text-xs">{latestResult.task_id.substring(0, 16)}...</code>
               </div>
             </div>
-            {isExpanded && result && (
-              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 animate-slideInDown">
-                <div className="mb-3 flex flex-wrap gap-4 text-sm">
-                  <div>
-                    <span className="text-slate-600 dark:text-slate-400">Submitted: </span>
-                    <span className="text-slate-900 dark:text-slate-100">{new Date(result.submitted_at).toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-600 dark:text-slate-400">Received: </span>
-                    <span className="text-slate-900 dark:text-slate-100">{new Date(result.received_at).toLocaleString()}</span>
-                  </div>
-                </div>
-                <pre className="rounded-lg p-4 overflow-auto text-xs max-h-96 bg-slate-900 dark:bg-slate-950 text-green-400 font-mono border border-slate-700">
-                  {JSON.stringify(result.audit_results, null, 2)}
-                </pre>
-              </div>
-            )}
           </div>
-        );
-      })}
+        </div>
+      </div>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">OpenSSL Version</div>
+          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
+               title={auditData.openssl_crypto?.version_details?.split('\n')[0] || 'N/A'}>
+            {auditData.openssl_crypto?.version_details?.split('\n')[0]?.split(' ')[1] || 'N/A'}
+          </div>
+        </div>
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Total Ciphers</div>
+          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
+               title={String(auditData.openssl_crypto?.cipher_information?.total_ciphers || 0)}>
+            {auditData.openssl_crypto?.cipher_information?.total_ciphers || 0}
+          </div>
+        </div>
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Certificates</div>
+          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
+               title={String(auditData.certificates?.certificates?.length || 0)}>
+            {auditData.certificates?.certificates?.length || 0}
+          </div>
+        </div>
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">CPU Features</div>
+          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
+               title={String(auditData.hardware_crypto?.crypto_feature_count || 0)}>
+            {auditData.hardware_crypto?.crypto_feature_count || 0}
+          </div>
+        </div>
+      </div>
+
+      {/* Sections with Document 2 styling */}
+      <div className="space-y-4">
+        {processedSections.map((section) => (
+          <CollapsibleSection
+            key={section.title}
+            section={section}
+            isExpanded={expandedSections.has(section.title)}
+            onToggle={() => toggleSection(section.title)}
+          />
+        ))}
+        
+        {/* Raw JSON Section */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowRawJson(!showRawJson)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-slate-500 to-slate-600 rounded-lg text-white">
+                <FileText size={18} />
+              </div>
+              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Raw JSON Data</h3>
+            </div>
+            <div className={`transition-transform duration-500 ease-in-out ${showRawJson ? 'rotate-180' : ''}`}>
+              <ChevronDown size={20} className="text-slate-400" />
+            </div>
+          </button>
+          
+          <div 
+            className={`transition-all duration-500 ease-in-out ${
+              showRawJson ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
+            }`}
+            style={{ overflow: showRawJson ? 'visible' : 'hidden' }}
+          >
+            <div className="border-t border-slate-200 dark:border-slate-700">
+              <pre className="p-4 overflow-auto max-h-96 text-xs bg-slate-900 dark:bg-slate-950 text-green-400 font-mono">
+                {JSON.stringify(latestResult.audit_results, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Historical scans summary */}
+      {results.length > 1 && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+            <Clock size={16} />
+            <span className="text-sm font-medium">
+              Showing latest result. {results.length - 1} previous scan{results.length > 2 ? 's' : ''} available in history.
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

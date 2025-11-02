@@ -231,27 +231,33 @@ async def fetch_action(agent_id: str):
         
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM tasks WHERE agent_id = ? AND status = 'pending' ORDER BY created_at LIMIT 1",
-                (agent_id,)
-            )
-            task = cursor.fetchone()
-            
-            if task:
-                # Mark task as in-progress
+            try:
+                # Use a transaction to prevent race conditions
+                cursor.execute("BEGIN IMMEDIATE")
+                
                 cursor.execute(
-                    "UPDATE tasks SET status = 'in_progress', started_at = ? WHERE task_id = ?",
-                    (datetime.now().isoformat(), task["task_id"])
+                    "SELECT * FROM tasks WHERE agent_id = ? AND status = 'pending' ORDER BY created_at LIMIT 1",
+                    (agent_id,)
                 )
-                conn.commit()
+                task = cursor.fetchone()
                 
-                print(f"[+] Scan task dispatched to agent: {agent_id}")
-                
-                return FetchActionResponse(
-                    scan_flag=True,
-                    task_id=task["task_id"],
-                    message="Crypto audit scan requested"
-                )
+                if task:
+                    # Mark task as in-progress within the same transaction
+                    cursor.execute(
+                        "UPDATE tasks SET status = 'in_progress', started_at = ? WHERE task_id = ?",
+                        (datetime.now().isoformat(), task["task_id"])
+                    )
+                    conn.commit()
+                    print(f"[+] Scan task dispatched to agent: {agent_id}")
+                    return FetchActionResponse(
+                        scan_flag=True,
+                        task_id=task["task_id"],
+                        message="Crypto audit scan requested"
+                    )
+                conn.commit() # Commit even if no task is found
+            except sqlite3.Error as e:
+                conn.rollback()
+                raise HTTPException(status_code=500, detail=f"Database transaction failed: {str(e)}")
         
         return FetchActionResponse(
             scan_flag=False,
@@ -401,6 +407,43 @@ async def get_agent_results(agent_id: str):
             "agent_id": agent_id,
             "count": len(results_list),
             "results": results_list
+        }
+
+@app.get("/api/v1/admin/agent/{agent_id}/tasks-with-results")
+async def get_agent_tasks_with_results(agent_id: str):
+    """Get all tasks for an agent with their results in one query"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT 
+                t.*,
+                r.result_id as res_result_id,
+                r.audit_results,
+                r.received_at,
+                r.submitted_at
+            FROM tasks t
+            LEFT JOIN results r ON t.result_id = r.result_id
+            WHERE t.agent_id = ?
+            ORDER BY t.created_at DESC
+        ''', (agent_id,))
+        
+        rows = cursor.fetchall()
+        
+        tasks_with_results = []
+        for row in rows:
+            task_dict = dict(row)
+            
+            # Parse audit_results if it exists
+            if task_dict.get('audit_results'):
+                task_dict['audit_results'] = json.loads(task_dict['audit_results'])
+            
+            tasks_with_results.append(task_dict)
+        
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "count": len(tasks_with_results),
+            "tasks_with_results": tasks_with_results
         }
 
 @app.get("/api/v1/admin/tasks")
