@@ -38,7 +38,7 @@ const menuItems = [
   { title: "Profile", url: "/profile", icon: User },
   { title: "SSL/TLS scans", url: "/SSL-TLS scans", icon: ScanLine },
   { title: "PQC-Scans", url: "/PQC-Scans", icon: Computer },
-  { title: "Readiness Analysis", url: "/Readinessanalysis", icon: ClipboardCheck },
+  { title: "Readiness Assessment", url: "/Readinessanalysis", icon: ClipboardCheck },
   { title: "Migration Assist", url: "/migrationAssist", icon: ArrowRightLeft },
   { title: "Integration", url: "/integration", icon: Link2 },
   { title: "Settings", url: "/settings", icon: Settings },

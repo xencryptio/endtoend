@@ -1106,7 +1106,7 @@ const CryptoAuditDashboard: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
               <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
                 <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
-                  Registered Agents ({filteredAgents.length})
+                  Crypt Inventory by assets ({filteredAgents.length})
                 </h3>
               </div>
               {isInitialLoad ? (
@@ -1115,7 +1115,7 @@ const CryptoAuditDashboard: React.FC = () => {
                 <EmptyState message="No agents found" />
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full table-fixed">
                     <thead className="bg-slate-50 dark:bg-slate-800/50">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 w-12"></th>
@@ -1418,11 +1418,11 @@ const AgentRow: React.FC<{
       </tr>
       {expanded && (
         <tr className="bg-slate-50 dark:bg-slate-800/30">
-          <td colSpan={10} className="px-4 py-4">
+          <td colSpan={10} className="px-4 py-4 w-full">
             {loadingResults ? (
               <LoadingState />
             ) : (
-              <div className="animate-slideInDown">
+              <div className="animate-slideInDown w-full overflow-x-hidden">
                 <AgentResultsView
                   agentId={agent.agent_id}
                   tasks={tasks}

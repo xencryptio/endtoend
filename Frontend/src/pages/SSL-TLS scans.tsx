@@ -268,16 +268,6 @@ const Scan = () => {
     setIsPqcEdited(false);
   }, []);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <p>Loading Scan Center...</p>
-        </div>
-      </div>
-    );
-  }
-
   const cardVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0 },
