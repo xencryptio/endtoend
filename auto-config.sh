@@ -1,37 +1,38 @@
 #!/usr/bin/env bash
 set -e
 
-echo "⚙️ Running auto-config to replace 'localhost' dynamically...'"
+echo "⚙️ Running auto-config to replace 'localhost' dynamically..."
 
-# ---------------------------
-# SIMULATION MODE (optional)
-# If SIMULATED_AWS_IP is set, treat it as the public IP.
-# ---------------------------
+# ============================================================
+# STEP 1 — Detect IP
+# ============================================================
+
+# ✅ Simulation override (used for local testing)
 if [[ -n "$SIMULATED_AWS_IP" ]]; then
   PUBLIC_IP="$SIMULATED_AWS_IP"
-  echo "🧪 Simulation active. Using SIMULATED_AWS_IP: $PUBLIC_IP"
+  echo "🧪 Simulation enabled. Using SIMULATED_AWS_IP: $PUBLIC_IP"
 else
-  # Try to fetch public IP from cloud metadata (works on real cloud hosts)
-  PUBLIC_IP=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
+  # ✅ Try AWS EC2 metadata public IP first (works on AWS)
+  PUBLIC_IP=$(curl -s --connect-timeout 1 http://169.254.169.254/latest/meta-data/public-ipv4 || true)
 
-  # Try IMDSv2 if needed
+  # ✅ If IMDSv2 needed (fallback)
   if [[ -z "$PUBLIC_IP" ]]; then
     TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
-      -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+      -H "X-aws-ec2-metadata-token-ttl-seconds: 60" || true)
     PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
-      http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
+      http://169.254.169.254/latest/meta-data/public-ipv4 || true)
   fi
 fi
 
-# Detect internal IP (works on Linux/macOS)
+# ✅ Detect internal network IP (works in Docker + Linux/macOS)
 PRIVATE_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 
-# macOS/other fallback
+# ✅ macOS fallback network interface
 if [[ -z "$PRIVATE_IP" ]]; then
-  PRIVATE_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+  PRIVATE_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "")
 fi
 
-# Final decision
+# ✅ Final fallback decision logic
 if [[ -n "$PUBLIC_IP" ]]; then
   HOST_IP="$PUBLIC_IP"
   echo "🌍 Using PUBLIC IP: $HOST_IP"
@@ -40,11 +41,13 @@ elif [[ -n "$PRIVATE_IP" ]]; then
   echo "💻 Using PRIVATE IP: $HOST_IP"
 else
   HOST_IP="localhost"
-  echo "⚠️ Could not detect any IP. Falling back to localhost."
+  echo "⚠️ No IP found → Using localhost"
 fi
 
+echo "📌 Final Applied IP: $HOST_IP"
+
 # ============================================================
-# STEP 2: Define Files to Modify
+# STEP 2 — Files to Update
 # ============================================================
 FILES=(
   "./Frontend/.env"
@@ -54,7 +57,7 @@ FILES=(
 )
 
 # ============================================================
-# STEP 3: Perform Safe Cross-Platform Replacement
+# STEP 3 — Safe Replace localhost → Detected IP
 # ============================================================
 for FILE in "${FILES[@]}"; do
   if [[ -f "$FILE" ]]; then
@@ -62,8 +65,8 @@ for FILE in "${FILES[@]}"; do
     TMP_FILE="${FILE}.tmp"
     sed "s|localhost|$HOST_IP|g" "$FILE" > "$TMP_FILE" && mv "$TMP_FILE" "$FILE"
   else
-    echo "⚠️ Missing file: $FILE"
+    echo "⚠️ File not found: $FILE"
   fi
 done
 
-echo "✅ Configuration updated successfully!"
+echo "✅ Auto-config completed successfully!"
