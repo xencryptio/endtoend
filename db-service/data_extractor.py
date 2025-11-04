@@ -6,8 +6,36 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 
+VALID_GRADES = {'A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F'}
+
+def validate_pqc_score_and_grade(score, grade):
+    """Normalize score to a number and grade to a valid letter grade."""
+    if score is None:
+        score = 0
+    if not grade or grade not in VALID_GRADES:
+        grade = 'F'
+    return score, grade
+
 def extract_pqc_fields(raw_response: Dict[str, Any]) -> Dict[str, Any]:
     """Extract PQC/Quantum fields from raw response."""
+    # ✅ Handle None/empty raw_response
+    if not raw_response or not isinstance(raw_response, dict):
+        return {
+            "pqc_overall_score": None,
+            "pqc_overall_grade": None,
+            "pqc_security_level": None,
+            "pqc_quantum_ready": None,
+            "pqc_hybrid_ready": None,
+        }
+    # ✅ Check for http_skipped
+    if raw_response.get("scan_status") == "http_skipped":
+        return {
+            "pqc_overall_score": 0,
+            "pqc_overall_grade": "F",
+            "pqc_security_level": "None",
+            "pqc_quantum_ready": False,
+            "pqc_hybrid_ready": False,
+        }
     pqc_analysis = raw_response.get("pqc_analysis", {})
 
     # 🔧 FIX: Try multiple sources for scores
@@ -22,9 +50,11 @@ def extract_pqc_fields(raw_response: Dict[str, Any]) -> Dict[str, Any]:
 
     # Fallback: top-level quantum fields
     if overall_score is None:
-        overall_score = raw_response.get("quantum_score")
+        overall_score = raw_response.get("quantum_score") or raw_response.get("pqc_overall_score")
     if overall_grade is None:
-        overall_grade = raw_response.get("quantum_grade")
+        overall_grade = raw_response.get("quantum_grade") or raw_response.get("pqc_overall_grade")
+
+    overall_score, overall_grade = validate_pqc_score_and_grade(overall_score, overall_grade)
 
     return {
         "pqc_overall_score": overall_score,

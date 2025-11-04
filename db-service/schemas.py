@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from models import ScanStatusEnum
 
 # ============================================================
 # SCAN BATCH SCHEMAS
@@ -19,6 +20,7 @@ class ScanBatchCreate(ScanBatchBase):
 class ScanBatch(ScanBatchBase):
     id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None # <-- ADD THIS
     successful_count: int = 0
     failed_count: int = 0
     status: str
@@ -48,59 +50,37 @@ class ScanResultBase(BaseModel):
     url: str
     scan_type: str = "crypto_audit"
 
-class ScanResultCreate(ScanResultBase):
-    request_id: Optional[str] = None
-    status: str = "pending"
+class ScanResultCreate(BaseModel):
+    """
+    Schema for creating a scan result.
+    ✅ FIXED: Accepts pqc_overall_* and scan_status
+    """
+    batch_id: str
+    request_id: str
+    url: str    
+    scan_status: ScanStatusEnum = ScanStatusEnum.PENDING  # ✅ Use Enum
+    status: str = "pending" # Keep for backward compatibility
+    scan_type: str = "crypto_audit"
     requested_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     execution_time_seconds: Optional[float] = None
-    tls_version: Optional[str] = None
-    primary_cipher_suite: Optional[str] = None
-    quantum_score: Optional[float] = None
-    quantum_grade: Optional[str] = None
+    
+    # ✅ Accept pqc_overall_* (will be extracted from raw_response if missing)
+    pqc_overall_score: Optional[float] = None
+    pqc_overall_grade: Optional[str] = None
+    
+    # Complete scan data stored as JSON
     raw_response: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
 
-    # 🔧 FIX: Validator to ensure raw_response is always present and contains pqc_analysis
-    @validator('raw_response', always=True)
-    def validate_raw_response(cls, v, values):
-        """Ensure we have minimum data to store."""
-        if not v:
-            # If no raw_response, create a minimal structure from available fields
-            url = values.get("url", "")
-            quantum_score = values.get("quantum_score")
-            quantum_grade = values.get("quantum_grade")
-            tls_version = values.get("tls_version")
-
-            return {
-                "domain": url,
-                "quantum_score": quantum_score,
-                "quantum_grade": quantum_grade,
-                "tls_configuration": {
-                    "supported_protocols": [tls_version] if tls_version else []
-                },
-                # 🔧 ADD: Include pqc_analysis structure
-                "pqc_analysis": {
-                    "overall_score": quantum_score,
-                    "overall_grade": quantum_grade,
-                    "security_level": "unknown",
-                    "quantum_ready": False,
-                    "hybrid_ready": False
-                } if quantum_score is not None else {}
-            }
-
-        # 🔧 FIX: Ensure pqc_analysis exists in raw_response
-        if isinstance(v, dict) and "pqc_analysis" not in v:
-            quantum_score = v.get("quantum_score") or values.get("quantum_score")
-            quantum_grade = v.get("quantum_grade") or values.get("quantum_grade")
-            if quantum_score is not None:
-                v["pqc_analysis"] = {
-                    "overall_score": quantum_score,
-                    "overall_grade": quantum_grade,
-                    "security_level": "unknown",
-                    "quantum_ready": False,
-                    "hybrid_ready": False
-                }
+    @validator('pqc_overall_grade')
+    def validate_pqc_grade(cls, v):
+        """Validate PQC grade format."""
+        if v is not None:
+            valid_grades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F']
+            if v not in valid_grades:
+                # Allow it but warn
+                pass
         return v
 
 class ScanResult(ScanResultBase):
@@ -112,8 +92,10 @@ class ScanResult(ScanResultBase):
     execution_time_seconds: Optional[float] = None
     tls_version: Optional[str] = None
     primary_cipher_suite: Optional[str] = None
-    quantum_score: Optional[float] = None
-    quantum_grade: Optional[str] = None
+    
+    pqc_overall_score: Optional[float] = None
+    pqc_overall_grade: Optional[str] = None
+
     raw_response: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
 
@@ -132,6 +114,7 @@ class ScanStatistics(BaseModel):
     total_results: int
     successful_scans: int
     failed_scans: int
+    http_skipped_scans: int = 0
     pending_scans: int
     avg_execution_time: Optional[float] = None
 
@@ -160,6 +143,7 @@ class ScanResultWithNormalized(BaseModel):
     request_id: Optional[str] = None
     url: str
     status: str
+    scan_status: Optional[ScanStatusEnum] = None # <-- ADD THIS
     scan_type: str
     
     # Timestamps

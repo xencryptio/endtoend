@@ -494,8 +494,17 @@ const ExpandedDetailModal: React.FC<{
   onClose: () => void;
 }> = ({ result, onClose }) => {
   const isSuccess = result.scan_status === 'success';
-  const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? result.quantum_score ?? 'N/A';
-  const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? result.quantum_grade ?? 'N/A';
+  const pqcScore =
+    (result as any).pqc_overall_score ?? // Top-level first
+    result.raw_response?.pqc_analysis?.overall_score ?? // Then nested
+    result.quantum_score ?? // Legacy fallback
+    'N/A';
+
+  const pqcGrade =
+    (result as any).pqc_overall_grade ??
+    result.raw_response?.pqc_analysis?.overall_grade ??
+    result.quantum_grade ??
+    'N/A';
 
   return (
     <>
@@ -625,10 +634,10 @@ const DomainCard: React.FC<{
   result: ScanResult;
   onExpand: () => void;
 }> = ({ result, onExpand }) => {
-  const isSuccess = result.scan_status === 'success';
+  const isSuccess = result.scan_status === 'completed';
   const isHttpSkipped = result.scan_status === 'http_skipped';
-  const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? result.quantum_score ?? 'N/A';
-  const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? result.quantum_grade ?? 'N/A';
+  const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? 'N/A';
+  const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? 'N/A';
 
   return (
     <Card 
@@ -728,8 +737,8 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) =
   const stats = useMemo(() => {
     if (!scan.detailedResults) return { successful: 0, failed: 0 };
     return {
-      successful: scan.detailedResults.filter(r => r.scan_status === 'success').length,
-      failed: scan.detailedResults.filter(r => r.scan_status !== 'success').length,
+      successful: scan.detailedResults.filter(r => r.scan_status === 'completed').length,
+      failed: scan.detailedResults.filter(r => r.scan_status !== 'completed').length,
     };
   }, [scan.detailedResults]);
 

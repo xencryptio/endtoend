@@ -104,6 +104,13 @@ def create_scan_result(
 
             # Update scan_data with normalized fields
             scan_data.update(normalized_fields)
+
+            # Set scan_status from raw_response if available
+            scan_data['scan_status'] = raw_response.get('scan_status', scan.scan_status)
+            
+            # Ensure status and scan_status are aligned for completed scans
+            if scan_data['status'] == 'completed' and 'scan_status' not in raw_response:
+                 scan_data['scan_status'] = 'completed'
         except Exception as e:
             print(f"   ⚠️ Error extracting normalized fields: {e}")
     else:
@@ -251,11 +258,16 @@ def update_batch_counts(db: Session, batch_id: str):
             models.ScanResult.status == "failed"
         ).count()
 
-        batch.successful_count = successful
-        batch.failed_count = failed
+        http_skipped = db.query(models.ScanResult).filter(
+            models.ScanResult.scan_status == "http_skipped"
+        ).count()
 
+        batch.successful_count = successful
+        # Failed count should include both actual failures and skipped domains
+        batch.failed_count = failed + http_skipped
+        
         total = batch.total_urls
-        if successful + failed == total:
+        if successful + failed + http_skipped >= total:
             batch.status = "completed"
         elif failed == total:
             batch.status = "failed"
@@ -282,6 +294,10 @@ def get_scan_statistics(db: Session) -> dict:
         models.ScanResult.status == "pending"
     ).count()
 
+    http_skipped = db.query(models.ScanResult).filter(
+        models.ScanResult.scan_status == "http_skipped"
+    ).count()
+
     avg_time = db.query(
         func.avg(models.ScanResult.execution_time_seconds)
     ).filter(
@@ -294,5 +310,6 @@ def get_scan_statistics(db: Session) -> dict:
         "successful_scans": successful,
         "failed_scans": failed,
         "pending_scans": pending,
+        "http_skipped_scans": http_skipped,
         "avg_execution_time": round(float(avg_time), 2) if avg_time else None
     }

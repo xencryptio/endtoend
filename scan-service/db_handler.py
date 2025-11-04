@@ -24,7 +24,7 @@ class DatabaseHandler:
         if self.enabled:
             logger.info("✅ Database service is available and ready!")
         else:
-            logger.warning("Database service is NOT available. Data will NOT be persisted!")
+            logger.warning("⚠️ Database service is NOT available. Data will NOT be persisted!")
     
     def _check_connection(self) -> bool:
         """Check if database service is available."""
@@ -63,8 +63,9 @@ class DatabaseHandler:
                 timeout=10
             )
             
-            if response.status_code == 200:
-                logger.info("✅ Created batch %s in database", batch_id)
+            # 🔧 CRITICAL FIX: Check for both 200 and 201 status codes
+            if response.status_code in (200, 201):
+                logger.info("✅ Created batch %s in database (status: %s)", batch_id, response.status_code)
                 return True
             else:
                 logger.error("❌ Failed to create batch: %s - %s", response.status_code, response.text)
@@ -80,48 +81,149 @@ class DatabaseHandler:
             return False
 
         try:
-            # Extract raw_response
-            raw_response = result.get("raw_response")
-            
-            # If raw_response is None or empty, construct from available fields
-            if not raw_response or not isinstance(raw_response, dict):
-                logger.warning("⚠️ No valid raw_response for %s, constructing from result fields.", result.get('url'))
-                raw_response = {
-                    "domain": result.get("url", ""),
-                    "quantum_score": result.get("quantum_score"),
-                    "quantum_grade": result.get("quantum_grade"),
-                    "tls_configuration": {
-                        "supported_protocols": []
-                    },
-                    "pqc_analysis": {
-                        "overall_score": result.get("quantum_score"),
-                        "overall_grade": result.get("quantum_grade"),
-                        "security_level": "unknown",
-                        "quantum_ready": False,
-                        "hybrid_ready": False
-                    } if result.get("quantum_score") else {}
+            # 🆕 SPECIAL HANDLING FOR HTTP SKIPPED DOMAINS
+            scan_status = result.get("scan_status")
+            if scan_status == "http_skipped":
+                logger.info("🔄 Handling HTTP skipped domain: %s", result.get('url'))
+                
+                # Use the existing raw_response or create one
+                raw_response = result.get("raw_response")
+                if not raw_response or not isinstance(raw_response, dict):
+                    raw_response = {
+                        "domain": result.get("url", ""),
+                        "scan_status": "http_skipped",
+                        "error_detail": result.get("error_message", "HTTP/Unreachable domain cannot be scanned."),
+                        "scan_metadata": {
+                            "attempt": 0,
+                            "cached": False,
+                            "timestamp": datetime.now().isoformat()
+                        },
+                        "tls_configuration": {
+                            "supported_protocols": [],
+                            "tls_1.2_cipher_suites": {"server_preference": "disabled", "suites": []},
+                            "tls_1.3_cipher_suites": {"server_preference": "disabled", "suites": []},
+                            "supported_elliptic_curves": {"server_preference": "disabled", "curves": []}
+                        },
+                        "certificate_chain": {
+                            "leaf_certificate": {},
+                            "intermediate_certificates": [],
+                            "root_certificates": []
+                        },
+                        "signature_algorithms": {
+                            "certificate_signatures": [],
+                            "handshake_signatures": []
+                        },
+                        "pqc_analysis": {
+                            "overall_score": 0,
+                            "overall_grade": "F",
+                            "security_level": "None",
+                            "quantum_ready": False,
+                            "hybrid_ready": False,
+                            "components": {}
+                        }
+                    }
+
+                db_data = {
+                    "batch_id": batch_id,
+                    "request_id": result.get("request_id"),
+                    "url": result.get("url"),
+                    "status": "completed",  # ✅ Use "completed" status
+                    "scan_status": "http_skipped",  # ✅ This is critical
+                    "scan_type": "crypto_audit",
+                    "requested_at": result.get("requested_at"),
+                    "completed_at": result.get("completed_at") or datetime.now().isoformat(),
+                    "execution_time_seconds": result.get("execution_time_seconds", 0),
+                    
+                    # 🆕 PQC FIELDS FOR HTTP SKIPPED
+                    "pqc_overall_score": 0,
+                    "pqc_overall_grade": "F",
+                    
+                    "raw_response": raw_response,
+                    "error_message": result.get("error_message"),
                 }
 
-            logger.info("💾 SAVING TO DB: URL: %s, Batch: %s, ReqID: %s, Score: %s, Grade: %s",
-                       result.get('url'), batch_id, result.get('request_id'), 
-                       result.get('quantum_score'), result.get('quantum_grade'))
+                logger.info("-> Sending HTTP skipped domain to: %s/scans/result", self.db_service_url)
 
-            # 🔧 FIX: Map quantum_score/grade to pqc_overall_score/grade
-            # The db-service will extract pqc_overall_score/grade from raw_response
-            # but we need to include these for backward compatibility and for the validator in schemas.py
+                response = requests.post(
+                    f"{self.db_service_url}/scans/result",
+                    json=db_data,
+                    timeout=30
+                )
+
+                logger.info("<- Response status for HTTP skipped: %s", response.status_code)
+                
+                if response.status_code in (200, 201):
+                    logger.info("✅ Successfully saved HTTP skipped domain to DB! (status: %s)", response.status_code)
+                    return True
+                else:
+                    logger.error("❌ Failed to save HTTP skipped domain: %s - %s", response.status_code, response.text)
+                    return False
+
+            # 🆕 CONTINUE WITH EXISTING LOGIC FOR REGULAR SCANS
+            logger.info("💾 SAVING TO DB: URL: %s, Batch: %s, ReqID: %s",
+                       result.get('url'), batch_id, result.get('request_id'))
+            # 🔧 FIX: Validate raw_response structure
+            raw_response = result.get("raw_response")
+            
+            if not raw_response or not isinstance(raw_response, dict):
+                logger.warning("⚠️ No valid raw_response for %s, constructing from result fields.", result.get('url'))
+                
+                # Construct minimal raw_response from available fields
+                raw_response = {
+                    "domain": result.get("url", ""),
+                    "scan_status": result.get("scan_status", "success"),
+                    "tls_configuration": {"supported_protocols": []},
+                    "certificate_chain": {"leaf_certificate": {}},
+                    "signature_algorithms": {
+                        "certificate_signatures": [],
+                        "handshake_signatures": []
+                    },
+                    # 🔧 CRITICAL: Use pqc_analysis structure
+                    "pqc_analysis": {
+                        "overall_score": result.get("pqc_overall_score", 0),
+                        "overall_grade": result.get("pqc_overall_grade", "F"),
+                        "security_level": "unknown",
+                        "quantum_ready": False,
+                        "hybrid_ready": False,
+                        "components": {}
+                    }
+                }
+
+            # Get PQC score, preferring top-level, then nested in raw_response, default to 0
+            pqc_score = (
+                result.get("pqc_overall_score") or
+                raw_response.get("pqc_analysis", {}).get("overall_score") or
+                0
+            )
+            # Get PQC grade, with a similar fallback mechanism, default to "F"
+            pqc_grade = (
+                result.get("pqc_overall_grade") or
+                raw_response.get("pqc_analysis", {}).get("overall_grade") or
+                "F"
+            )
+            
+            logger.info("   📊 PQC Score: %s, Grade: %s", pqc_score, pqc_grade)
+
+            # Construct payload for db-service
             db_data = {
                 "batch_id": batch_id,
                 "request_id": result.get("request_id"),
                 "url": result.get("url"),
                 "status": "completed",
+                "scan_status": result.get("scan_status", "completed"),  # Use 'completed' as default
                 "scan_type": "crypto_audit",
                 "requested_at": result.get("requested_at"),
-                "completed_at": datetime.now().isoformat(),
+                "completed_at": result.get("completed_at") or datetime.now().isoformat(),
                 "execution_time_seconds": result.get("execution_time_seconds"),
-                "quantum_score": result.get("quantum_score"),
-                "quantum_grade": result.get("quantum_grade"),
+                
+                # 🔧 CRITICAL: Send pqc_overall_* (db-service will also extract from raw_response)
+                "pqc_overall_score": pqc_score,
+                "pqc_overall_grade": pqc_grade,
+                
                 "raw_response": raw_response,
-                "error_message": None,
+                
+                # ✅ FIXED: Check for both error_message and error_detail
+                "error_message": result.get("error_message") or result.get("error_detail"),
             }
 
             logger.info("-> Sending payload to: %s/scans/result", self.db_service_url)
@@ -134,10 +236,11 @@ class DatabaseHandler:
 
             logger.info("<- Response status: %s", response.status_code)
             
-            if response.status_code == 200:
+            # 🔧 CRITICAL FIX: Check for both 200 and 201 status codes
+            if response.status_code in (200, 201):
                 response_data = response.json()
-                logger.info("✅ Successfully saved result to DB! ID: %s, PQC Score: %s",
-                           response_data.get('id'), response_data.get('pqc_overall_score'))
+                logger.info("✅ Successfully saved result to DB! ID: %s, PQC Score: %s (status: %s)",
+                           response_data.get('id'), response_data.get('pqc_overall_score'), response.status_code)
                 return True
             else:
                 logger.error("❌ Failed to save result: %s - %s", response.status_code, response.text)
@@ -173,8 +276,9 @@ class DatabaseHandler:
                 timeout=10
             )
             
-            if response.status_code == 200:
-                logger.info("✅ Saved FAILED scan for %s to database", domain)
+            # 🔧 CRITICAL FIX: Check for both 200 and 201 status codes
+            if response.status_code in (200, 201):
+                logger.info("✅ Saved FAILED scan for %s to database (status: %s)", domain, response.status_code)
                 return True
             else:
                 logger.error("❌ Failed to save FAILED scan: %s - %s", response.status_code, response.text)
@@ -329,8 +433,8 @@ class DatabaseHandler:
                 timeout=10
             )
             
-            if response.status_code == 200:
-                logger.info("✅ Deleted batch %s and all its results from database", batch_id)
+            if response.status_code in (200, 204):
+                logger.info("✅ Deleted batch %s from database (status: %s)", batch_id, response.status_code)
                 return True
             else:
                 logger.error("❌ Failed to delete batch: %s - %s", response.status_code, response.text)
@@ -353,8 +457,8 @@ class DatabaseHandler:
                 timeout=10
             )
             
-            if response.status_code == 200:
-                logger.info("✅ Deleted result %s from database", result_id)
+            if response.status_code in (200, 204):
+                logger.info("✅ Deleted result %s from database (status: %s)", result_id, response.status_code)
                 return True
             else:
                 logger.error("❌ Failed to delete result: %s - %s", response.status_code, response.text)
@@ -377,8 +481,8 @@ class DatabaseHandler:
                 timeout=10
             )
             
-            if response.status_code == 200:
-                data = response.json()
+            if response.status_code in (200, 204):
+                data = response.json() if response.status_code == 200 else {"deleted_results": 0, "deleted_batches": 0}
                 logger.info("✅ Cleared database: %s batches and %s results deleted", 
                        data.get('deleted_batches', 0), data.get('deleted_results', 0))
                 return data
