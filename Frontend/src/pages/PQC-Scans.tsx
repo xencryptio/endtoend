@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive } from 'lucide-react';
 
-// API Configuration
-const API_BASE_URL = 'http://localhost:9000';
+// Access environment variables
+const VITE_SYSTEM_SCAN_API_URL = import.meta.env.VITE_SYSTEM_SCAN_API_URL;
+
 
 // Types
 interface Agent {
@@ -624,7 +625,7 @@ const CryptoAuditDashboard: React.FC = () => {
   
   const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/admin/stats`);
+      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/stats`);
       const data = await response.json();
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setStats(data);
@@ -639,7 +640,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const fetchAgents = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/admin/agents`);
+      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/agents`);
       const data = await response.json();
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setAgents(data.agents);
@@ -654,7 +655,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const fetchTasks = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/admin/tasks`);
+      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/tasks`);
       const data = await response.json();
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setTasks(data.tasks);
@@ -670,7 +671,7 @@ const CryptoAuditDashboard: React.FC = () => {
   const fetchAgentResults = useCallback(async (agentId: string) => {
     try {
       setError(null);
-      const response = await fetch(`${API_BASE_URL}/api/v1/admin/agent/${agentId}/results`);
+      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/agent/${agentId}/results`);
       const data = await response.json();
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setAgentResults(prev => new Map(prev).set(agentId, data.results));
@@ -684,8 +685,8 @@ const CryptoAuditDashboard: React.FC = () => {
   const fetchFiles = useCallback(async () => {
     try {
       const [linuxResponse, windowsResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/v1/files/list/linux`),
-        fetch(`${API_BASE_URL}/api/v1/files/list/windows`)
+        fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/list/linux`),
+        fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/list/windows`)
       ]);
       const linuxData = await linuxResponse.json();
       const windowsData = await windowsResponse.json();
@@ -748,7 +749,7 @@ const CryptoAuditDashboard: React.FC = () => {
   const triggerScan = async (agentId: string) => {
     setTriggeredScans(prev => new Set(prev).add(agentId));
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/admin/trigger-scan/${agentId}`, {
+      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/trigger-scan/${agentId}`, {
         method: 'POST'
       });
       const data = await response.json();
@@ -756,7 +757,7 @@ const CryptoAuditDashboard: React.FC = () => {
         const poll = async (retries: number, delay: number) => {
           if (retries === 0) return;
           
-          const tasksResponse = await fetch(`${API_BASE_URL}/api/v1/admin/tasks`);
+          const tasksResponse = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/tasks`);
           const tasksData = await tasksResponse.json();
           
           if (tasksData.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
@@ -1633,7 +1634,7 @@ const FileDownloadSection: React.FC<{
             <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">{title}</h3>
           </div>
           <a
-            href={`${API_BASE_URL}/api/v1/files/download-zip/${folderType}`}
+            href={`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/download-zip/${folderType}`}
             download
             className="px-4 py-2 rounded-lg font-medium text-sm bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
           >
@@ -1732,7 +1733,7 @@ const DocumentationSection: React.FC = () => (
         </p>
         <ul className="space-y-3">
           {[
-            { label: 'server_url', desc: 'API server address (default: http://localhost:9000)' },
+            { label: 'server_url', desc: `API server address (default: ${VITE_SYSTEM_SCAN_API_URL})` },
             { label: 'poll_interval', desc: 'How often the agent checks for tasks (default: 30 seconds)' },
             { label: 'agent_id', desc: 'Auto-generated unique identifier for the agent' },
           ].map((item, idx) => (
