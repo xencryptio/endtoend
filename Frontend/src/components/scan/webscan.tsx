@@ -486,12 +486,21 @@ const loadBatchDetails = async (apiBaseUrl: string, batchId: string) => {
     const data = await response.json();
     const results = Array.isArray(data) ? data : (data.results || []);
     
-    // Convert database results to frontend ScanResult format
-    return results.map((result: any) => ({
-      ...result,
-      scan_status: result.status === 'completed' ? 'success' : 'failed',
-      total_urls: 1 // Each detailed result is for one URL
-    }));
+    // ✅ CRITICAL FIX: Filter out http_skipped domains
+    return results
+      .filter((result: any) => {
+        // Only include actual scan results (successful or truly failed)
+        // Exclude http_skipped and other skipped statuses
+        const status = result.scan_status || result.status;
+        return status !== 'http_skipped';
+      })
+      .map((result: any) => ({
+        ...result,
+        scan_status: result.status === 'completed' ? 'success' : 
+                     result.scan_status === 'http_skipped' ? 'http_skipped' : 
+                     'failed',
+        total_urls: 1
+      }));
   } catch (error) {
     console.error('Error loading batch details:', error);
     return [];

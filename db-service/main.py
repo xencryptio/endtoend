@@ -67,13 +67,17 @@ def get_scan_batch_by_id(batch_id: str, db: Session = Depends(get_db)):
     if not batch:
         raise HTTPException(status_code=404, detail="Scan batch not found")
     
-    # Convert results to normalized schema
-    normalized_results = [
-        schemas.ScanResultWithNormalized.from_orm(r) 
-        for r in batch.scan_results
-    ]
+    # This endpoint is intended to return normalized results.
+    # We can directly use the ScanBatchWithNormalizedResults schema which will handle
+    # the conversion of each `scan_result` in the batch.
+    # The commented-out code seems to be an incomplete attempt at filtering,
+    # which is not required by the current logic of this endpoint.
     
-    return schemas.ScanBatchWithNormalizedResults.from_orm(batch)
+    # The `from_orm` method will create the Pydantic model from the SQLAlchemy model.
+    # It will automatically convert the `scan_results` list as well.
+    batch_with_filtered_results = schemas.ScanBatchWithNormalizedResults.from_orm(batch)
+    
+    return batch_with_filtered_results
 
 @app.delete("/scans/batch/{batch_id}")
 def delete_scan_batch_endpoint(batch_id: str, db: Session = Depends(get_db)):

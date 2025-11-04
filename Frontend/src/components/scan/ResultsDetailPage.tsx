@@ -543,21 +543,25 @@ const ExpandedDetailModal: React.FC<{
           <CardContent className="flex-1 overflow-y-auto p-6">
             {isSuccess ? (
               <div className="space-y-8">
-                {/* Quick Stats */}
-                <div className="grid grid-cols-3 gap-4 pb-6 border-b">
-                  <div className="text-center">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center p-4 bg-muted/50 rounded-xl">
+                  <div>
                     <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">PQC Score</div>
-                    <div className="text-3xl font-bold mt-2">{pqcScore}</div>
+                    <div className="text-3xl font-bold mt-2">
+                      {typeof pqcScore === 'number' ? pqcScore.toFixed(2) : pqcScore}
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Grade</div>
-                    <div className={`text-3xl font-bold mt-2 ${getGradeColor(pqcGrade)}`}>
+                  <div>
+                    <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Status</div>
+                    <div className={`text-3xl font-bold mt-2 ${getGradeColor(pqcGrade as string)}`}>
                       {pqcGrade}
                     </div>
                   </div>
-                  <div className="text-center">
+                  <div>
                     <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Status</div>
-                    <div className="text-2xl font-bold mt-2 flex items-center justify-center"><div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center"><Check className="w-3 h-3 text-emerald-600" /></div></div>
+                    <div className="text-2xl font-bold mt-2 flex items-center justify-center gap-2">
+                      <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center"><Check className="w-3 h-3 text-emerald-600" /></div>
+                      <span>Ready</span>
+                    </div>
                   </div>
                 </div>
 
@@ -565,9 +569,33 @@ const ExpandedDetailModal: React.FC<{
                 <DetailedSections result={result} />
               </div>
             ) : (
-              <div className="p-6 bg-destructive/10 text-destructive rounded-xl">
-                <p className="font-semibold text-lg mb-2">Scan Failed</p>
-                <p>{result.error_message || 'An unknown error occurred.'}</p>
+              <div className={`p-6 rounded-xl ${result.scan_status === 'http_skipped' ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-rose-50 dark:bg-rose-950/30'}`}>
+                {result.scan_status === 'http_skipped' ? (
+                  <>
+                    <div className="flex items-center gap-3 mb-3">
+                      <AlertTriangle className="w-6 h-6 text-amber-600" />
+                      <p className="font-semibold text-lg text-amber-900 dark:text-amber-100">
+                        HTTP Domain - Cannot Scan
+                      </p>
+                    </div>
+                    <p className="text-amber-800 dark:text-amber-200 mb-3">
+                      {result.error_message || 'This domain uses HTTP instead of HTTPS. SSL Labs can only analyze TLS/SSL encrypted connections (HTTPS).'}
+                    </p>
+                    <div className="bg-amber-100 dark:bg-amber-900/40 rounded-lg p-4 text-sm">
+                      <p className="font-semibold text-amber-900 dark:text-amber-100 mb-2">Why can't we scan this domain?</p>
+                      <ul className="list-disc list-inside space-y-1 text-amber-800 dark:text-amber-200">
+                        <li>SSL Labs only analyzes TLS/SSL certificates</li>
+                        <li>HTTP domains don't use encryption</li>
+                        <li>No cryptographic data is available to analyze</li>
+                      </ul>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold text-lg mb-2">Scan Failed</p>
+                    <p>{result.error_message || 'An unknown error occurred during the scan.'}</p>
+                  </>
+                )}
               </div>
             )}
           </CardContent>
@@ -598,48 +626,80 @@ const DomainCard: React.FC<{
   onExpand: () => void;
 }> = ({ result, onExpand }) => {
   const isSuccess = result.scan_status === 'success';
+  const isHttpSkipped = result.scan_status === 'http_skipped';
   const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? result.quantum_score ?? 'N/A';
   const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? result.quantum_grade ?? 'N/A';
 
   return (
     <Card 
       className={`cursor-pointer transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-2xl hover:-translate-y-1 border-l-4 ${
-        isSuccess ? 'border-l-emerald-500' : 'border-l-rose-500'
+        isSuccess ? 'border-l-emerald-500' : 
+        isHttpSkipped ? 'border-l-amber-500' : 
+        'border-l-rose-500'
       }`}
       onClick={onExpand}
     >
-      <CardContent className="p-6">
+      <CardContent className="p-4">
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
               <h5 className="font-semibold truncate text-base">{result.url}</h5>
               <div className="text-xs text-muted-foreground mt-1">
-                {isSuccess 
-                  ? <div className="flex items-center gap-2"><div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center"><Check className="w-3 h-3 text-emerald-600" /></div><span>Successful</span></div>
-                  : <div className="flex items-center gap-2"><div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center"><X className="w-3 h-3 text-rose-600" /></div><span>Failed</span></div>}
+                {isSuccess ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                      <Check className="w-3 h-3 text-emerald-600" />
+                    </div>
+                    <span>Successful</span>
+                  </div>
+                ) : isHttpSkipped ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center">
+                      <AlertTriangle className="w-3 h-3 text-amber-600" />
+                    </div>
+                    <span>HTTP - Not Scannable</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center">
+                      <X className="w-3 h-3 text-rose-600" />
+                    </div>
+                    <span>Failed</span>
+                  </div>
+                )}
               </div>
             </div>
-            <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 animate-pulse ${
-              isSuccess ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50' : 'bg-rose-500 shadow-lg shadow-rose-500/50'
+            <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${
+              isSuccess ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50 animate-pulse' : 
+              isHttpSkipped ? 'bg-amber-500 shadow-lg shadow-amber-500/50' :
+              'bg-rose-500 shadow-lg shadow-rose-500/50'
             }`}></div>
           </div>
 
           {isSuccess && (
             <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="bg-muted p-2 rounded-xl">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">PQC Score</div>
-                <div className="font-bold text-sm">{pqcScore}</div>
+              <div>
+                <div className="bg-muted p-2 rounded-xl">
+                  <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">PQC Score</div>
+                  <div className="font-bold text-sm">{typeof pqcScore === 'number' ? pqcScore.toFixed(1) : 'N/A'}</div>
+                </div>
               </div>
               <div className="bg-muted p-2 rounded-xl">
                 <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Grade</div>
-                <div className={`font-bold text-sm ${getGradeColor(pqcGrade)}`}>
+                <div className={`font-bold text-sm ${getGradeColor(pqcGrade as string)}`}>
                   {pqcGrade}
                 </div>
               </div>
               <div className="bg-muted p-2 rounded-xl">
                 <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Status</div>
-                <div className="font-bold text-sm">Success</div>
+                <div className="font-bold text-sm text-emerald-600">Ready</div>
               </div>
+            </div>
+          )}
+          
+          {isHttpSkipped && (
+            <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg text-xs text-amber-800 dark:text-amber-200">
+              <p className="font-medium">⚠️ Cannot analyze HTTP domains. SSL Labs requires HTTPS.</p>
             </div>
           )}
         </div>
