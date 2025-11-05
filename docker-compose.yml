@@ -1,5 +1,9 @@
 version: '3.8'
 
+# ================================================================
+# MAIN SERVICES (without pre-init)
+# ================================================================
+
 services:
 
   # ======================
@@ -12,8 +16,6 @@ services:
     networks:
       - xencrypt-network
     depends_on:
-      pre-init:
-        condition: service_completed_successfully
       crypto-scanner:
         condition: service_started
       db-service:
@@ -37,8 +39,6 @@ services:
     networks:
       - xencrypt-network
     depends_on:
-      pre-init:
-        condition: service_completed_successfully
       db-service:
         condition: service_started
       postgres:
@@ -62,8 +62,6 @@ services:
     networks:
       - xencrypt-network
     depends_on:
-      pre-init:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     restart: unless-stopped
@@ -148,8 +146,6 @@ services:
     container_name: linux-agent-modern
     hostname: ubuntu-modern-agent
     depends_on:
-      pre-init:
-        condition: service_completed_successfully
       system-scan:
         condition: service_started
     environment:
@@ -178,8 +174,6 @@ services:
     container_name: linux-agent-legacy
     hostname: debian-legacy-agent
     depends_on:
-      pre-init:
-        condition: service_completed_successfully
       system-scan:
         condition: service_started
     environment:
@@ -208,8 +202,6 @@ services:
     container_name: linux-agent-mixed
     hostname: alpine-mixed-agent
     depends_on:
-      pre-init:
-        condition: service_completed_successfully
       system-scan:
         condition: service_started
     environment:
