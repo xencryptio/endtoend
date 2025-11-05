@@ -51,9 +51,7 @@ echo "📌 Final Applied IP: $HOST_IP"
 # ============================================================
 FILES=(
   "./Frontend/.env"
-  "./Frontend/.env.development"
   "./scan-service/Dockerfile"
-  "./docker-compose.yml"
 )
 
 # ============================================================
