@@ -1,17 +1,6 @@
 version: '3.8'
 
-# ================================================================
-# UNIVERSAL PRE-INIT SERVICE (runs the auto-config script)
-# ================================================================
 services:
-  pre-init:
-    image: bash:5
-    volumes:
-      - .:/app
-    working_dir: /app
-    command: ["bash", "-c", "chmod +x ./auto-config.sh && ./auto-config.sh"]
-    # This ensures the script runs before anything else
-    restart: "no"
 
   # ======================
   # FRONTEND SERVICE
