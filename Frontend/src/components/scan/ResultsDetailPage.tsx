@@ -588,12 +588,12 @@ const ExpandedDetailModal: React.FC<{
                       </p>
                     </div>
                     <p className="text-amber-800 dark:text-amber-200 mb-3">
-                      {result.error_message || 'This domain uses HTTP instead of HTTPS. SSL Labs can only analyze TLS/SSL encrypted connections (HTTPS).'}
+                      {result.error_message || 'This domain uses HTTP instead of HTTPS. we can only analyze TLS/SSL encrypted connections (HTTPS).'}
                     </p>
                     <div className="bg-amber-100 dark:bg-amber-900/40 rounded-lg p-4 text-sm">
                       <p className="font-semibold text-amber-900 dark:text-amber-100 mb-2">Why can't we scan this domain?</p>
                       <ul className="list-disc list-inside space-y-1 text-amber-800 dark:text-amber-200">
-                        <li>SSL Labs only analyzes TLS/SSL certificates</li>
+                        
                         <li>HTTP domains don't use encryption</li>
                         <li>No cryptographic data is available to analyze</li>
                       </ul>
@@ -708,7 +708,7 @@ const DomainCard: React.FC<{
           
           {isHttpSkipped && (
             <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg text-xs text-amber-800 dark:text-amber-200">
-              <p className="font-medium">⚠️ Cannot analyze HTTP domains. SSL Labs requires HTTPS.</p>
+              <p className="font-medium">⚠️ Cannot analyze HTTP domains. We requires HTTPS.</p>
             </div>
           )}
         </div>

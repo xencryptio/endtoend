@@ -1134,7 +1134,7 @@ def process_single_domain(domain: str, use_cache: bool = True, attempt: int = 1,
     
     if protocol != "https":
         # 2. Skip if HTTP or Unreachable
-        error_message = f"Domain is {protocol.upper()} and cannot be scanned by SSL Labs (TLS/SSL only)."
+        error_message = f"Domain is {protocol.upper()} and cannot be scanned   (TLS/SSL only)."
         print(f"🚫 Skipping {domain}: {error_message}")
         
         # ✅ ADD THIS: Create and return properly structured result for skipped domains
@@ -1238,7 +1238,7 @@ def scan_domain(request: ScanRequest):
             https_domains.append(domain)
             print(f"✅ {domain} - HTTPS, proceeding to scan.")
         else:
-            error_msg = f"Domain is {protocol.upper()} and cannot be scanned by SSL Labs."
+            error_msg = f"Domain is {protocol.upper()} and cannot be scanned  ."
             # Define the skipped_domain_result structure here
             skipped_domain_result = {
                 "request_id": f"skipped_{domain}",
@@ -1433,7 +1433,7 @@ async def scan_with_progress(request: ScanRequest):
             # ============================================================
             # Handle non-HTTPS domains (skip them)
             # ============================================================
-            error_msg = f"Domain is {protocol.upper()} and cannot be scanned by SSL Labs."
+            error_msg = f"Domain is {protocol.upper()} and cannot be scanned  ."
             if protocol == "dns_failed":
                 error_msg = dns_error_msg
             

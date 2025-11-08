@@ -476,19 +476,20 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
 
 const loadBatchDetails = async (apiBaseUrl: string, batchId: string) => {
   try {
-    // Call the scan-service which proxies to db-service
+    // Normalize base URL to avoid trailing slash
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
+    
+    // Fetch batch results
     const response = await fetch(`${normalizedBaseUrl}/results/batch/${batchId}`);
     
     if (!response.ok) {
       console.warn(`Failed to load batch details for ${batchId}: ${response.status}`);
       return [];
     }
-    
     const data = await response.json();
     const results = Array.isArray(data) ? data : (data.results || []);
     
-    // Do NOT filter out http_skipped. Map and normalize.
+    // Map and normalize results
     return results.map((result: any) => ({
         ...result,
         scan_status: result.scan_status
@@ -496,7 +497,10 @@ const loadBatchDetails = async (apiBaseUrl: string, batchId: string) => {
           : result.status === 'completed'
             ? 'completed'
             : (result.scan_status === 'http_skipped' ? 'http_skipped' : 'failed'),
-        total_urls: 1
+        total_urls: 1,
+        
+        // ✅ FIX: Ensure execution_time_seconds is preserved or defaults to 0
+        execution_time_seconds: result.execution_time_seconds || 0
       }));
   } catch (error) {
     console.error('Error loading batch details:', error);
@@ -1038,23 +1042,38 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
       showMessage('Could not find batch to load.', 'error');
       return;
     }
-
+  
     try {
       const details = await loadBatchDetails(apiBaseUrl, scan.batch_id);
       if (details && details.length > 0) {
-        setScanHistory(prev => prev.map(s => 
+        // ✅ FIX: Calculate total execution time from all results
+        const totalExecutionTime = details.reduce((sum, result) => {
+          return sum + (result.execution_time_seconds || 0);
+        }, 0);
+  
+        // ✅ Update scan history with new data
+        setScanHistory(prev => prev.map(s =>
           s.request_id === requestId
-            ? { ...s, detailedResults: details }
+            ? {
+                ...s,
+                detailedResults: details,
+                execution_time_seconds: totalExecutionTime  // ✅ ADD THIS
+              }
             : s
         ));
-        setViewingResultsFor(requestId);
       } else {
         showMessage('No details found for this batch.', 'warning');
       }
     } catch (error) {
       showMessage('Failed to load batch details.', 'error');
     }
+
+    // ✅ FIX: Delay navigation until after state is committed
+    setTimeout(() => {
+      setViewingResultsFor(requestId);
+    }, 0);
   };
+
   const calculateSecurityScore = (result: any) => {
     if (result.scan_status !== 'success') return 0;
   
@@ -1114,6 +1133,8 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
         />
       );
     }
+    // If scanToView is not found, fall back to the main view.
+    // This can happen if history is cleared while viewing details.
   }
   
   // Otherwise show normal UI
@@ -1368,7 +1389,24 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                           <span className="text-muted-foreground">URLs:</span> {scan.total_urls}
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Execution Time:</span> {scan.execution_time_seconds !== undefined ? `${scan.execution_time_seconds} seconds` : 'N/A'}
+                          <span className="text-muted-foreground">Execution Time:</span>{' '}
+                          {(() => {
+                            // ✅ FIX: Calculate total execution time from detailed results if available
+                            if (scan.detailedResults && scan.detailedResults.length > 0) {
+                              const totalTime = scan.detailedResults.reduce((sum, result) => {
+                                return sum + (result.execution_time_seconds || 0);
+                              }, 0);
+                      
+                              return totalTime > 0 
+                                ? `${totalTime.toFixed(2)}s`
+                                : 'N/A';
+                            }
+                      
+                            // Fallback: use scan-level execution time if details not loaded
+                            return scan.execution_time_seconds !== undefined
+                              ? `${scan.execution_time_seconds.toFixed(2)}s`
+                              : 'N/A';
+                          })()}
                         </div>
                       </div>
 
@@ -1400,13 +1438,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                           <Button
                             variant="outline"
                             onClick={() => {
-                              // If results already loaded, just view them
-                              if (scan.detailedResults && scan.detailedResults.length > 0) {
-                                setViewingResultsFor(scan.request_id);
-                              } else {
-                                // Otherwise, load them first
-                                handleLoadBatchDetails(scan.request_id);
-                              }
+                              handleLoadBatchDetails(scan.request_id);
                             }}
                             size="sm"
                           >
@@ -1418,8 +1450,17 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                                   uniqueDomains[result.url] = result;
                                 });
                                 const uniqueResults = Object.values(uniqueDomains); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-                                const successCount = uniqueResults.filter(r => r.scan_status === 'success').length;
-                                const failCount = uniqueResults.filter(r => r.scan_status !== 'success').length;
+                                
+                                // ✅ FIX: Handle both 'success' and 'completed' statuses with case insensitivity
+                                const successCount = uniqueResults.filter(r => {
+                                  const status = r.scan_status?.toLowerCase();
+                                  return status === 'completed' || status === 'success';
+                                }).length;
+                                
+                                const failCount = uniqueResults.filter(r => {
+                                  const status = r.scan_status?.toLowerCase();
+                                  return status !== 'completed' && status !== 'success';
+                                }).length;
 
                                 return (
                                   <span className="ml-2 text-xs text-muted-foreground">
@@ -1480,10 +1521,11 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                                   const domain = result.url;
                                   
                                   // Determine correct status
+                                  const scanStatus = result.scan_status?.toLowerCase();
                                   let status = 'failed';
-                                  if (result.scan_status === 'success' || result.scan_status === 'completed') {
+                                  if (scanStatus === 'success' || scanStatus === 'completed') {
                                     status = 'completed';
-                                  } else if (result.scan_status === 'http_skipped') {
+                                  } else if (scanStatus === 'http_skipped') {
                                     status = 'http_skipped';
                                   }
                                   
