@@ -493,7 +493,7 @@ const ExpandedDetailModal: React.FC<{
   result: ScanResult;
   onClose: () => void;
 }> = ({ result, onClose }) => {
-  const isSuccess = result.scan_status === 'success';
+  const isSuccess = result.scan_status?.toLowerCase() === 'completed';
   const pqcScore =
     (result as any).pqc_overall_score ?? // Top-level first
     result.raw_response?.pqc_analysis?.overall_score ?? // Then nested
