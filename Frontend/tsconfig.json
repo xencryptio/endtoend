@@ -5,10 +5,13 @@
     { "path": "./tsconfig.node.json" }
   ],
   "compilerOptions": {
+    "composite": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
     "noImplicitAny": false,
     "noUnusedParameters": false,
     "skipLibCheck": true,

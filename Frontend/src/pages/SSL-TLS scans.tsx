@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Save, RotateCcw, ArrowLeft, ArrowRight, Globe } from "lucide-react";
+import { Save, RotateCcw, ArrowLeft, ArrowRight, Globe, Github } from "lucide-react";
 import { CryptoTable, CryptoAlgorithm, ColumnDef } from "@/components/profile/crypto table";
 import {
   Card,
@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import WebScan from '@/components/scan/webscan'; // Import the autonomous WebScan component
+import GitScan from "@/components/git-scan/git-scan";
 
 // ============================================================================
 // INTERFACES & TYPES
@@ -31,7 +32,7 @@ interface ApiCryptoAlgorithm {
   Notes: string;
 }
 
-type ViewType = 'dashboard' | 'tables' | 'webscan';
+type ViewType = 'dashboard' | 'tables' | 'webscan' | 'gitscan';
 
 // ============================================================================
 // API CONFIGURATION
@@ -287,6 +288,12 @@ const Scan = () => {
           onBack={() => setView('dashboard')}
           apiBaseUrl={API_CONFIG.scanApi}
         />
+      ) : view === 'gitscan' ? (
+        <GitScan
+          key="gitscan"
+          // Assuming GitScan has an onBack prop like WebScan
+          // onBack={() => setView('dashboard')} 
+        />
       ) : view === 'dashboard' ? (
         // Dashboard View - Simple Navigation
         <motion.div
@@ -303,7 +310,7 @@ const Scan = () => {
               <h1 className="text-4xl font-bold tracking-tight">Scan Center</h1>
               <p className="text-lg text-muted-foreground mt-2">Select a scan type to begin.</p>
             </div>
-            <div className="grid grid-cols-1 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <motion.div whileHover={{ y: -5, scale: 1.02 }} transition={{ type: 'spring', stiffness: 300 }}>
                 <Card
                   onClick={() => setView('webscan')}
@@ -323,6 +330,34 @@ const Scan = () => {
                   <CardContent>
                     <p className="text-muted-foreground">
                       Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues.
+                    </p>
+                  </CardContent>
+                  <div className="p-6 pt-0">
+                    <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                      Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                    </Button>
+                  </div>
+                </Card>
+              </motion.div>
+              <motion.div whileHover={{ y: -5, scale: 1.02 }} transition={{ type: 'spring', stiffness: 300 }}>
+                <Card
+                  onClick={() => setView('gitscan')}
+                  className="h-full flex flex-col justify-between cursor-pointer group border-2 hover:border-primary/50 transition-all"
+                >
+                  <CardHeader>
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="p-3 bg-gray-800/10 dark:bg-gray-200/10 rounded-lg">
+                        <Github className="h-8 w-8 text-gray-800 dark:text-gray-200" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-2xl">Git Scan</CardTitle>
+                        <CardDescription className="text-base">Scan your Git repositories for vulnerabilities.</CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-muted-foreground">
+                      Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness.
                     </p>
                   </CardContent>
                   <div className="p-6 pt-0">

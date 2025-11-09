@@ -106,6 +106,22 @@ services:
     networks:
       - xencrypt-network
 
+  # ======================
+  # REPO SCANNER SERVICE
+  # ======================
+  repo-scanner:
+    build:
+      context: ./repo_scanner
+      dockerfile: Dockerfile
+    container_name: crypto_scanner_backend
+    ports:
+      - "8003:8001" # Mapped to 8003 to avoid conflict with db-service on 8001
+    volumes:
+      - ./repo_scanner:/app
+    networks:
+      - xencrypt-network
+    restart: always
+
   # =============================================================================
   # CRYPTO AUDIT SYSTEM SERVICES (inside system-scaner)
   # =============================================================================

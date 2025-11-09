@@ -1,0 +1,11 @@
+services:
+  flask:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crypto_scanner_backend
+    ports:              # ← CHANGE THIS
+      - "8001:8001"     # ← CHANGE THIS
+    volumes:
+      - .:/app
+    restart: always
