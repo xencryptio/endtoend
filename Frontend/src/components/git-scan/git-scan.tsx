@@ -35,7 +35,7 @@ interface Scan {
 
 type StatusType = 'error' | 'success' | 'info';
 
-const API_URL = 'http://localhost:8003';
+const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL
 
 const CryptoScanner: React.FC = () => {
   const [repoUrl, setRepoUrl] = useState('');
@@ -262,6 +262,77 @@ const CryptoScanner: React.FC = () => {
     );
   };
 
+  // Create a separate component for each row to avoid Fragment issues
+  const ScanRow: React.FC<{ scan: Scan }> = ({ scan }) => {
+    const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
+    const isExpanded = expandedRows.has(scan.id);
+    const fileCountDisplay =
+      scan.scan_status === 'in_progress' && scan.total_files_to_scan > 0
+        ? `${scan.total_files || 0} / ${scan.total_files_to_scan}`
+        : scan.total_files || '-';
+
+    return (
+      <>
+        <tr
+          onClick={() => canView && toggleRow(scan.id)}
+          className={`border-b border-gray-200 ${
+            canView ? 'cursor-pointer hover:bg-gray-50' : ''
+          }`}
+        >
+          <td className="px-4 py-3 text-gray-900">{scan.repo_url}</td>
+          <td className="px-4 py-3">
+            {getStatusBadge(scan.scan_status, scan.current_status)}
+          </td>
+          <td className="px-4 py-3 text-gray-900">
+            {new Date(scan.last_scanned).toLocaleString()}
+          </td>
+          <td className="px-4 py-3 text-gray-900">{fileCountDisplay}</td>
+          <td className="px-4 py-3 text-green-600 font-semibold">
+            {scan.pqc_safe_count || '-'}
+          </td>
+          <td className="px-4 py-3 text-red-600 font-semibold">
+            {scan.pqc_vulnerable_count || '-'}
+          </td>
+          <td className="px-4 py-3">
+            {canView ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleRow(scan.id);
+                }}
+                className="px-3 py-1 bg-white border border-gray-300 rounded text-gray-700 text-sm hover:bg-gray-50"
+              >
+                {isExpanded ? 'Hide' : 'View'}
+              </button>
+            ) : (
+              <button
+                disabled
+                className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-gray-500 text-sm cursor-not-allowed"
+              >
+                {scan.scan_status === 'pending'
+                  ? 'Queued'
+                  : scan.scan_status === 'in_progress'
+                  ? 'Scanning...'
+                  : 'Failed'}
+              </button>
+            )}
+          </td>
+        </tr>
+        {canView && isExpanded && (
+          <tr className="bg-gray-50">
+            <td colSpan={7}>
+              {scanDetailsCache.has(scan.id) ? (
+                renderExpandedContent(scanDetailsCache.get(scan.id)!)
+              ) : (
+                <div className="p-6 text-center text-gray-600">Loading details...</div>
+              )}
+            </td>
+          </tr>
+        )}
+      </>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200">
@@ -389,75 +460,7 @@ const CryptoScanner: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  scans.map((scan) => {
-                    const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
-                    const isExpanded = expandedRows.has(scan.id);
-                    const fileCountDisplay =
-                      scan.scan_status === 'in_progress' && scan.total_files_to_scan > 0
-                        ? `${scan.total_files || 0} / ${scan.total_files_to_scan}`
-                        : scan.total_files || '-';
-
-                    return (
-                      <React.Fragment key={scan.id}>
-                        <tr
-                          onClick={() => canView && toggleRow(scan.id)}
-                          className={`border-b border-gray-200 ${
-                            canView ? 'cursor-pointer hover:bg-gray-50' : ''
-                          }`}
-                        >
-                          <td className="px-4 py-3 text-gray-900">{scan.repo_url}</td>
-                          <td className="px-4 py-3">
-                            {getStatusBadge(scan.scan_status, scan.current_status)}
-                          </td>
-                          <td className="px-4 py-3 text-gray-900">
-                            {new Date(scan.last_scanned).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-gray-900">{fileCountDisplay}</td>
-                          <td className="px-4 py-3 text-green-600 font-semibold">
-                            {scan.pqc_safe_count || '-'}
-                          </td>
-                          <td className="px-4 py-3 text-red-600 font-semibold">
-                            {scan.pqc_vulnerable_count || '-'}
-                          </td>
-                          <td className="px-4 py-3">
-                            {canView ? (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleRow(scan.id);
-                                }}
-                                className="px-3 py-1 bg-white border border-gray-300 rounded text-gray-700 text-sm hover:bg-gray-50"
-                              >
-                                {isExpanded ? 'Hide' : 'View'}
-                              </button>
-                            ) : (
-                              <button
-                                disabled
-                                className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-gray-500 text-sm cursor-not-allowed"
-                              >
-                                {scan.scan_status === 'pending'
-                                  ? 'Queued'
-                                  : scan.scan_status === 'in_progress'
-                                  ? 'Scanning...'
-                                  : 'Failed'}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                        {canView && isExpanded && (
-                          <tr className="bg-gray-50">
-                            <td colSpan={7}>
-                              {scanDetailsCache.has(scan.id) ? (
-                                renderExpandedContent(scanDetailsCache.get(scan.id)!)
-                              ) : (
-                                <div className="p-6 text-center text-gray-600">Loading details...</div>
-                              )}
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
+                  scans.map((scan) => <ScanRow key={scan.id} scan={scan} />)
                 )}
               </tbody>
             </table>
@@ -490,7 +493,7 @@ const AlgorithmSection: React.FC<{
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
         {algorithms.map((algo, idx) => (
-          <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
+          <div key={`${algo.name}-${idx}`} className="bg-white border border-gray-200 rounded-lg p-4">
             <div className="text-base font-semibold text-gray-900 mb-1">{algo.name}</div>
             <div className="text-sm text-gray-600 mb-3">{algo.category}</div>
             <div className="flex gap-4 pt-3 border-t border-gray-200 text-sm text-gray-600">
