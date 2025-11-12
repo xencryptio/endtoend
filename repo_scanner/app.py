@@ -935,24 +935,56 @@ def process_scan_job(repo_id: int, repo_url: str):
                     break
 
 
+# ===========================================
+# 🚀 MULTI-SCAN QUEUE WORKER IMPLEMENTATION
+# ===========================================
+
+MAX_CONCURRENT_SCANS = 3   # You can tune this safely
+active_scans = set()
+lock = threading.Lock()
+
+
+def process_scan_wrapper(repo_id: int, repo_url: str):
+    """Wrapper to ensure cleanup of active_scans set even on error."""
+    try:
+        process_scan_job(repo_id, repo_url)
+    finally:
+        with lock:
+            active_scans.discard(repo_id)
+        print(f"✅ Completed and released repo ID {repo_id}")
+
+
 def job_queue_worker():
-    """Background worker that processes pending scans every 5 seconds"""
-    print("🔄 Job queue worker started")
-    
+    """Multi-threaded queue worker for concurrent scans."""
+    print(f"🔄 Job queue worker started (max {MAX_CONCURRENT_SCANS} concurrent scans)")
+
     while True:
         try:
-            # Get pending scans
             pending_scans = db.get_pending_scans()
-            
-            if pending_scans:
-                # Process the first pending scan
-                scan = pending_scans[0]
-                print(f"📋 Processing scan job: {scan['repo_url']} (ID: {scan['id']})")
-                process_scan_job(scan['id'], scan['repo_url'])
-            
-            # Wait 5 seconds before checking again
-            time.sleep(5)
-            
+
+            if not pending_scans:
+                time.sleep(3)
+                continue
+
+            for scan in pending_scans:
+                with lock:
+                    if scan['id'] in active_scans:
+                        continue
+                    if len(active_scans) >= MAX_CONCURRENT_SCANS:
+                        break  # Respect concurrency limit
+                    active_scans.add(scan['id'])
+
+                print(f"⚙️  Starting scan: {scan['repo_url']} (ID: {scan['id']})")
+
+                thread = threading.Thread(
+                    target=process_scan_wrapper,
+                    args=(scan['id'], scan['repo_url']),
+                    daemon=True
+                )
+                thread.start()
+
+            time.sleep(3)
+
         except Exception as e:
             print(f"❌ Error in job queue worker: {e}", file=sys.stderr)
             time.sleep(5)
@@ -1022,14 +1054,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware
+# CORS middleware must be added BEFORE routes
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, you should restrict this to your frontend's origin
+    allow_origins=["*"],  # Allow all origins in development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 db = Database()
 
