@@ -994,7 +994,7 @@ def job_queue_worker():
 
 # Pydantic Models for Request/Response Validation
 class ScanRequest(BaseModel):
-    repo_url: HttpUrl
+    repo_url: str
 
 class ScanQueueResponse(BaseModel):
     repo_id: int
@@ -1070,7 +1070,7 @@ db = Database()
 worker_thread = threading.Thread(target=job_queue_worker, daemon=True)
 worker_thread.start()
 
-@app.post('/api/scan', response_model=ScanDetailsResponse, status_code=status.HTTP_200_OK, responses={202: {"model": ScanQueueResponse}})
+@app.post('/api/scan', status_code=status.HTTP_200_OK)
 async def scan_repository_endpoint(scan_request: ScanRequest):
     """Queue a scan request (checks cache first)"""
     repo_url = str(scan_request.repo_url)
@@ -1182,7 +1182,7 @@ if __name__ == '__main__':
     uvicorn.run(
         "app:app", 
         host='0.0.0.0', 
-        port=8003,
+        port=8001,
         log_level='info',
         reload=True
     )

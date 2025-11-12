@@ -48,12 +48,30 @@ const CryptoScanner: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   useEffect(() => {
     loadHistory();
   }, []);
 
   const showStatusMessage = (message: string, type: StatusType = 'info') => {
+    setStatusMessage(message);
+    setStatusType(type);
+    setShowStatus(true);
+    setTimeout(() => setShowStatus(false), 5000);
+  };
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    
+    const interval = setInterval(() => {
+      loadHistory();
+    }, 3000); // Refresh every 3 seconds
+    
+    return () => clearInterval(interval);
+  }, [autoRefresh]);
+
+  const showStatusMessageWithTimeout = (message: string, type: StatusType = 'info') => {
     setStatusMessage(message);
     setStatusType(type);
     setShowStatus(true);
@@ -88,25 +106,29 @@ const CryptoScanner: React.FC = () => {
       });
 
       const data = await response.json();
-
+  
       if (!response.ok) {
         throw new Error(data.detail || 'Scan failed');
       }
-
+  
       if (data.cached) {
-        showStatusMessage('✓ Using cached scan results', 'success');
+        showStatusMessageWithTimeout('✓ Using cached scan results', 'success');
       } else {
-        showStatusMessage('✓ Scan queued successfully! Click "Refresh" to check progress.', 'success');
+        showStatusMessageWithTimeout('✓ Scan queued successfully! Auto-refreshing...', 'success');
+        setAutoRefresh(true); // Start auto-refresh
+        
+        // Stop auto-refresh after 5 minutes
+        setTimeout(() => setAutoRefresh(false), 300000);
       }
-
+  
       await loadHistory();
     } catch (error: any) {
       if (error.name === 'TimeoutError') {
-        showStatusMessage('Request timeout - Please check if the backend is running', 'error');
+        showStatusMessageWithTimeout('Request timeout - Please check if the backend is running', 'error');
       } else if (error.message.includes('Failed to fetch')) {
-        showStatusMessage('Cannot connect to backend server. Ensure Flask is running.', 'error');
+        showStatusMessageWithTimeout('Cannot connect to backend server. Ensure backend is running.', 'error');
       } else {
-        showStatusMessage(error.message, 'error');
+        showStatusMessageWithTimeout(error.message, 'error');
       }
     } finally {
       setTimeout(() => setIsScanning(false), 2000);
@@ -118,6 +140,13 @@ const CryptoScanner: React.FC = () => {
     await loadHistory();
     setTimeout(() => setIsRefreshing(false), 500);
   };
+
+  useEffect(() => {
+    const hasInProgress = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending');
+    if (!hasInProgress && autoRefresh) {
+      setAutoRefresh(false);
+    }
+  }, [scans, autoRefresh]);
 
   const toggleRow = async (scanId: number) => {
     const newExpandedRows = new Set(expandedRows);
@@ -412,10 +441,12 @@ const CryptoScanner: React.FC = () => {
             <button
               onClick={refreshHistory}
               disabled={isRefreshing}
-              className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              className={`px-4 py-2 bg-white border rounded-lg text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors ${
+                autoRefresh ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+              }`}
             >
-              <RefreshCw className={`w-4 h-4 inline mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
+              <RefreshCw className={`w-4 h-4 inline mr-2 ${isRefreshing || autoRefresh ? 'animate-spin' : ''}`} />
+              {autoRefresh ? 'Auto-refreshing...' : 'Refresh'}
             </button>
           </div>
 
