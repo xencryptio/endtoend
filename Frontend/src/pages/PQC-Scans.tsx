@@ -53,7 +53,21 @@ interface AuditResult {
   result_id: string;
   agent_id: string;
   task_id: string;
-  audit_results: any;
+  audit_results: {
+    _metadata?: AuditMetadata; // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Linux structure
+    with_sudo?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    without_sudo?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Windows structure
+    cryptoapi_info?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    tls_ssl_configuration?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    certificate_stores?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    installed_crypto_software?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Common sections
+    system_context?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    hardware_crypto?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    system_security?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  };
   received_at: string;
   submitted_at: string;
 }
@@ -71,15 +85,21 @@ interface TaskResultPair {
   result: AuditResult | null;
 }
 
-// 1. Data Structure Organization
+interface AuditMetadata {
+  hostname: string;
+  timestamp: string;
+  platform: 'Windows' | 'Linux';
+  audit_type: string;
+}
+
 interface SectionData {
   title: string;
   icon: React.ReactNode;
   color: string;
-  data: any;
+  data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   subsections?: {
     title: string;
-    data: any;
+    data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   }[];
 }
 
@@ -131,331 +151,717 @@ const StatusBadge: React.FC<{ status: boolean | string; label?: string }> = ({ s
   );
 };
 
-// 2. Data Processing Function
-const processAuditResults = (auditResults: any): SectionData[] => { // eslint-disable-line @typescript-eslint/no-explicit-any
-  const sections: SectionData[] = [];
-
-  // System Context Section
-  if (auditResults.system_context) {
-    sections.push({
-      title: 'System Context',
-      icon: <Server size={18} />,
-      color: 'blue',
-      data: {
-        'Operating System': auditResults.system_context.os_info, // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-        'Kernel Version': auditResults.system_context.kernel_version,
-        'Crypto Modules Loaded': auditResults.system_context.crypto_modules?.length || 0
-      }
-    });
+const detectOS = (auditResults: any): 'Windows' | 'Linux' => {
+  // Method 1: Check for Windows-specific sections
+  if (auditResults.cryptoapi_info || auditResults.tls_ssl_configuration) {
+    return 'Windows';
   }
-
-  // OpenSSL Crypto Section
-  if (auditResults.openssl_crypto) {
-    const openssl = auditResults.openssl_crypto;
-    
-    // Build Available Algorithms subsection with cleaner format
-    const availableAlgos: any[] = [];
-    if (openssl.available_algorithms) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      Object.entries(openssl.available_algorithms).forEach(([key, value]: [string, any]) => {
-        if (value.available) {
-          availableAlgos.push({
-            'Algorithm': key.toUpperCase(),
-            'Status': '✓ Available'
-          });
-        }
-      });
-    }
-
-    // Build Cipher Distribution
-    const cipherDist: any[] = [];
-    if (openssl.cipher_information?.cipher_type_distribution) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      Object.entries(openssl.cipher_information.cipher_type_distribution).forEach(([key, value]) => {
-        const readableKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        cipherDist.push({
-          'Type': readableKey,
-          'Count': `${value} ciphers`
-        });
-      });
-    }
-
-    // Build Protocol Support
-    const protocols: any[] = [];
-    if (openssl.protocol_support) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      openssl.protocol_support
-        .filter((proto: any) => proto.available)
-        .forEach((proto: any) => {
-          protocols.push({
-            'Protocol': proto.protocol.toUpperCase().replace('_', '.'),
-            'Status': '✓ Enabled',
-            'Cipher Count': proto.cipher_count
-          });
-      });
-    }
-
-    // Build Cipher Details
-    const cipherDetails: any[] = [];
-    if (openssl.cipher_information?.cipher_details) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      openssl.cipher_information.cipher_details.slice(0, 10).forEach((cipher: any) => {
-        cipherDetails.push({
-          'Cipher Name': cipher.name,
-          'Type': cipher.type.replace(/_/g, ' ')
-        });
-      });
-    }
-
-    sections.push({
-      title: 'OpenSSL Configuration',
-      icon: <Lock size={18} />,
-      color: 'green',
-      data: {
-        'OpenSSL Version': openssl.version_details?.split('\n')[0] || 'N/A', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-        'FIPS Mode': openssl.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled',
-        'Total Ciphers': openssl.cipher_information?.total_ciphers || 0,
-        'Platform': openssl.version_details?.split('\n').find((l: string) => l.includes('platform:'))?.split(':')[1]?.trim() || 'N/A'
-      },
-      subsections: [
-        {
-          title: 'Available Hash & Cipher Algorithms',
-          data: availableAlgos
-        },
-        {
-          title: 'Cipher Type Distribution',
-          data: cipherDist
-        },
-        {
-          title: 'Available Protocol Support',
-          data: protocols
-        },
-        {
-          title: 'Cipher Details (Top 10)',
-          data: cipherDetails
-        }
-      ]
-    });
+  
+  // Method 2: Check for Linux-specific structure
+  if (auditResults.with_sudo || auditResults.without_sudo) {
+    return 'Linux';
   }
-
-  // SSH Configuration Section
-  if (auditResults.ssh_crypto) {
-    const ssh = auditResults.ssh_crypto;
-    
-    // Build Configured Ciphers
-    const ciphers: any[] = [];
-    if (ssh.configuration?.configured_ciphers) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      ssh.configuration.configured_ciphers.ciphers?.forEach((cipher: string) => {
-        ciphers.push({ 'Cipher': cipher });
-      });
-    }
-
-    // Build MACs
-    const macs: any[] = [];
-    if (ssh.configuration?.configured_macs) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      ssh.configuration.configured_macs.macs?.forEach((mac: string) => {
-        macs.push({ 'MAC': mac });
-      });
-    }
-
-    // Build Key Exchange
-    const kex: any[] = [];
-    if (ssh.configuration?.configured_kex) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      ssh.configuration.configured_kex.kex_algorithms?.forEach((algo: string) => {
-        kex.push({ 'Algorithm': algo });
-      });
-    }
-
-    // Build Host Key Algorithms
-    const hostKeys: any[] = [];
-    if (ssh.configuration?.host_key_algorithms) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      ssh.configuration.host_key_algorithms.algorithms?.forEach((algo: string) => {
-        hostKeys.push({ 'Algorithm': algo });
-      });
-    }
-
-    sections.push({
-      title: 'SSH Configuration',
-      icon: <Network size={18} />,
-      color: 'purple',
-      data: {
-        'SSH Version': ssh.version_info || 'Not Available', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-        'Protocol Version': ssh.configuration?.protocol_version || 'N/A',
-        'Distribution': ssh.version_details?.distribution || 'N/A',
-        'Total Ciphers': ssh.configuration?.configured_ciphers?.count || 0,
-        'Total MACs': ssh.configuration?.configured_macs?.count || 0
-      },
-      subsections: [
-        {
-          title: `Configured Ciphers (${ciphers.length})`,
-          data: ciphers
-        },
-        {
-          title: `Message Authentication Codes (${macs.length})`,
-          data: macs
-        },
-        {
-          title: `Key Exchange Algorithms (${kex.length})`,
-          data: kex
-        },
-        {
-          title: `Host Key Algorithms (${hostKeys.length})`,
-          data: hostKeys
-        }
-      ]
-    });
+  
+  // Method 3: Check _metadata if present
+  if (auditResults._metadata?.platform) {
+    return auditResults._metadata.platform === 'Windows' ? 'Windows' : 'Linux';
   }
-
-  // Certificates Section
-  if (auditResults.certificates) {
-    const certSummary: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
-      'Total Certificates Found': auditResults.certificates.certificates?.length || 0,
-      'Search Paths Used': auditResults.certificates.search_paths_used?.length || 0
-    };
-
-    const certSubsections = auditResults.certificates.certificates?.map((cert: any, idx: number) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-      const certName = cert.path.split('/').pop() || `Certificate ${idx + 1}`;
-      return {
-          title: `${idx + 1}. ${certName}`,
-          data: {
-            'File Path': cert.path,
-            'Key Algorithm': cert.crypto_information.key_algorithm,
-            'Key Size': `${cert.crypto_information.key_size} bits`,
-            'Signature Algorithm': cert.crypto_information.signature_algorithm,
-            'Uses SHA-1': cert.crypto_information.characteristics?.includes('uses_sha1_signature') ? '⚠️ Yes' : '✓ No',
-            'Uses SHA-256': cert.crypto_information.characteristics?.includes('uses_sha256_signature') ? '✓ Yes' : 'No',
-            'RSA Algorithm': cert.crypto_information.characteristics?.includes('rsa_algorithm') ? '✓ Yes' : 'No'
-          }
-      };
-    }) || [];
-
-    sections.push({
-      title: 'Certificates',
-      icon: <FileText size={18} />,
-      color: 'amber',
-      data: certSummary,
-      subsections: certSubsections
-    });
-  }
-
-  // Hardware Crypto Features Section
-  if (auditResults.hardware_crypto) {
-    const hw = auditResults.hardware_crypto;
-    
-    // Build CPU Features with readable names
-    const cpuFeatures: any[] = [];
-    if (hw.cpu_crypto_features) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      const featureNames: any = {
-        'aes_instructions': 'AES-NI',
-        'random_number_generator': 'Hardware RNG',
-        'secure_random_seed': 'Secure Random Seed',
-        'sha_extensions': 'SHA Extensions',
-        'advanced_vector_extensions': 'AVX Support',
-        'advanced_vector_extensions_2': 'AVX2 Support',
-        'carry_less_multiplication': 'CLMUL Support'
-      };
-      
-      Object.entries(hw.cpu_crypto_features).forEach(([key, value]) => {
-        const readableName = featureNames[key] || key;
-        if (value) {
-          cpuFeatures.push({
-            'Feature': readableName,
-            'Status': '✓ Supported'
-          });
-        }
-      });
-    }
-
-    // Build Devices Info
-    const devices: any[] = [];
-    if (hw.random_devices && hw.random_devices.length > 0) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      devices.push({ 'Device Type': 'Random Devices', 'Devices': hw.random_devices.join(', ') });
-    }
-    if (hw.tpm_devices && hw.tpm_devices.length > 0) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      devices.push({ 'Device Type': 'TPM Devices', 'Devices': hw.tpm_devices.join(', ') });
-    } else {
-      devices.push({ 'Device Type': 'TPM Devices', 'Devices': 'None Found' });
-    }
-    if (hw.crypto_devices && hw.crypto_devices.length > 0) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      devices.push({ 'Device Type': 'Crypto Devices', 'Devices': hw.crypto_devices.join(', ') });
-    } else {
-      devices.push({ 'Device Type': 'Crypto Devices', 'Devices': 'None Found' });
-    }
-
-    sections.push({
-      title: 'Hardware Crypto Features',
-      icon: <Cpu size={18} />,
-      color: 'indigo',
-      data: {
-        'CPU Model': hw.cpu_information || 'N/A', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-        'Total Crypto Features': hw.crypto_feature_count || 0
-      },
-      subsections: [
-        {
-          title: 'Enabled CPU Cryptographic Features',
-          data: cpuFeatures
-        },
-        {
-          title: 'Hardware Devices',
-          data: devices
-        }
-      ]
-    });
-  }
-
-  // System Security Section
-  if (auditResults.system_security) {
-    const security = auditResults.system_security;
-    
-    // Build Crypto Libraries list
-    const libraries: any[] = [];
-    if (security.crypto_libraries) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      (security.crypto_libraries as string[]).forEach((lib: string) => {
-        const libName = lib.split('=>')[0]?.trim() || lib;
-        libraries.push({ 'Library': libName });
-      });
-    }
-
-    // Build Kernel Algorithms
-    const kernelAlgos: { Algorithm: string; Category: string; }[] = [];
-    if (security.kernel_crypto_algorithms) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-      (security.kernel_crypto_algorithms as string[]).forEach((algo: string) => {
-        const algoName = algo.split(':')[1]?.trim() || algo;
-        let category = 'Other';
-        if (algoName.includes('hmac')) category = 'HMAC'; // eslint-disable-line no-param-reassign
-        else if (algoName.includes('gcm')) category = 'GCM';
-        else if (algoName.includes('aes')) category = 'AES';
-        
-        kernelAlgos.push({
-          'Algorithm': algoName,
-          'Category': category
-        });
-      });
-    }
-
-    sections.push({ // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-      title: 'System Security',
-      icon: <Shield size={18} />,
-      color: 'red',
-      data: {
-        'FIPS Kernel Mode': security.fips_kernel_mode ? '✓ Enabled' : '✗ Disabled', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
-        'System Entropy': `${security.system_entropy} bits`,
-        'Crypto Libraries': security.crypto_libraries?.length || 0,
-        'Kernel Algorithms': security.kernel_crypto_algorithms?.length || 0
-      },
-      subsections: [
-        {
-          title: 'Cryptographic Libraries',
-          data: libraries
-        },
-        {
-          title: 'Kernel Crypto Algorithms',
-          data: kernelAlgos
-        }
-      ]
-    });
-  }
-
-  return sections; // eslint-disable-line @typescript-eslint/no-unsafe-return
+  
+  // Default fallback
+  return 'Linux';
 };
 
-// 3. Component for Section Display with Document 2 styling
+const processAuditResults = (auditResults: any): SectionData[] => { // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  try {
+    const os = detectOS(auditResults);
+    
+    // Normalize data - get the actual audit data regardless of OS
+    let normalizedData: any;
+
+    if (os === 'Windows') {
+      // Windows data is already at the root level
+      normalizedData = auditResults;
+    } else {
+      // Linux data needs extraction from with_sudo/without_sudo
+      normalizedData = auditResults.with_sudo || auditResults.without_sudo || auditResults;
+    }
+
+    const sections: SectionData[] = [];
+
+    // System Context Section
+    if (normalizedData.system_context) {
+      sections.push({
+        title: 'System Context',
+        icon: <Server size={18} />,
+        color: 'blue',
+        data: {
+          'Operating System': normalizedData.system_context.os_info,
+          'Kernel Version': normalizedData.system_context.kernel_version,
+          'Crypto Modules Loaded': normalizedData.system_context.crypto_modules?.length || 0
+        }
+      });
+    }
+
+    if (os === 'Windows' && normalizedData.cryptoapi_info) {
+      const cryptoapi = normalizedData.cryptoapi_info;
+
+      sections.push({
+        title: 'Windows CryptoAPI',
+        icon: <Key size={18} />,
+        color: 'blue',
+        data: {
+          'FIPS Mode': cryptoapi.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled',
+          'Crypto Providers': cryptoapi.cryptographic_providers?.count || 0,
+          'Registered Algorithms': cryptoapi.registered_oid_algorithms?.count || 0,
+          'ECC Curves': cryptoapi.ecc_curves_registered?.count || 0
+        },
+        subsections: [
+          {
+            title: 'Cryptographic Providers',
+            data: (cryptoapi.cryptographic_providers?.providers || []).map((p: string) => ({
+              'Provider': p
+            }))
+          },
+          // Add more subsections for algorithms, curves, etc.
+        ]
+      });
+    }
+
+    if (os === 'Windows' && normalizedData.tls_ssl_configuration) {
+      const tlsConfig = normalizedData.tls_ssl_configuration;
+
+      // Build protocol status
+      const protocolStatus: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (tlsConfig.protocol_configurations) {
+        tlsConfig.protocol_configurations.forEach((proto: any) => {
+          protocolStatus.push({
+            'Protocol': proto.protocol,
+            'Type': proto.type,
+            'Client': proto.client_status,
+            'Server': proto.server_status
+          });
+        });
+      }
+
+      sections.push({
+        title: 'TLS/SSL Configuration',
+        icon: <Lock size={18} />,
+        color: 'green',
+        data: {
+          'Total Cipher Suites': tlsConfig.cipher_suites?.total_cipher_suites || 0,
+          'Cipher Suite Order': tlsConfig.cipher_suite_order?.count || 0,
+          'Registered Hashes': tlsConfig.registered_hash_algorithms?.count || 0
+        },
+        subsections: [
+          {
+            title: 'Protocol Configurations',
+            data: protocolStatus
+          },
+          {
+            title: 'Cipher Suite Distribution',
+            data: Object.entries(tlsConfig.cipher_suites?.cipher_type_distribution || {}).map(([key, value]) => ({
+              'Type': key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+              'Count': `${value} ciphers`
+            }))
+          },
+          {
+            title: 'Cipher Details',
+            data: (tlsConfig.cipher_suites?.cipher_details || []).slice(0, 15).map((c: any) => ({
+              'Name': c.name,
+              'Type': c.type,
+              'Protocols': c.protocols,
+              'Key Exchange': c.key_exchange
+            }))
+          }
+        ]
+      });
+    }
+
+    if (os === 'Linux' && normalizedData.openssl_crypto) {
+      const openssl = normalizedData.openssl_crypto;
+
+      // Build Available Algorithms subsection with cleaner format
+      const availableAlgos: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (openssl.available_algorithms) {
+        Object.entries(openssl.available_algorithms).forEach(([key, value]: [string, any]) => {
+          if (value.available) {
+            availableAlgos.push({
+              'Algorithm': key.toUpperCase(),
+              'Status': '✓ Available'
+            });
+          }
+        });
+      }
+
+      // Build Cipher Distribution
+      const cipherDist: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (openssl.cipher_information?.cipher_type_distribution) {
+        Object.entries(openssl.cipher_information.cipher_type_distribution).forEach(([key, value]) => {
+          const readableKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+          cipherDist.push({
+            'Type': readableKey,
+            'Count': `${value} ciphers`
+          });
+        });
+      }
+
+      // Build Protocol Support
+      const protocols: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (openssl.protocol_support) {
+        openssl.protocol_support
+          .filter((proto: any) => proto.available)
+          .forEach((proto: any) => {
+            protocols.push({
+              'Protocol': proto.protocol.toUpperCase().replace('_', '.'),
+              'Status': '✓ Enabled',
+              'Cipher Count': proto.cipher_count
+            });
+        });
+      }
+
+      // Build Cipher Details
+      const cipherDetails: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (openssl.cipher_information?.cipher_details) {
+        openssl.cipher_information.cipher_details.slice(0, 10).forEach((cipher: any) => {
+          cipherDetails.push({
+            'Cipher Name': cipher.name,
+            'Type': cipher.type.replace(/_/g, ' ')
+          });
+        });
+      }
+
+      sections.push({
+        title: 'OpenSSL Configuration',
+        icon: <Lock size={18} />,
+        color: 'green',
+        data: {
+          'OpenSSL Version': openssl.version_details?.split('\n')[0] || 'N/A',
+          'FIPS Mode': openssl.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled',
+          'Total Ciphers': openssl.cipher_information?.total_ciphers || 0,
+          'Platform': openssl.version_details?.split('\n').find((l: string) => l.includes('platform:'))?.split(':')[1]?.trim() || 'N/A'
+        },
+        subsections: [
+          {
+            title: 'Available Hash & Cipher Algorithms',
+            data: availableAlgos
+          },
+          {
+            title: 'Cipher Type Distribution',
+            data: cipherDist
+          },
+          {
+            title: 'Available Protocol Support',
+            data: protocols
+          },
+          {
+            title: 'Cipher Details (Top 10)',
+            data: cipherDetails
+          }
+        ]
+      });
+    }
+
+    if (os === 'Linux' && normalizedData.ssh_crypto) {
+      const ssh = normalizedData.ssh_crypto;
+
+      // Build Configured Ciphers
+      const ciphers: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (ssh.configuration?.configured_ciphers) {
+        ssh.configuration.configured_ciphers.ciphers?.forEach((cipher: string) => {
+          ciphers.push({ 'Cipher': cipher });
+        });
+      }
+
+      // Build MACs
+      const macs: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (ssh.configuration?.configured_macs) {
+        ssh.configuration.configured_macs.macs?.forEach((mac: string) => {
+          macs.push({ 'MAC': mac });
+        });
+      }
+
+      // Build Key Exchange
+      const kex: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (ssh.configuration?.configured_kex) {
+        ssh.configuration.configured_kex.kex_algorithms?.forEach((algo: string) => {
+          kex.push({ 'Algorithm': algo });
+        });
+      }
+
+      // Build Host Key Algorithms
+      const hostKeys: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (ssh.configuration?.host_key_algorithms) {
+        ssh.configuration.host_key_algorithms.algorithms?.forEach((algo: string) => {
+          hostKeys.push({ 'Algorithm': algo });
+        });
+      }
+      
+      sections.push({
+        title: 'SSH Configuration',
+        icon: <Network size={18} />,
+        color: 'purple',
+        data: {
+          'SSH Version': ssh.version_info || 'Not Available', // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+          'Protocol Version': ssh.configuration?.protocol_version || 'N/A',
+          'Distribution': ssh.version_details?.distribution || 'N/A',
+          'Total Ciphers': ssh.configuration?.configured_ciphers?.count || 0,
+          'Total MACs': ssh.configuration?.configured_macs?.count || 0
+        },
+        subsections: [
+          {
+            title: `Configured Ciphers (${ciphers.length})`,
+            data: ciphers
+          },
+          {
+            title: `Message Authentication Codes (${macs.length})`,
+            data: macs
+          },
+          {
+            title: `Key Exchange Algorithms (${kex.length})`,
+            data: kex
+          },
+          {
+            title: `Host Key Algorithms (${hostKeys.length})`,
+            data: hostKeys
+          }
+        ]
+      });
+    }
+
+    if (normalizedData.certificates || (os === 'Windows' && normalizedData.certificate_stores)) {
+      if (os === 'Linux' && normalizedData.certificates) {
+        const certSummary: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
+          'Total Certificates Found': normalizedData.certificates.certificates?.length || 0,
+          'Search Paths Used': normalizedData.certificates.search_paths_used?.length || 0
+        };
+
+        const certSubsections = normalizedData.certificates.certificates?.map((cert: any, idx: number) => {
+          const certName = cert.path.split('/').pop() || `Certificate ${idx + 1}`; // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+          return {
+              title: `${idx + 1}. ${certName}`,
+              data: {
+                'File Path': cert.path,
+                'Key Algorithm': cert.crypto_information.key_algorithm,
+                'Key Size': `${cert.crypto_information.key_size} bits`,
+                'Signature Algorithm': cert.crypto_information.signature_algorithm,
+                'Uses SHA-1': cert.crypto_information.characteristics?.includes('uses_sha1_signature') ? '⚠️ Yes' : '✓ No',
+                'Uses SHA-256': cert.crypto_information.characteristics?.includes('uses_sha256_signature') ? '✓ Yes' : 'No',
+                'RSA Algorithm': cert.crypto_information.characteristics?.includes('rsa_algorithm') ? '✓ Yes' : 'No'
+              }
+          };
+        }) || [];
+
+        sections.push({
+          title: 'Certificates',
+          icon: <FileText size={18} />,
+          color: 'amber',
+          data: certSummary,
+          subsections: certSubsections
+        });
+      } else if (os === 'Windows' && normalizedData.certificate_stores) {
+        const stores = normalizedData.certificate_stores;
+
+        // Aggregate all certificates from all stores
+        const allCerts: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+        let totalCount = 0;
+
+        Object.entries(stores).forEach(([, storeData]: [string, any]) => {
+          if (storeData.certificates) {
+            totalCount += storeData.certificate_count || 0; // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+            
+            storeData.certificates.forEach((cert: any) => {
+              allCerts.push({
+                'Store': storeData.store_name,
+                'Subject': cert.subject,
+                'Issuer': cert.issuer,
+                'Algorithm': cert.public_key_algorithm,
+                'Key Size': `${cert.public_key_size} bits`,
+                'Signature': cert.signature_algorithm,
+                'Valid Until': cert.not_after,
+                'Private Key': cert.has_private_key ? '✓' : '✗'
+              });
+            });
+          }
+        });
+
+        sections.push({
+          title: 'Certificate Stores',
+          icon: <FileText size={18} />,
+          color: 'amber',
+          data: {
+            'Total Certificates': totalCount,
+            'Certificate Stores': Object.keys(stores).length
+          },
+          subsections: [
+            {
+              title: 'Certificates (All Stores)',
+              data: allCerts.slice(0, 20) // Show first 20
+            }
+          ]
+        });
+      }
+    }
+
+    if (normalizedData.hardware_crypto) {
+      const hw = normalizedData.hardware_crypto;
+
+      // Build CPU Features with readable names
+      const cpuFeatures: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (hw.cpu_crypto_features) {
+        const featureNames: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
+          'aes_instructions': 'AES-NI',
+          'random_number_generator': 'Hardware RNG',
+          'secure_random_seed': 'Secure Random Seed',
+          'sha_extensions': 'SHA Extensions',
+          'advanced_vector_extensions': 'AVX Support',
+          'advanced_vector_extensions_2': 'AVX2 Support',
+          'carry_less_multiplication': 'CLMUL Support'
+        };
+
+        Object.entries(hw.cpu_crypto_features).forEach(([key, value]) => {
+          const readableName = featureNames[key] || key;
+          if (value) {
+            cpuFeatures.push({
+              'Feature': readableName,
+              'Status': '✓ Supported'
+            });
+          }
+        });
+      }
+
+      // Build Devices Info
+      const devices: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (hw.random_devices && hw.random_devices.length > 0) {
+        devices.push({ 'Device Type': 'Random Devices', 'Devices': hw.random_devices.join(', ') });
+      }
+      if (hw.tpm_devices && hw.tpm_devices.length > 0) {
+        devices.push({ 'Device Type': 'TPM Devices', 'Devices': hw.tpm_devices.join(', ') });
+      } else {
+        devices.push({ 'Device Type': 'TPM Devices', 'Devices': 'None Found' });
+      }
+      if (hw.crypto_devices && hw.crypto_devices.length > 0) {
+        devices.push({ 'Device Type': 'Crypto Devices', 'Devices': hw.crypto_devices.join(', ') });
+      } else {
+        devices.push({ 'Device Type': 'Crypto Devices', 'Devices': 'None Found' });
+      }
+      
+      sections.push({
+        title: 'Hardware Crypto Features',
+        icon: <Cpu size={18} />,
+        color: 'indigo',
+        data: {
+          'CPU Model': hw.cpu_information || 'N/A',
+          'Total Crypto Features': hw.crypto_feature_count || 0
+        },
+        subsections: [
+          {
+            title: 'Enabled CPU Cryptographic Features',
+            data: cpuFeatures
+          },
+          {
+            title: 'Hardware Devices',
+            data: devices
+          }
+        ]
+      });
+    }
+
+    if (os === 'Windows' && normalizedData.installed_crypto_software?.installed_crypto_software) {
+      const software = normalizedData.installed_crypto_software.installed_crypto_software;
+
+      sections.push({
+        title: 'Installed Crypto Software',
+        icon: <HardDrive size={18} />,
+        color: 'purple',
+        data: {
+          'Installed Applications': software.count || 0
+        },
+        subsections: [
+          {
+            title: 'Crypto-Related Software',
+            data: (software.software || []).map((app: any) => ({
+              'Application': app.DisplayName,
+              'Version': app.DisplayVersion,
+              'Publisher': app.Publisher,
+              'Install Date': app.InstallDate || 'Unknown'
+            }))
+          }
+        ]
+      });
+    }
+
+    if (normalizedData.system_security) {
+      const security = normalizedData.system_security;
+
+      // Build Crypto Libraries list
+      const libraries: any[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (security.crypto_libraries) {
+        (security.crypto_libraries as string[]).forEach((lib: string) => {
+          const libName = lib.split('=>')[0]?.trim() || lib;
+          libraries.push({ 'Library': libName });
+        });
+      }
+      
+      // Build Kernel Algorithms
+      const kernelAlgos: { Algorithm: string; Category: string; }[] = [];
+      if (security.kernel_crypto_algorithms) {
+        (security.kernel_crypto_algorithms as string[]).forEach((algo: string) => {
+          const algoName = algo.split(':')[1]?.trim() || algo; // eslint-disable-line @typescript-eslint/no-unsafe-member-access
+          let category = 'Other';
+          if (algoName.includes('hmac')) category = 'HMAC'; // eslint-disable-line no-param-reassign
+          else if (algoName.includes('gcm')) category = 'GCM';
+          else if (algoName.includes('aes')) category = 'AES';
+          
+          kernelAlgos.push({
+            'Algorithm': algoName,
+            'Category': category
+          });
+        });
+      }
+
+      sections.push({
+        title: 'System Security',
+        icon: <Shield size={18} />,
+        color: 'red',
+        data: {
+          'FIPS Kernel Mode': security.fips_kernel_mode ? '✓ Enabled' : '✗ Disabled',
+          'System Entropy': `${security.system_entropy} bits`,
+          'Crypto Libraries': security.crypto_libraries?.length || 0,
+          'Kernel Algorithms': security.kernel_crypto_algorithms?.length || 0
+        },
+        subsections: [
+          {
+            title: 'Cryptographic Libraries',
+            data: libraries
+          },
+          {
+            title: 'Kernel Crypto Algorithms',
+            data: kernelAlgos
+          }
+        ]
+      });
+    }
+
+    return sections;
+
+  } catch (error) {
+    console.error('Error processing audit results:', error);
+    // Return error section
+    return [{
+      title: 'Processing Error',
+      icon: <AlertCircle size={18} />,
+      color: 'red',
+      data: {
+        'Error': 'Failed to process audit data',
+        'Details': String(error)
+      }
+    }];
+  }
+};
+
+const AgentResultsView: React.FC<{
+  agentId: string;
+  tasks: Task[];
+  results: AuditResult[];
+  expandedResults: Set<string>;
+  toggleResultDetails: (id: string) => void;
+  onRetryFetch: (agentId: string, taskId: string) => void;
+  retryingResults: Set<string>;
+  getRelativeTime: (date: string) => string;
+}> = ({ agentId, tasks, results, expandedResults, toggleResultDetails, onRetryFetch, retryingResults, getRelativeTime }) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [showRawJson, setShowRawJson] = useState(false);
+
+  const latestResult = useMemo(() => {
+    const completedResults = results
+      .filter(r => r.audit_results)
+      .sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+
+    return completedResults.length > 0 ? completedResults[0] : null;
+  }, [results]);
+
+  const os = latestResult ? detectOS(latestResult.audit_results) : 'Linux';
+
+  const processedSections = useMemo(() => {
+    if (!latestResult) return [];
+    return processAuditResults(latestResult.audit_results);
+  }, [latestResult]);
+
+  const toggleSection = (sectionTitle: string) => {
+    setExpandedSections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(sectionTitle)) {
+        newSet.delete(sectionTitle);
+      } else {
+        newSet.add(sectionTitle);
+      }
+      return newSet;
+    });
+  };
+
+  if (!latestResult) {
+    return (
+      <div className="text-center py-8 text-slate-600 dark:text-slate-400">
+        <AlertCircle className="mx-auto mb-3" size={32} />
+        <p>No audit results available for this agent</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header with metadata */}
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 mb-2">
+              Latest Audit Result
+            </h4>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Submitted: </span>
+                <span className="text-slate-900 dark:text-slate-100">
+                  {new Date(latestResult.submitted_at).toLocaleString()}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">Task ID: </span>
+                <code className="text-xs">{latestResult.task_id.substring(0, 16)}...</code>
+              </div>
+              <div>
+                <span className="text-slate-600 dark:text-slate-400">OS: </span>
+                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                  os === 'Windows' 
+                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                    : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                }`}>
+                  {os}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {os === 'Linux' ? (
+          <>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">OpenSSL Version</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
+                   title={(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.openssl_crypto?.version_details?.split('\n')[0] || 'N/A'}>
+                {((latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.openssl_crypto?.version_details?.split('\n')[0]?.split(' ')[1]) || 'N/A'}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Total Ciphers</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                {(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.openssl_crypto?.cipher_information?.total_ciphers || 0}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Certificates</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                {(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.certificates?.certificates?.length || 0}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">CPU Features</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                {(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.hardware_crypto?.crypto_feature_count || 0}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">FIPS Mode</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                {latestResult?.audit_results.cryptoapi_info?.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled'}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Cipher Suites</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                {latestResult?.audit_results.tls_ssl_configuration?.cipher_suites?.total_cipher_suites || 0}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Certificates</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                {Object.values(latestResult?.audit_results.certificate_stores || {}).reduce((sum: number, store: any) => 
+                  sum + (store.certificate_count || 0), 0)}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Crypto Providers</div>
+              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                {latestResult?.audit_results.cryptoapi_info?.cryptographic_providers?.count || 0}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Sections with Document 2 styling */}
+      <div className="space-y-4">
+        {processedSections.map((section) => (
+          <CollapsibleSection
+            key={section.title}
+            section={section}
+            isExpanded={expandedSections.has(section.title)}
+            onToggle={() => toggleSection(section.title)}
+          />
+        ))}
+        
+        {/* Raw JSON Section */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowRawJson(!showRawJson)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-slate-500 to-slate-600 rounded-lg text-white">
+                <FileText size={18} />
+              </div>
+              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Raw JSON Data</h3>
+            </div>
+            <div className={`transition-transform duration-500 ease-in-out ${showRawJson ? 'rotate-180' : ''}`}>
+              <ChevronDown size={20} className="text-slate-400" />
+            </div>
+          </button>
+          
+          <div 
+            className={`transition-all duration-500 ease-in-out ${
+              showRawJson ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
+            }`}
+            style={{ overflow: showRawJson ? 'visible' : 'hidden' }}
+          >
+            <div className="border-t border-slate-200 dark:border-slate-700">
+              <pre className="p-4 overflow-auto max-h-96 text-xs bg-slate-900 dark:bg-slate-950 text-green-400 font-mono">
+                {JSON.stringify(latestResult.audit_results, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Historical scans summary */}
+      {results.length > 1 && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+            <Clock size={16} />
+            <span className="text-sm font-medium">
+              Showing latest result. {results.length - 1} previous scan{results.length > 2 ? 's' : ''} available in history.
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CollapsibleSection: React.FC<{
   section: SectionData;
   isExpanded: boolean;
@@ -1440,179 +1846,6 @@ const AgentRow: React.FC<{
         </tr>
       )}
     </>
-  );
-};
-
-// 4. Update AgentResultsView Component with Document 2 styling
-const AgentResultsView: React.FC<{
-  agentId: string;
-  tasks: Task[];
-  results: AuditResult[];
-  expandedResults: Set<string>;
-  toggleResultDetails: (id: string) => void;
-  onRetryFetch: (agentId: string, taskId: string) => void;
-  retryingResults: Set<string>;
-  getRelativeTime: (date: string) => string;
-}> = ({ agentId, tasks, results, expandedResults, toggleResultDetails, onRetryFetch, retryingResults, getRelativeTime }) => {
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set()); // eslint-disable-line @typescript-eslint/no-unused-vars
-  const [showRawJson, setShowRawJson] = useState(false);
-
-  // Get only the latest completed result
-  const latestResult = useMemo(() => {
-    const completedResults = results
-      .filter(r => r.audit_results)
-      .sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
-    
-    return completedResults.length > 0 ? completedResults[0] : null;
-  }, [results]);
-
-  const processedSections = useMemo(() => {
-    if (!latestResult) return []; // eslint-disable-line @typescript-eslint/no-unsafe-return
-    
-    const auditData = latestResult.audit_results.with_sudo || 
-                      latestResult.audit_results.without_sudo || 
-                      latestResult.audit_results;
-    
-    return processAuditResults(auditData);
-  }, [latestResult]);
-
-  const toggleSection = (sectionTitle: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
-    setExpandedSections(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(sectionTitle)) {
-        newSet.delete(sectionTitle);
-      } else {
-        newSet.add(sectionTitle);
-      }
-      return newSet;
-    });
-  };
-
-  if (!latestResult) {
-    return (
-      <div className="text-center py-8 text-slate-600 dark:text-slate-400">
-        <AlertCircle className="mx-auto mb-3" size={32} />
-        <p>No audit results available for this agent</p>
-      </div>
-    );
-  }
-
-  const auditData = latestResult.audit_results.with_sudo ||  // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-                    latestResult.audit_results.without_sudo || 
-                    latestResult.audit_results;
-
-  return (
-    <div className="space-y-4">
-      {/* Header with metadata */}
-      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 mb-2">
-              Latest Audit Result
-            </h4>
-            <div className="flex flex-wrap gap-4 text-sm">
-              <div>
-                <span className="text-slate-600 dark:text-slate-400">Submitted: </span>
-                <span className="text-slate-900 dark:text-slate-100">
-                  {new Date(latestResult.submitted_at).toLocaleString()}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-600 dark:text-slate-400">Task ID: </span>
-                <code className="text-xs">{latestResult.task_id.substring(0, 16)}...</code>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">OpenSSL Version</div>
-          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
-               title={auditData.openssl_crypto?.version_details?.split('\n')[0] || 'N/A'}>
-            {auditData.openssl_crypto?.version_details?.split('\n')[0]?.split(' ')[1] || 'N/A'}
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Total Ciphers</div>
-          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
-               title={String(auditData.openssl_crypto?.cipher_information?.total_ciphers || 0)}>
-            {auditData.openssl_crypto?.cipher_information?.total_ciphers || 0}
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Certificates</div>
-          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
-               title={String(auditData.certificates?.certificates?.length || 0)}>
-            {auditData.certificates?.certificates?.length || 0}
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">CPU Features</div>
-          <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
-               title={String(auditData.hardware_crypto?.crypto_feature_count || 0)}>
-            {auditData.hardware_crypto?.crypto_feature_count || 0}
-          </div>
-        </div>
-      </div>
-
-      {/* Sections with Document 2 styling */}
-      <div className="space-y-4">
-        {processedSections.map((section) => (
-          <CollapsibleSection
-            key={section.title}
-            section={section}
-            isExpanded={expandedSections.has(section.title)}
-            onToggle={() => toggleSection(section.title)}
-          />
-        ))}
-        
-        {/* Raw JSON Section */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-          <button
-            onClick={() => setShowRawJson(!showRawJson)}
-            className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-slate-500 to-slate-600 rounded-lg text-white">
-                <FileText size={18} />
-              </div>
-              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Raw JSON Data</h3>
-            </div>
-            <div className={`transition-transform duration-500 ease-in-out ${showRawJson ? 'rotate-180' : ''}`}>
-              <ChevronDown size={20} className="text-slate-400" />
-            </div>
-          </button>
-          
-          <div 
-            className={`transition-all duration-500 ease-in-out ${
-              showRawJson ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
-            }`}
-            style={{ overflow: showRawJson ? 'visible' : 'hidden' }}
-          >
-            <div className="border-t border-slate-200 dark:border-slate-700">
-              <pre className="p-4 overflow-auto max-h-96 text-xs bg-slate-900 dark:bg-slate-950 text-green-400 font-mono">
-                {JSON.stringify(latestResult.audit_results, null, 2)}
-              </pre>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Historical scans summary */}
-      {results.length > 1 && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
-          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-            <Clock size={16} />
-            <span className="text-sm font-medium">
-              Showing latest result. {results.length - 1} previous scan{results.length > 2 ? 's' : ''} available in history.
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
   );
 };
 

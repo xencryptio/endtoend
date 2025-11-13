@@ -195,6 +195,7 @@ class CryptoAgentService:
             payload = {
                 "agent_id": self.agent_id,
                 "task_id": task_id,
+                "os": "Linux",
                 "audit_results": audit_results,
                 "timestamp": datetime.now().isoformat()
             }

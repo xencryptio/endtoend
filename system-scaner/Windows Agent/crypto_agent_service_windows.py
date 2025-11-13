@@ -110,6 +110,7 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
                 "agent_id": self.agent_id,
                 "hostname": self.hostname,
                 "ip_address": self.ip_address,
+                "platform": self.platform,  # ✅ EXPLICIT PLATFORM
                 "os_info": os_info,
                 "kernel_version": platform.release(),
                 "timestamp": datetime.now().isoformat()
@@ -196,9 +197,14 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
             
             logger.info("Cryptographic audit completed successfully")
             
-            # DO NOT save to local storage - results will be sent directly to API
-            return audit_results
+            # ✅ VERIFY PLATFORM IN METADATA
+            if '_metadata' in audit_results:
+                logger.info(f"Platform in audit results: {audit_results['_metadata'].get('platform', 'NOT FOUND')}")
+            else:
+                logger.warning("No _metadata found in audit results!")
             
+            return audit_results
+
         except Exception as e:
             logger.error(f"Error performing crypto audit: {e}")
             return None
@@ -208,12 +214,16 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
         try:
             url = f"{API_BASE_URL}/api/v1/audit/result"
             
+            
             payload = {
                 "agent_id": self.agent_id,
                 "task_id": task_id,
+                "os": "Windows",  # ✅ ADD PLATFORM TO PAYLOAD
                 "audit_results": audit_results,
                 "timestamp": datetime.now().isoformat()
             }
+            
+            logger.info(f"Sending audit results with platform: {platform}")
             
             response = requests.post(url, json=payload, timeout=30)
             
@@ -247,6 +257,7 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
     def main(self):
         """Main service loop"""
         logger.info(f"Crypto Agent Service started (Agent ID: {self.agent_id})")
+        logger.info(f"Platform: {self.platform}")  # ✅ LOG PLATFORM
         logger.info(f"Hostname: {self.hostname}, IP: {self.ip_address}")
         logger.info(f"Running with Administrator privileges: {self.is_admin()}")
         

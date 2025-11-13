@@ -33,7 +33,7 @@ CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 
 # Default configuration
 DEFAULT_CONFIG = {
-    "api_base_url": "http://nipunnegi:9000",
+    "api_base_url": "http://localhost:9000",
     "poll_interval": 5,
     "log_level": "INFO"
 }
