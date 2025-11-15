@@ -14,6 +14,12 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine, Column, String, DateTime, ForeignKey, Text, func
 from sqlalchemy.orm import sessionmaker, relationship, Session, declarative_base
 from sqlalchemy.exc import SQLAlchemyError
+import logging
+
+# Configure logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Crypto Audit API Server")
 
@@ -125,7 +131,7 @@ def get_agent_status(agent: Agent) -> str:
             return "inactive"
         return "active"
     except Exception as e:
-        print(f"[ERROR] Error calculating status for {agent.agent_id}: {e}")
+        logger.error(f"Error calculating status for {agent.agent_id}: {e}")
         return "unknown"
 
 def update_agent_last_seen(db: Session, agent_id: str):
@@ -134,7 +140,7 @@ def update_agent_last_seen(db: Session, agent_id: str):
     if agent:
         agent.last_seen = datetime.now()
         db.commit()
-        print(f"[DEBUG] Updated last_seen for {agent_id}")
+        logger.debug(f"Updated last_seen for {agent_id}")
 
 def get_folder_files(folder_name: str):
     """Get list of files in a folder with their sizes"""
@@ -152,7 +158,7 @@ def get_folder_files(folder_name: str):
                     "modified": datetime.fromtimestamp(file_stat.st_mtime).isoformat()
                 })
     except Exception as e:
-        print(f"Error reading folder {folder_name}: {e}")
+        logger.error(f"Error reading folder {folder_name}: {e}")
     return files_list
 
 # Endpoints
@@ -178,7 +184,7 @@ async def register_agent(registration: AgentRegistration, db: Session = Depends(
             )
             db.add(agent)
         db.commit()
-        print(f"[+] Agent registered: {registration.agent_id} ({registration.hostname})")
+        logger.info(f"Agent registered: {registration.agent_id} ({registration.hostname})")
         return {"success": True, "message": "Agent registered successfully", "agent_id": registration.agent_id}
     except SQLAlchemyError as e:
         db.rollback()
@@ -191,7 +197,7 @@ async def receive_system_info(system_info: SystemInfo, db: Session = Depends(get
         update_agent_last_seen(db, system_info.agent_id)
         agent = db.query(Agent).filter(Agent.agent_id == system_info.agent_id).first()
         status = get_agent_status(agent)
-        print(f"[+] Heartbeat received from: {system_info.agent_id} ({system_info.hostname}) - Status: {status}")
+        logger.info(f"Heartbeat received from: {system_info.agent_id} ({system_info.hostname}) - Status: {status}")
         return {"success": True, "message": "System information received", "agent_id": system_info.agent_id, "status": status}
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Failed to process system info: {str(e)}")
@@ -206,7 +212,7 @@ async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
             task.status = 'in_progress'
             task.started_at = datetime.now()
             db.commit()
-            print(f"[+] Scan task dispatched to agent: {agent_id}")
+            logger.info(f"Scan task dispatched to agent: {agent_id}")
             return FetchActionResponse(scan_flag=True, task_id=task.task_id, message="Crypto audit scan requested")
         return FetchActionResponse(scan_flag=False, message="No pending tasks")
     except SQLAlchemyError as e:
@@ -236,7 +242,7 @@ async def receive_audit_result(audit_data: AuditData, db: Session = Depends(get_
             task.completed_at = datetime.now()
         
         db.commit()
-        print(f"[+] Audit results received from: {audit_data.agent_id} (Task: {audit_data.task_id})")
+        logger.info(f"Audit results received from: {audit_data.agent_id} (Task: {audit_data.task_id})")
         return {"success": True, "message": "Audit results received and stored", "result_id": result_id}
     except SQLAlchemyError as e:
         db.rollback()
@@ -252,14 +258,14 @@ async def trigger_scan(agent_id: str, db: Session = Depends(get_db)):
         
         status = get_agent_status(agent)
         if status == "inactive":
-            print(f"[!] Warning: Triggering scan for inactive agent: {agent_id}")
+            logger.warning(f"Triggering scan for inactive agent: {agent_id}")
         
         task_id = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         new_task = Task(task_id=task_id, agent_id=agent_id, status="pending", created_at=datetime.now())
         db.add(new_task)
         db.commit()
         
-        print(f"[+] Scan triggered for agent: {agent_id} (Task ID: {task_id})")
+        logger.info(f"Scan triggered for agent: {agent_id} (Task ID: {task_id})")
         return {"success": True, "message": "Scan triggered successfully", "task_id": task_id, "agent_id": agent_id, "agent_status": status}
     except SQLAlchemyError as e:
         db.rollback()
@@ -377,12 +383,12 @@ async def download_folder_as_zip(folder_type: str):
     return StreamingResponse(zip_buffer, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={zip_filename}"})
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Starting Crypto Audit API Server v3.2 (PostgreSQL)")
-    print("=" * 60)
-    print(f"Database URL: {DATABASE_URL}")
-    print(f"Agent Timeout: {AGENT_TIMEOUT_MINUTES} minutes")
-    print(f"Agent Folders: {AGENT_FOLDERS}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Starting Crypto Audit API Server v3.2 (PostgreSQL)")
+    logger.info("=" * 60)
+    logger.info(f"Database URL: {DATABASE_URL}")
+    logger.info(f"Agent Timeout: {AGENT_TIMEOUT_MINUTES} minutes")
+    logger.info(f"Agent Folders: {AGENT_FOLDERS}")
+    logger.info("=" * 60)
     
     uvicorn.run(app, host="0.0.0.0", port=9000)
