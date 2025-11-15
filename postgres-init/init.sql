@@ -1,13 +1,27 @@
--- This script runs automatically when PostgreSQL container starts for the first time
--- It creates the necessary tables if they don't exist
+-- This script runs automatically when PostgreSQL container starts for the first time.
+-- It creates the necessary databases and grants privileges.
 
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Create databases for each service
+CREATE DATABASE scandb;
+CREATE DATABASE repo_scanner_db;
+CREATE DATABASE system_scanner_db;
 
--- Grant all privileges to scanuser
+-- Grant all privileges to scanuser on each database
 GRANT ALL PRIVILEGES ON DATABASE scandb TO scanuser;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO scanuser;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO scanuser;
+GRANT ALL PRIVILEGES ON DATABASE repo_scanner_db TO scanuser;
+GRANT ALL PRIVILEGES ON DATABASE system_scanner_db TO scanuser;
 
--- Note: SQLAlchemy will create the actual tables via models.py
--- This file is just for initial setup and permissions
+-- Connect to each database to enable extensions and set permissions.
+-- This is necessary because some commands are database-specific.
+
+\c scandb;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+GRANT ALL ON SCHEMA public TO scanuser;
+
+\c repo_scanner_db;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+GRANT ALL ON SCHEMA public TO scanuser;
+
+\c system_scanner_db;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+GRANT ALL ON SCHEMA public TO scanuser;

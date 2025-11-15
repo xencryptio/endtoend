@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle } from 'lucide-react';
+import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Button } from "@/components/ui/button";
 
 // Types
 interface Algorithm {
@@ -35,9 +36,13 @@ interface Scan {
 
 type StatusType = 'error' | 'success' | 'info';
 
+interface CryptoScannerProps {
+  onBack: () => void;
+}
+
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL
 
-const CryptoScanner: React.FC = () => {
+const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
   const [repoUrl, setRepoUrl] = useState('');
   const [scans, setScans] = useState<Scan[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
@@ -66,7 +71,7 @@ const CryptoScanner: React.FC = () => {
     
     const interval = setInterval(() => {
       loadHistory();
-    }, 3000); // Refresh every 3 seconds
+    }, 4000); // Faster polling - every 2 seconds instead of 3
     
     return () => clearInterval(interval);
   }, [autoRefresh]);
@@ -122,6 +127,11 @@ const CryptoScanner: React.FC = () => {
       }
   
       await loadHistory();
+
+      // Force another refresh after 2 seconds to catch quick completions
+      setTimeout(() => {
+        loadHistory();
+      }, 2000);
     } catch (error: any) {
       if (error.name === 'TimeoutError') {
         showStatusMessageWithTimeout('Request timeout - Please check if the backend is running', 'error');
@@ -142,9 +152,13 @@ const CryptoScanner: React.FC = () => {
   };
 
   useEffect(() => {
-    const hasInProgress = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending');
+    const hasInProgress = scans.some(s => 
+      s.scan_status === 'in_progress' || s.scan_status === 'pending'
+    );
+    // Don't stop auto-refresh immediately - give it time to show completion
     if (!hasInProgress && autoRefresh) {
-      setAutoRefresh(false);
+      // Wait 5 seconds before stopping to ensure UI updates
+      setTimeout(() => setAutoRefresh(false), 5000);
     }
   }, [scans, autoRefresh]);
 
@@ -175,52 +189,52 @@ const CryptoScanner: React.FC = () => {
     switch (status) {
       case 'pending':
         return (
-          <div>
-            <span className="inline-flex items-center px-3 py-1 rounded bg-yellow-100 text-yellow-800 text-sm font-medium">
+          <div className="text-xs">
+            <span className="inline-flex items-center px-3 py-1 rounded bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-sm font-medium">
               <Clock className="w-3 h-3 mr-1" /> Queued
             </span>
             {currentStatus && (
-              <div className="text-xs text-yellow-800 mt-1">Waiting for worker...</div>
+              <div className="text-yellow-800 dark:text-yellow-300 mt-1">Waiting for worker...</div>
             )}
           </div>
         );
       case 'in_progress':
         return (
-          <div>
-            <span className="inline-flex items-center px-3 py-1 rounded bg-blue-100 text-blue-800 text-sm font-medium">
+          <div className="text-xs">
+            <span className="inline-flex items-center px-3 py-1 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 text-sm font-medium">
               <RefreshCw className="w-3 h-3 mr-1 animate-spin" /> In Progress
             </span>
             {currentStatus && (
-              <div className="text-xs text-blue-800 mt-1">{currentStatus}</div>
+              <div className="text-blue-800 dark:text-blue-300 mt-1">{currentStatus}</div>
             )}
           </div>
         );
       case 'completed':
         return (
-          <span className="inline-flex items-center px-3 py-1 rounded bg-green-100 text-green-800 text-sm font-medium">
+          <span className="inline-flex items-center px-3 py-1 rounded bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-sm font-medium">
             <CheckCircle className="w-3 h-3 mr-1" /> Completed
           </span>
         );
       case 'failed':
         return (
-          <div>
-            <span className="inline-flex items-center px-3 py-1 rounded bg-red-100 text-red-800 text-sm font-medium">
+          <div className="text-xs">
+            <span className="inline-flex items-center px-3 py-1 rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-sm font-medium">
               <XCircle className="w-3 h-3 mr-1" /> Failed
             </span>
             {currentStatus && (
-              <div className="text-xs text-red-600 mt-1">{currentStatus}</div>
+              <div className="text-red-600 dark:text-red-300 mt-1">{currentStatus}</div>
             )}
           </div>
         );
       case 'cached':
         return (
-          <span className="inline-flex items-center px-3 py-1 rounded bg-indigo-100 text-indigo-800 text-sm font-medium">
+          <span className="inline-flex items-center px-3 py-1 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 text-sm font-medium">
             <Package className="w-3 h-3 mr-1" /> Cached
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center px-3 py-1 rounded bg-gray-100 text-gray-800 text-sm font-medium">
+          <span className="inline-flex items-center px-3 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 text-sm font-medium">
             Unknown
           </span>
         );
@@ -241,12 +255,12 @@ const CryptoScanner: React.FC = () => {
     });
 
     return (
-      <div className="p-6 bg-gray-50">
-        <div className="bg-gray-100 p-4 rounded-lg mb-4">
+      <div className="p-6 bg-gray-50 dark:bg-gray-900">
+        <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg mb-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
               <strong>Commit Hash:</strong>{' '}
-              <code className="bg-white px-2 py-1 rounded text-xs">{data.repo_hash}</code>
+              <code className="bg-white dark:bg-gray-700 px-2 py-1 rounded text-xs">{data.repo_hash}</code>
             </div>
             <div>
               <strong>Last Scanned:</strong> {new Date(data.last_scanned).toLocaleString()}
@@ -255,26 +269,26 @@ const CryptoScanner: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white border border-gray-200 rounded-lg p-5">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
               Files Scanned
             </div>
-            <div className="text-3xl font-semibold text-gray-900">{data.total_files || 0}</div>
+            <div className="text-3xl font-semibold text-gray-900 dark:text-gray-100">{data.total_files || 0}</div>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-5">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
               Algorithms Found
             </div>
-            <div className="text-3xl font-semibold text-gray-900">{Object.keys(algorithms).length}</div>
+            <div className="text-3xl font-semibold text-gray-900 dark:text-gray-100">{Object.keys(algorithms).length}</div>
           </div>
-          <div className="bg-white border-l-4 border-green-500 rounded-lg p-5">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          <div className="bg-white dark:bg-gray-800 border-l-4 border-green-500 rounded-lg p-5">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
               PQC Safe
             </div>
             <div className="text-3xl font-semibold text-green-600">{safe.length}</div>
           </div>
-          <div className="bg-white border-l-4 border-red-500 rounded-lg p-5">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          <div className="bg-white dark:bg-gray-800 border-l-4 border-red-500 rounded-lg p-5">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
               PQC Vulnerable
             </div>
             <div className="text-3xl font-semibold text-red-600">{unsafe.length}</div>
@@ -304,18 +318,18 @@ const CryptoScanner: React.FC = () => {
       <>
         <tr
           onClick={() => canView && toggleRow(scan.id)}
-          className={`border-b border-gray-200 ${
-            canView ? 'cursor-pointer hover:bg-gray-50' : ''
+          className={`border-b border-gray-200 dark:border-gray-700 ${
+            canView ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800' : ''
           }`}
         >
-          <td className="px-4 py-3 text-gray-900">{scan.repo_url}</td>
+          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{scan.repo_url}</td>
           <td className="px-4 py-3">
             {getStatusBadge(scan.scan_status, scan.current_status)}
           </td>
           <td className="px-4 py-3 text-gray-900">
             {new Date(scan.last_scanned).toLocaleString()}
           </td>
-          <td className="px-4 py-3 text-gray-900">{fileCountDisplay}</td>
+          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{fileCountDisplay}</td>
           <td className="px-4 py-3 text-green-600 font-semibold">
             {scan.pqc_safe_count || '-'}
           </td>
@@ -329,14 +343,14 @@ const CryptoScanner: React.FC = () => {
                   e.stopPropagation();
                   toggleRow(scan.id);
                 }}
-                className="px-3 py-1 bg-white border border-gray-300 rounded text-gray-700 text-sm hover:bg-gray-50"
+                className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 {isExpanded ? 'Hide' : 'View'}
               </button>
             ) : (
               <button
                 disabled
-                className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-gray-500 text-sm cursor-not-allowed"
+                className="px-3 py-1 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-500 dark:text-gray-400 text-sm cursor-not-allowed"
               >
                 {scan.scan_status === 'pending'
                   ? 'Queued'
@@ -348,12 +362,12 @@ const CryptoScanner: React.FC = () => {
           </td>
         </tr>
         {canView && isExpanded && (
-          <tr className="bg-gray-50">
+          <tr className="bg-gray-50 dark:bg-gray-800/50">
             <td colSpan={7}>
               {scanDetailsCache.has(scan.id) ? (
                 renderExpandedContent(scanDetailsCache.get(scan.id)!)
               ) : (
-                <div className="p-6 text-center text-gray-600">Loading details...</div>
+                <div className="p-6 text-center text-gray-600 dark:text-gray-400">Loading details...</div>
               )}
             </td>
           </tr>
@@ -363,17 +377,23 @@ const CryptoScanner: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-5 py-6">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center text-2xl">
-              🔐
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center text-2xl">
+                🔐
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Crypto Scanner</h1>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Post-Quantum Cryptography Security Analysis</div>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Crypto Scanner</h1>
-              <div className="text-sm text-gray-600">Post-Quantum Cryptography Security Analysis</div>
-            </div>
+            <Button variant="outline" onClick={onBack}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
           </div>
         </div>
       </header>
@@ -383,20 +403,20 @@ const CryptoScanner: React.FC = () => {
           <div
             className={`mb-6 p-3 rounded-lg border ${
               statusType === 'error'
-                ? 'bg-red-50 border-red-500 text-red-900'
+                ? 'bg-red-50 dark:bg-red-900/30 border-red-500 text-red-900 dark:text-red-200'
                 : statusType === 'success'
-                ? 'bg-green-50 border-green-500 text-green-900'
-                : 'bg-blue-50 border-blue-500 text-blue-900'
+                ? 'bg-green-50 dark:bg-green-900/30 border-green-500 text-green-900 dark:text-green-200'
+                : 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 text-blue-900 dark:text-blue-200'
             }`}
           >
             {statusMessage}
           </div>
         )}
 
-        <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-          <div className="mb-5 pb-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Repository Scan</h2>
-            <p className="text-sm text-gray-600">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6 mb-6">
+          <div className="mb-5 pb-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Repository Scan</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
               Analyze GitHub repositories for cryptographic algorithm usage and PQC readiness
             </p>
           </div>
@@ -413,12 +433,12 @@ const CryptoScanner: React.FC = () => {
                 onChange={(e) => setRepoUrl(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && scanRepository()}
                 placeholder="https://github.com/username/repository"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
                 onClick={scanRepository}
                 disabled={isScanning}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
               >
                 {isScanning ? (
                   <>
@@ -433,16 +453,16 @@ const CryptoScanner: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex justify-between items-center mb-5 pb-4 border-b border-gray-200">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
+          <div className="flex justify-between items-center mb-5 pb-4 border-b border-gray-200 dark:border-gray-700">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Scan History</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Scan History</h2>
             </div>
             <button
               onClick={refreshHistory}
               disabled={isRefreshing}
-              className={`px-4 py-2 bg-white border rounded-lg text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors ${
-                autoRefresh ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+              className={`px-4 py-2 bg-white dark:bg-gray-800 border rounded-lg text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors ${
+                autoRefresh ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/50' : 'border-gray-300 dark:border-gray-600'
               }`}
             >
               <RefreshCw className={`w-4 h-4 inline mr-2 ${isRefreshing || autoRefresh ? 'animate-spin' : ''}`} />
@@ -451,28 +471,28 @@ const CryptoScanner: React.FC = () => {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm text-left">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <tr className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Repository
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Last Updated
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Files
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     PQC Safe
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     PQC Vulnerable
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Action
                   </th>
                 </tr>
@@ -480,13 +500,13 @@ const CryptoScanner: React.FC = () => {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                       Loading history...
                     </td>
                   </tr>
                 ) : scans.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                       No scans yet
                     </td>
                   </tr>
@@ -508,13 +528,13 @@ const AlgorithmSection: React.FC<{
   type: 'safe' | 'unsafe';
 }> = ({ title, algorithms, type }) => {
   const borderColor = type === 'safe' ? 'border-green-500' : 'border-red-500';
-  const badgeColor = type === 'safe' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+  const badgeColor = type === 'safe' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200' : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200';
   const icon = type === 'safe' ? <Shield className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />;
 
   return (
     <div className="mb-6">
-      <div className={`flex items-center justify-between p-4 bg-gray-50 border ${borderColor} border-l-4 rounded-lg`}>
-        <div className="flex items-center gap-3 text-lg font-semibold text-gray-900">
+      <div className={`flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 border ${borderColor} border-l-4 rounded-lg`}>
+        <div className="flex items-center gap-3 text-lg font-semibold text-gray-900 dark:text-gray-100">
           {icon}
           <span>{title}</span>
         </div>
@@ -524,10 +544,10 @@ const AlgorithmSection: React.FC<{
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
         {algorithms.map((algo, idx) => (
-          <div key={`${algo.name}-${idx}`} className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-base font-semibold text-gray-900 mb-1">{algo.name}</div>
-            <div className="text-sm text-gray-600 mb-3">{algo.category}</div>
-            <div className="flex gap-4 pt-3 border-t border-gray-200 text-sm text-gray-600">
+          <div key={`${algo.name}-${idx}`} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <div className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">{algo.name}</div>
+            <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">{algo.category}</div>
+            <div className="flex gap-4 pt-3 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400">
               <span>{algo.occurrences} occurrences</span>
               <span>{algo.files_affected || 0} files</span>
             </div>

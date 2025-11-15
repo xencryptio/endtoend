@@ -5,12 +5,19 @@
 # Use a lightweight Python base image
 FROM python:3.11-slim
 
+# Install postgresql-client for pg_isready
+RUN apt-get update && apt-get install -y postgresql-client curl
+
 # Set the working directory inside the container
 WORKDIR /app
 
 # --- Prepare requirements.txt and install dependencies ---
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the wait-for-db.sh script and make it executable
+COPY wait-for-db.sh /usr/local/bin/wait-for-db.sh
+RUN chmod +x /usr/local/bin/wait-for-db.sh
 
 # --- Copy all application code and folders ---
 COPY . .

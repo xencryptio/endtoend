@@ -1,130 +1,31 @@
 version: '3.8'
 
-# ================================================================
-# MAIN DOCKER COMPOSE (without pre-init)
-# ================================================================
+# =============================================================================
+# CRYPTO AUDIT SYSTEM - COMPLETE DOCKER COMPOSE
+# =============================================================================
 
 services:
-  # ======================
-  # FRONTEND SERVICE
-  # ======================
-  frontend:
-    build: ./Frontend
-    ports:
-      - "3000:8080"
-    networks:
-      - xencrypt-network
-    depends_on:
-      crypto-scanner:
-        condition: service_started
-      db-service:
-        condition: service_started
-    restart: unless-stopped
-
-  # ======================
-  # CRYPTO SCANNER SERVICE
-  # ======================
-  crypto-scanner:
-    build:
-      context: ./scan-service
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./scan-service:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DB_SERVICE_URL=http://db-service:8001
-    networks:
-      - xencrypt-network
-    depends_on:
-      db-service:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # ======================
-  # DATABASE SERVICE
-  # ======================
-  db-service:
-    build:
-      context: ./db-service
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./db-service:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/scandb
-    networks:
-      - xencrypt-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  # ======================
-  # POSTGRES DATABASE
-  # ======================
+  # ---------------------------------------------------------------------------
+  # POSTGRESQL DATABASE
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
+    container_name: postgres
     environment:
       POSTGRES_USER: scanuser
       POSTGRES_PASSWORD: scanpass
-      POSTGRES_DB: scandb
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: scanuser
     volumes:
+      - ./postgres-init/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres-data:/var/lib/postgresql/data
-      - ./postgres-init:/docker-entrypoint-initdb.d
     networks:
       - xencrypt-network
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U scanuser -d scandb"]
+      test: ["CMD-SHELL", "pg_isready -U scanuser"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    restart: unless-stopped
-
-  # ======================
-  # ADMINER (DB WEB UI)
-  # ======================
-  adminer:
-    image: adminer
-    restart: always
-    ports:
-      - "8080:8080"
-    networks:
-      - xencrypt-network
-
-  # ======================
-  # REPO SCANNER SERVICE
-  # ======================
-  repo-scanner:
-    build:
-      context: ./repo_scanner
-      dockerfile: Dockerfile
-    container_name: crypto_scanner_backend
-    ports:
-      - "8003:8001" # Mapped to 8003 to avoid conflict with db-service on 8001
-    volumes:
-      - ./repo_scanner:/app
-    networks:
-      - xencrypt-network
-    restart: always
-
-  # =============================================================================
-  # CRYPTO AUDIT SYSTEM SERVICES (inside system-scaner)
-  # =============================================================================
 
   # ---------------------------------------------------------------------------
   # CENTRAL API SERVER
@@ -140,14 +41,129 @@ services:
       - server-data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/system_scanner_db
     networks:
       - xencrypt-network
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["/usr/local/bin/wait-for-db.sh", "postgres", "python", "api_server.py"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/api/v1/admin/stats"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
+
+  # ======================
+  # CRYPTO SCANNER SERVICE
+  # ======================
+  crypto-scanner:
+    build:
+      context: ./scan-service
+      dockerfile: Dockerfile
+    container_name: crypto-scanner
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./scan-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_SERVICE_URL=http://db-service:8001
+      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/crypto_scanner_db
+    networks:
+      - xencrypt-network
+    depends_on:
+      db-service:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # DATABASE SERVICE
+  # ---------------------------------------------------------------------------
+  db-service:
+    build:
+      context: ./db-service
+      dockerfile: Dockerfile
+    container_name: db-service-1
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./db-service:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/scandb
+    networks:
+      - xencrypt-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # REPO SCANNER SERVICE
+  # ---------------------------------------------------------------------------
+  repo-scanner:
+    build:
+      context: ./repo_scanner
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8001"
+    volumes:
+      - ./repo_scanner:/app
+    environment:
+      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db
+    networks:
+      - xencrypt-network
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ======================
+  # ADMINER (DB WEB UI)
+  # ======================
+  adminer:
+    image: adminer
+    container_name: adminer
+    restart: always
+    ports:
+      - "8080:8080"
+    networks:
+      - xencrypt-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # FRONTEND SERVICE
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3000:8080"
+    networks:
+      - xencrypt-network
+    depends_on:
+      system-scan:
+        condition: service_healthy
+      db-service:
+        condition: service_healthy
+      crypto-scanner:
+        condition: service_started
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # LINUX AGENT #1 - MODERN CONFIGURATION
@@ -162,7 +178,7 @@ services:
     hostname: ubuntu-modern-agent
     depends_on:
       system-scan:
-        condition: service_started
+        condition: service_healthy
     environment:
       - AGENT_PROFILE=modern
       - API_BASE_URL=http://system-scan:9000
@@ -190,7 +206,7 @@ services:
     hostname: debian-legacy-agent
     depends_on:
       system-scan:
-        condition: service_started
+        condition: service_healthy
     environment:
       - AGENT_PROFILE=legacy
       - API_BASE_URL=http://system-scan:9000
@@ -218,7 +234,7 @@ services:
     hostname: alpine-mixed-agent
     depends_on:
       system-scan:
-        condition: service_started
+        condition: service_healthy
     environment:
       - AGENT_PROFILE=mixed
       - API_BASE_URL=http://system-scan:9000
@@ -233,17 +249,17 @@ services:
     volumes:
       - agent-mixed-data:/var/lib/crypto_agent
 
-# ======================
+# =============================================================================
 # NETWORKS
-# ======================
+# =============================================================================
 networks:
   xencrypt-network:
     driver: bridge
     name: xencrypt-network
 
-# ======================
-# VOLUMES
-# ======================
+# =============================================================================
+# VOLUMES (Persistent storage)
+# =============================================================================
 volumes:
   postgres-data:
     driver: local
@@ -255,3 +271,30 @@ volumes:
     driver: local
   agent-mixed-data:
     driver: local
+
+# =============================================================================
+# USAGE INSTRUCTIONS
+# =============================================================================
+# 
+# Clean start (removes all data):
+#   docker-compose down -v
+#   docker-compose up -d --build
+#
+# View logs:
+#   docker-compose logs -f
+#   docker-compose logs postgres
+#   docker-compose logs system-scan
+#   docker-compose logs crypto-scanner
+#
+# Stop everything:
+#   docker-compose down
+#
+# Access Points:
+#   Dashboard: http://localhost:9000
+#   Frontend: http://localhost:3000
+#   Crypto Scanner: http://localhost:8000
+#   DB Service: http://localhost:8001
+#   Repo Scanner: http://localhost:8003
+#   Adminer: http://localhost:8080
+#
+# =============================================================================

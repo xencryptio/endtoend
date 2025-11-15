@@ -1,18 +1,18 @@
 """
 Enhanced GitHub Repository Cryptographic Algorithm Scanner
-With SQLite caching, hash-based deduplication, job queue, and REST API
+With PostgreSQL caching, hash-based deduplication, job queue, and REST API
 """
 
+import logging
 import re
 import os
 import sys
 import json
 import tempfile
 import subprocess
-import sqlite3
 import hashlib
-import threading 
-import shutil 
+import threading
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +22,77 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 import uvicorn
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy.orm import sessionmaker, relationship, Session
+from sqlalchemy.ext.declarative import declarative_base
+from contextlib import contextmanager
+
+# --- Logging Setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("repo_scanner.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# --- SQLAlchemy Setup ---
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scanuser:scanpass@localhost:5432/repo_scanner_db")
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# --- SQLAlchemy Models ---
+class Repository(Base):
+    __tablename__ = "repositories"
+    id = Column(Integer, primary_key=True, index=True)
+    repo_url = Column(String, unique=True, index=True, nullable=False)
+    repo_hash = Column(String, nullable=False, index=True)
+    last_scanned = Column(DateTime, default=datetime.utcnow)
+    scan_status = Column(String, default='pending')
+    total_files = Column(Integer, default=0)
+    total_algorithms = Column(Integer, default=0)
+    pqc_safe_count = Column(Integer, default=0)
+    pqc_vulnerable_count = Column(Integer, default=0)
+    current_status = Column(String, default='Queued for scanning')
+    total_files_to_scan = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    scan_results = relationship("ScanResult", back_populates="repository", cascade="all, delete-orphan")
+
+class ScanResult(Base):
+    __tablename__ = "scan_results"
+    id = Column(Integer, primary_key=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repositories.id"), nullable=False)
+    algorithm = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    is_pqc_safe = Column(Boolean, nullable=False)
+    occurrences = Column(Integer, nullable=False)
+    files_affected = Column(Integer, nullable=False)
+    repository = relationship("Repository", back_populates="scan_results")
+    findings = relationship("Finding", back_populates="scan_result", cascade="all, delete-orphan")
+
+class Finding(Base):
+    __tablename__ = "findings"
+    id = Column(Integer, primary_key=True, index=True)
+    scan_result_id = Column(Integer, ForeignKey("scan_results.id"), nullable=False)
+    file_path = Column(String, nullable=False)
+    line_number = Column(Integer, nullable=False)
+    context = Column(Text)
+    match_text = Column(String)
+    scan_result = relationship("ScanResult", back_populates="findings")
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+@contextmanager
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # Complete cryptographic patterns from original script
 CRYPTO_PATTERNS = {
@@ -379,362 +450,172 @@ CODE_EXTENSIONS = {
 
 
 class Database:
-    """SQLite database manager for scan results with job queue"""
-    
-    def __init__(self, db_path='crypto_scans.db'):
-        self.db_path = db_path
-        self.init_database()
-    
-    def init_database(self):
-        """Initialize database schema with job queue support"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # --- FIX APPLIED HERE ---
-        # The column existence checks are removed because the columns 
-        # (current_status, total_files_to_scan, created_at) 
-        # are already included in the CREATE TABLE statement below.
-        # This prevents the 'duplicate column name' error on first run.
-        
-        # Create repositories table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS repositories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                repo_url TEXT UNIQUE NOT NULL,
-                repo_hash TEXT NOT NULL,
-                last_scanned TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                scan_status TEXT DEFAULT 'pending',
-                total_files INTEGER DEFAULT 0,
-                total_algorithms INTEGER DEFAULT 0,
-                pqc_safe_count INTEGER DEFAULT 0,
-                pqc_vulnerable_count INTEGER DEFAULT 0,
-                current_status TEXT DEFAULT 'Queued for scanning',
-                total_files_to_scan INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+    """PostgreSQL database manager for scan results with job queue"""
 
-        # To support future schema changes, you can re-enable the column check, 
-        # but only for columns *not* already in the CREATE TABLE block above.
-        
-        # # Check existing columns (only if needed for columns NOT in CREATE TABLE)
-        # cursor.execute("PRAGMA table_info(repositories)")
-        # columns = [col[1] for col in cursor.fetchall()]
-
-        # # Example of how to add a NEW column (e.g., 'scan_version') if needed later:
-        # if 'scan_version' not in columns:
-        #     cursor.execute('ALTER TABLE repositories ADD COLUMN scan_version INTEGER DEFAULT 1')
-
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scan_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                repo_id INTEGER NOT NULL,
-                algorithm TEXT NOT NULL,
-                category TEXT NOT NULL,
-                is_pqc_safe BOOLEAN NOT NULL,
-                occurrences INTEGER NOT NULL,
-                files_affected INTEGER NOT NULL,
-                FOREIGN KEY (repo_id) REFERENCES repositories(id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS findings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scan_result_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                line_number INTEGER NOT NULL,
-                context TEXT,
-                match_text TEXT,
-                FOREIGN KEY (scan_result_id) REFERENCES scan_results(id)
-            )
-        ''')
-        
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_repo_hash ON repositories(repo_hash)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_repo_url ON repositories(repo_url)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_status ON repositories(scan_status)')
-        
-        conn.commit()
-        conn.close()
-    
-    def get_cached_scan(self, repo_hash: str) -> Optional[Dict]:
+    def get_cached_scan(self, db: Session, repo_hash: str) -> Optional[Dict]:
         """Check if completed scan exists for this repo hash"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, repo_url, last_scanned, scan_status, 
-                   total_files, total_algorithms, pqc_safe_count, pqc_vulnerable_count,
-                   current_status, total_files_to_scan
-            FROM repositories 
-            WHERE repo_hash = ? AND scan_status = 'completed'
-            ORDER BY last_scanned DESC LIMIT 1
-        ''', (repo_hash,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
+        repo = db.query(Repository).filter(Repository.repo_hash == repo_hash, Repository.scan_status == 'completed').order_by(Repository.last_scanned.desc()).first()
+        if repo:
             return {
-                'id': row[0],
-                'repo_url': row[1],
-                'last_scanned': row[2],
+                'id': repo.id,
+                'repo_url': repo.repo_url,
+                'last_scanned': repo.last_scanned,
                 'scan_status': 'cached',
-                'total_files': row[4],
-                'total_algorithms': row[5],
-                'pqc_safe_count': row[6],
-                'pqc_vulnerable_count': row[7],
+                'total_files': repo.total_files,
+                'total_algorithms': repo.total_algorithms,
+                'pqc_safe_count': repo.pqc_safe_count,
+                'pqc_vulnerable_count': repo.pqc_vulnerable_count,
                 'current_status': 'Using cached results',
-                'total_files_to_scan': row[9],
+                'total_files_to_scan': repo.total_files_to_scan,
                 'cached': True
             }
         return None
-    
-    def create_scan_record(self, repo_url: str, repo_hash: str) -> int:
+
+    def create_scan_record(self, db: Session, repo_url: str, repo_hash: str) -> int:
         """Create initial scan record with 'pending' status"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-                INSERT INTO repositories 
-                (repo_url, repo_hash, scan_status, current_status, created_at)
-                VALUES (?, ?, 'pending', 'Queued for scanning', CURRENT_TIMESTAMP)
-            ''', (repo_url, repo_hash))
-            
-            repo_id = cursor.lastrowid
-            conn.commit()
-            return repo_id
-        except sqlite3.IntegrityError:
-            # Repo already exists, update it
-            cursor.execute('''
-                UPDATE repositories 
-                SET repo_hash = ?, 
-                    scan_status = 'pending',
-                    current_status = 'Queued for scanning',
-                    created_at = CURRENT_TIMESTAMP
-                WHERE repo_url = ?
-            ''', (repo_hash, repo_url))
-            conn.commit()
-            cursor.execute('SELECT id FROM repositories WHERE repo_url = ?', (repo_url,))
-            return cursor.fetchone()[0]
-        finally:
-            conn.close()
+        repo = db.query(Repository).filter(Repository.repo_url == repo_url).first()
+        if repo:
+            repo.repo_hash = repo_hash
+            repo.scan_status = 'pending'
+            repo.current_status = 'Queued for scanning'
+            repo.created_at = datetime.utcnow()
+        else:
+            repo = Repository(
+                repo_url=repo_url,
+                repo_hash=repo_hash,
+                scan_status='pending',
+                current_status='Queued for scanning'
+            )
+            db.add(repo)
+        db.commit()
+        db.refresh(repo)
+        return repo.id
 
-    def get_pending_scans(self) -> List[Dict]:
+    def get_pending_scans(self, db: Session) -> List[Dict]:
         """Get all pending scans ordered by creation time"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, repo_url, repo_hash, created_at
-            FROM repositories 
-            WHERE scan_status = 'pending'
-            ORDER BY created_at ASC
-        ''')
-        
-        scans = []
-        for row in cursor.fetchall():
-            scans.append({
-                'id': row[0],
-                'repo_url': row[1],
-                'repo_hash': row[2],
-                'created_at': row[3]
-            })
-        
-        conn.close()
-        return scans
+        scans = db.query(Repository).filter(Repository.scan_status == 'pending').order_by(Repository.created_at.asc()).all()
+        return [
+            {
+                'id': scan.id,
+                'repo_url': scan.repo_url,
+                'repo_hash': scan.repo_hash,
+                'created_at': scan.created_at
+            } for scan in scans
+        ]
 
-    def mark_scan_processing(self, repo_id: int):
+    def mark_scan_processing(self, db: Session, repo_id: int):
         """Mark scan as currently processing"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE repositories 
-            SET scan_status = 'in_progress',
-                current_status = 'Cloning repository...',
-                last_scanned = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (repo_id,))
-        
-        conn.commit()
-        conn.close()
+        repo = db.query(Repository).filter(Repository.id == repo_id).first()
+        if repo:
+            repo.scan_status = 'in_progress'
+            repo.current_status = 'Cloning repository...'
+            repo.last_scanned = datetime.utcnow()
+            db.commit()
 
-    def update_scan_progress(self, repo_id: int, current_scanned: int, total_files_to_scan: int, status_message: str):
+    def update_scan_progress(self, db: Session, repo_id: int, current_scanned: int, total_files_to_scan: int, status_message: str):
         """Update the scan's live progress status"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE repositories 
-            SET current_status = ?, total_files = ?, total_files_to_scan = ?
-            WHERE id = ?
-        ''', (status_message, current_scanned, total_files_to_scan, repo_id))
-            
-        conn.commit()
-        conn.close()
-    
-    def save_scan_results(self, repo_id: int, scan_data: Dict):
+        repo = db.query(Repository).filter(Repository.id == repo_id).first()
+        if repo:
+            repo.current_status = status_message
+            repo.total_files = current_scanned
+            repo.total_files_to_scan = total_files_to_scan
+            db.commit()
+
+    def save_scan_results(self, db: Session, repo_id: int, scan_data: Dict):
         """Update scan record with complete results"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-                UPDATE repositories 
-                SET scan_status = 'completed',
-                    total_files = ?,
-                    total_algorithms = ?,
-                    pqc_safe_count = ?,
-                    pqc_vulnerable_count = ?,
-                    last_scanned = CURRENT_TIMESTAMP,
-                    current_status = 'Scan completed successfully'
-                WHERE id = ?
-            ''', (
-                scan_data['total_files'],
-                scan_data['total_algorithms'],
-                scan_data['pqc_safe_count'],
-                scan_data['pqc_vulnerable_count'],
-                repo_id
-            ))
-            
-            # Delete old scan results if they exist
-            cursor.execute('DELETE FROM scan_results WHERE repo_id = ?', (repo_id,))
-            
-            for algo, data in scan_data['algorithms'].items():
-                cursor.execute('''
-                    INSERT INTO scan_results 
-                    (repo_id, algorithm, category, is_pqc_safe, occurrences, files_affected)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
-                    repo_id,
-                    algo,
-                    data['category'],
-                    data['pqc_safe'],
-                    data['occurrences'],
-                    len(data['files'])
-                ))
-                
-                scan_result_id = cursor.lastrowid
-                
-                for finding in data['findings'][:100]:
-                    cursor.execute('''
-                        INSERT INTO findings 
-                        (scan_result_id, file_path, line_number, context, match_text)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (
-                        scan_result_id,
-                        finding['file'],
-                        finding['line'],
-                        finding['context'][:200],
-                        finding['match']
-                    ))
-            
-            conn.commit()
-            
-        except Exception as e:
-            conn.rollback()
-            raise e
-        finally:
-            conn.close()
-    
-    def mark_scan_failed(self, repo_id: int, error_message: str = None):
+        repo = db.query(Repository).filter(Repository.id == repo_id).first()
+        if not repo:
+            return
+
+        repo.scan_status = 'completed'
+        repo.total_files = scan_data['total_files']
+        repo.total_algorithms = scan_data['total_algorithms']
+        repo.pqc_safe_count = scan_data['pqc_safe_count']
+        repo.pqc_vulnerable_count = scan_data['pqc_vulnerable_count']
+        repo.last_scanned = datetime.utcnow()
+        repo.current_status = 'Scan completed successfully'
+
+        # Delete old scan results
+        db.query(ScanResult).filter(ScanResult.repo_id == repo_id).delete()
+
+        for algo, data in scan_data['algorithms'].items():
+            scan_result = ScanResult(
+                repo_id=repo_id,
+                algorithm=algo,
+                category=data['category'],
+                is_pqc_safe=data['pqc_safe'],
+                occurrences=data['occurrences'],
+                files_affected=len(data['files'])
+            )
+            db.add(scan_result)
+            db.flush()  # To get scan_result.id
+
+            for finding in data['findings'][:100]:
+                new_finding = Finding(
+                    scan_result_id=scan_result.id,
+                    file_path=finding['file'],
+                    line_number=finding['line'],
+                    context=finding['context'][:200],
+                    match_text=finding['match']
+                )
+                db.add(new_finding)
+        db.commit()
+
+    def mark_scan_failed(self, db: Session, repo_id: int, error_message: str = None):
         """Mark a scan as failed"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        status_message = f"Failed: {error_message}" if error_message else "Scan failed unexpectedly"
-        cursor.execute('''
-            UPDATE repositories 
-            SET scan_status = 'failed',
-                current_status = ?
-            WHERE id = ?
-        ''', (status_message, repo_id))
-        
-        conn.commit()
-        conn.close()
-    
-    def get_scan_details(self, repo_id: int) -> Dict:
+        repo = db.query(Repository).filter(Repository.id == repo_id).first()
+        if repo:
+            repo.scan_status = 'failed'
+            repo.current_status = f"Failed: {error_message}" if error_message else "Scan failed unexpectedly"
+            db.commit()
+
+    def get_scan_details(self, db: Session, repo_id: int) -> Dict:
         """Retrieve complete scan details"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, repo_url, repo_hash, last_scanned, scan_status,
-                   total_files, total_algorithms, pqc_safe_count, pqc_vulnerable_count,
-                   current_status, total_files_to_scan
-            FROM repositories 
-            WHERE id = ?
-        ''', (repo_id,))
-        repo = cursor.fetchone()
-        
+        repo = db.query(Repository).filter(Repository.id == repo_id).first()
         if not repo:
             raise ValueError(f"Scan ID {repo_id} not found.")
 
-        cursor.execute('''
-            SELECT algorithm, category, is_pqc_safe, occurrences, files_affected
-            FROM scan_results WHERE repo_id = ?
-        ''', (repo_id,))
-        
         algorithms = {}
-        for row in cursor.fetchall():
-            algo_name = row[0]
-            algorithms[algo_name] = {
-                'category': row[1],
-                'pqc_safe': bool(row[2]),
-                'occurrences': row[3],
-                'files_affected': row[4]
+        for sr in repo.scan_results:
+            algorithms[sr.algorithm] = {
+                'category': sr.category,
+                'pqc_safe': sr.is_pqc_safe,
+                'occurrences': sr.occurrences,
+                'files_affected': sr.files_affected
             }
-        
-        conn.close()
-        
+
         return {
-            'repo_id': repo[0],
-            'repo_url': repo[1],
-            'repo_hash': repo[2],
-            'last_scanned': repo[3],
-            'scan_status': repo[4],
-            'total_files': repo[5],
-            'total_algorithms': repo[6],
-            'pqc_safe_count': repo[7],
-            'pqc_vulnerable_count': repo[8],
-            'current_status': repo[9],
-            'total_files_to_scan': repo[10],
+            'repo_id': repo.id,
+            'repo_url': repo.repo_url,
+            'repo_hash': repo.repo_hash,
+            'last_scanned': repo.last_scanned,
+            'scan_status': repo.scan_status,
+            'total_files': repo.total_files,
+            'total_algorithms': repo.total_algorithms,
+            'pqc_safe_count': repo.pqc_safe_count,
+            'pqc_vulnerable_count': repo.pqc_vulnerable_count,
+            'current_status': repo.current_status,
+            'total_files_to_scan': repo.total_files_to_scan,
             'algorithms': algorithms
         }
-    
-    def get_all_scans(self) -> List[Dict]:
+
+    def get_all_scans(self, db: Session) -> List[Dict]:
         """Get list of all scans"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, repo_url, repo_hash, last_scanned, scan_status,
-                   total_files, pqc_safe_count, pqc_vulnerable_count,
-                   current_status, total_files_to_scan
-            FROM repositories 
-            ORDER BY last_scanned DESC
-        ''')
-        
-        scans = []
-        for row in cursor.fetchall():
-            scans.append({
-                'id': row[0],
-                'repo_url': row[1],
-                'repo_hash': row[2],
-                'last_scanned': row[3],
-                'scan_status': row[4],
-                'total_files': row[5],
-                'pqc_safe_count': row[6],
-                'pqc_vulnerable_count': row[7],
-                'current_status': row[8],
-                'total_files_to_scan': row[9]
-            })
-        
-        conn.close()
-        return scans
+        scans = db.query(Repository).order_by(Repository.last_scanned.desc()).all()
+        return [
+            {
+                'id': scan.id,
+                'repo_url': scan.repo_url,
+                'repo_hash': scan.repo_hash,
+                'last_scanned': scan.last_scanned,
+                'scan_status': scan.scan_status,
+                'total_files': scan.total_files,
+                'pqc_safe_count': scan.pqc_safe_count,
+                'pqc_vulnerable_count': scan.pqc_vulnerable_count,
+                'current_status': scan.current_status,
+                'total_files_to_scan': scan.total_files_to_scan
+            } for scan in scans
+        ]
 
 
 class CryptoScanner:
@@ -858,81 +739,83 @@ def process_scan_job(repo_id: int, repo_url: str):
     """Process a single scan job"""
     temp_dir = None
     
-    try:
-        # Mark as processing
-        db.mark_scan_processing(repo_id)
-        
-        # Clone repository
-        temp_dir = tempfile.mkdtemp()
-        subprocess.run(
-            ['git', 'clone', '--depth', '1', repo_url, temp_dir],
-            check=True,
-            capture_output=True,
-            timeout=300 # 5 minute timeout for cloning
-        )
-        
-        # Initialize scanner
-        scanner = CryptoScanner(temp_dir)
-        
-        # Get all files
-        all_files_to_scan = scanner.get_all_code_files()
-        total_files = len(all_files_to_scan)
-        db.update_scan_progress(repo_id, 0, total_files, 'Preparing to scan files...')
+    with get_db() as db:
+        try:
+            # Mark as processing
+            db_manager.mark_scan_processing(db, repo_id)
+            
+            # Clone repository
+            temp_dir = tempfile.mkdtemp()
+            subprocess.run(
+                ['git', 'clone', '--depth', '1', repo_url, temp_dir],
+                check=True,
+                capture_output=True,
+                timeout=300 # 5 minute timeout for cloning
+            )
+            
+            # Initialize scanner
+            scanner = CryptoScanner(temp_dir)
+            
+            # Get all files
+            all_files_to_scan = scanner.get_all_code_files()
+            total_files = len(all_files_to_scan)
+            db_manager.update_scan_progress(db, repo_id, 0, total_files, 'Preparing to scan files...')
 
-        # Perform scan
-        scanned_count = 0
-        for file_path in all_files_to_scan:
-            file_results = scanner.scan_file(file_path)
-            for algo, occurrences in file_results.items():
-                scanner.findings[algo].extend(occurrences)
+            # Perform scan
+            scanned_count = 0
+            for file_path in all_files_to_scan:
+                file_results = scanner.scan_file(file_path)
+                for algo, occurrences in file_results.items():
+                    scanner.findings[algo].extend(occurrences)
+                
+                scanned_count += 1
+                # Update progress every 10 files to reduce DB writes
+                if scanned_count % 10 == 0 or scanned_count == total_files:
+                    db_manager.update_scan_progress(
+                        db,
+                        repo_id, 
+                        scanned_count, 
+                        total_files, 
+                        f'Scanning files... ({scanned_count}/{total_files})'
+                    )
+                scanner.file_count = scanned_count
+                
+            # Save results
+            results = scanner.get_results()
+            results['total_files'] = scanned_count
+            db_manager.save_scan_results(db, repo_id, results)
             
-            scanned_count += 1
-            # Update progress every 10 files to reduce DB writes
-            if scanned_count % 10 == 0 or scanned_count == total_files:
-                db.update_scan_progress(
-                    repo_id, 
-                    scanned_count, 
-                    total_files, 
-                    f'Scanning files... ({scanned_count}/{total_files})'
-                )
-            scanner.file_count = scanned_count
+            logger.info(f"✓ Scan completed for repo ID {repo_id}: {repo_url}")
             
-        # Save results
-        results = scanner.get_results()
-        results['total_files'] = scanned_count
-        db.save_scan_results(repo_id, results)
-        
-        print(f"✓ Scan completed for repo ID {repo_id}: {repo_url}")
-        
-    except subprocess.CalledProcessError as e:
-        error_msg = f"Failed to clone repository: {e.stderr.decode() if e.stderr else str(e)}"
-        print(f"✗ Scan failed for ID {repo_id}: {error_msg}", file=sys.stderr)
-        db.mark_scan_failed(repo_id, error_msg)
-    except subprocess.TimeoutExpired:
-        error_msg = "Repository clone timed out (exceeded 5 minutes)"
-        print(f"✗ Scan failed for ID {repo_id}: {error_msg}", file=sys.stderr)
-        db.mark_scan_failed(repo_id, error_msg)
-    except Exception as e:
-        print(f"✗ Scan failed for ID {repo_id}: {e}", file=sys.stderr)
-        db.mark_scan_failed(repo_id, str(e))
-    finally:
-        # Enhanced cleanup with retry logic
-        if temp_dir:
-            MAX_RETRIES = 5
-            DELAY_SECONDS = 0.5
-            for attempt in range(MAX_RETRIES):
-                try:
-                    shutil.rmtree(temp_dir)
-                    break
-                except PermissionError:
-                    if attempt < MAX_RETRIES - 1:
-                        time.sleep(DELAY_SECONDS)
-                        DELAY_SECONDS *= 2
-                    else:
-                        print(f"⚠ Failed to clean up temp dir {temp_dir} after {MAX_RETRIES} attempts", file=sys.stderr)
-                except Exception as e:
-                    print(f"⚠ Failed to clean up temp dir {temp_dir}: {e}", file=sys.stderr)
-                    break
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to clone repository: {e.stderr.decode() if e.stderr else str(e)}"
+            logger.error(f"✗ Scan failed for ID {repo_id}: {error_msg}")
+            db_manager.mark_scan_failed(db, repo_id, error_msg)
+        except subprocess.TimeoutExpired:
+            error_msg = "Repository clone timed out (exceeded 5 minutes)"
+            logger.error(f"✗ Scan failed for ID {repo_id}: {error_msg}")
+            db_manager.mark_scan_failed(db, repo_id, error_msg)
+        except Exception as e:
+            logger.error(f"✗ Scan failed for ID {repo_id}: {e}", exc_info=True)
+            db_manager.mark_scan_failed(db, repo_id, str(e))
+        finally:
+            # Enhanced cleanup with retry logic
+            if temp_dir:
+                MAX_RETRIES = 5
+                DELAY_SECONDS = 0.5
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        shutil.rmtree(temp_dir)
+                        break
+                    except PermissionError:
+                        if attempt < MAX_RETRIES - 1:
+                            time.sleep(DELAY_SECONDS)
+                            DELAY_SECONDS *= 2
+                        else:
+                            logger.warning(f"⚠ Failed to clean up temp dir {temp_dir} after {MAX_RETRIES} attempts")
+                    except Exception as e:
+                        logger.warning(f"⚠ Failed to clean up temp dir {temp_dir}: {e}")
+                        break
 
 
 # ===========================================
@@ -951,16 +834,17 @@ def process_scan_wrapper(repo_id: int, repo_url: str):
     finally:
         with lock:
             active_scans.discard(repo_id)
-        print(f"✅ Completed and released repo ID {repo_id}")
+        logger.info(f"✅ Completed and released repo ID {repo_id}")
 
 
 def job_queue_worker():
     """Multi-threaded queue worker for concurrent scans."""
-    print(f"🔄 Job queue worker started (max {MAX_CONCURRENT_SCANS} concurrent scans)")
+    logger.info(f"🔄 Job queue worker started (max {MAX_CONCURRENT_SCANS} concurrent scans)")
 
     while True:
         try:
-            pending_scans = db.get_pending_scans()
+            with get_db() as db:
+                pending_scans = db_manager.get_pending_scans(db)
 
             if not pending_scans:
                 time.sleep(3)
@@ -974,7 +858,7 @@ def job_queue_worker():
                         break  # Respect concurrency limit
                     active_scans.add(scan['id'])
 
-                print(f"⚙️  Starting scan: {scan['repo_url']} (ID: {scan['id']})")
+                logger.info(f"⚙️  Starting scan: {scan['repo_url']} (ID: {scan['id']})")
 
                 thread = threading.Thread(
                     target=process_scan_wrapper,
@@ -986,7 +870,7 @@ def job_queue_worker():
             time.sleep(3)
 
         except Exception as e:
-            print(f"❌ Error in job queue worker: {e}", file=sys.stderr)
+            logger.error(f"❌ Error in job queue worker: {e}", exc_info=True)
             time.sleep(5)
 
 
@@ -1064,7 +948,7 @@ app.add_middleware(
 )
 
 
-db = Database()
+db_manager = Database()
 
 # Start job queue worker in background thread
 worker_thread = threading.Thread(target=job_queue_worker, daemon=True)
@@ -1076,106 +960,101 @@ async def scan_repository_endpoint(scan_request: ScanRequest):
     repo_url = str(scan_request.repo_url)
     temp_dir = None
     
-    try:
-        # Quick clone to get hash for cache checking
-        temp_dir = tempfile.mkdtemp()
-        subprocess.run(
-            ['git', 'clone', '--depth', '1', repo_url, temp_dir],
-            check=True,
-            capture_output=True,
-            timeout=60
-        )
-        
-        temp_scanner = CryptoScanner(temp_dir)
-        repo_hash = temp_scanner.get_repo_hash()
-        
-        # Check cache
-        cached = db.get_cached_scan(repo_hash)
-        if cached:
+    with get_db() as db:
+        try:
+            # Quick clone to get hash for cache checking
+            temp_dir = tempfile.mkdtemp()
+            subprocess.run(
+                ['git', 'clone', '--depth', '1', repo_url, temp_dir],
+                check=True,
+                capture_output=True,
+                timeout=60
+            )
+            
+            temp_scanner = CryptoScanner(temp_dir)
+            repo_hash = temp_scanner.get_repo_hash()
+            
+            # Check cache
+            cached = db_manager.get_cached_scan(db, repo_hash)
+            if cached:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                details = db_manager.get_scan_details(db, cached['id'])
+                details['cached'] = True
+                details['message'] = 'Using cached scan results'
+                return details
+            
+            # Not cached - create pending job
+            repo_id = db_manager.create_scan_record(db, repo_url, repo_hash)
+            
+            # Clean up temp clone
             shutil.rmtree(temp_dir, ignore_errors=True)
-            details = db.get_scan_details(cached['id'])
-            details['cached'] = True
-            details['message'] = 'Using cached scan results'
-            return details
-        
-        # Not cached - create pending job
-        repo_id = db.create_scan_record(repo_url, repo_hash)
-        
-        # Clean up temp clone
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        
-        return ScanQueueResponse(
-            repo_id=repo_id,
-            repo_url=repo_url,
-            repo_hash=repo_hash,
-            scan_status='pending',
-            current_status='Queued for scanning',
-            message='Scan request queued successfully. Worker will process it shortly.',
-            created_at=datetime.now().isoformat()
-        )
-        
-    except subprocess.CalledProcessError as e:
-        if temp_dir:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        error_msg = e.stderr.decode() if e.stderr else 'Failed to clone repository'
-        raise HTTPException(status_code=400, detail=f'Failed to clone repository. Please check the URL. Details: {error_msg}')
-    except subprocess.TimeoutExpired:
-        if temp_dir:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        raise HTTPException(status_code=408, detail='Repository clone timed out. The repository might be too large or the connection is slow.')
-    except Exception as e:
-        if temp_dir:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=str(e))
+            
+            repo = db.query(Repository).filter(Repository.id == repo_id).first()
+            return ScanQueueResponse(
+                repo_id=repo.id,
+                repo_url=repo.repo_url,
+                repo_hash=repo.repo_hash,
+                scan_status=repo.scan_status,
+                current_status=repo.current_status,
+                message='Scan request queued successfully. Worker will process it shortly.',
+                created_at=repo.created_at
+            )
+            
+        except subprocess.CalledProcessError as e:
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            error_msg = e.stderr.decode() if e.stderr else 'Failed to clone repository'
+            raise HTTPException(status_code=400, detail=f'Failed to clone repository. Please check the URL. Details: {error_msg}')
+        except subprocess.TimeoutExpired:
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            raise HTTPException(status_code=408, detail='Repository clone timed out. The repository might be too large or the connection is slow.')
+        except Exception as e:
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get('/api/scans', response_model=List[AllScansResponse])
 async def get_scans():
     """Get list of all scans"""
-    scans = db.get_all_scans()
-    return scans
+    with get_db() as db:
+        scans = db_manager.get_all_scans(db)
+        return scans
 
 
 @app.get('/api/scans/{scan_id}', response_model=ScanDetailsResponse)
 async def get_scan_details_endpoint(scan_id: int):
     """Get detailed scan results"""
-    try:
-        details = db.get_scan_details(scan_id)
-        return details
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
+    with get_db() as db:
+        try:
+            details = db_manager.get_scan_details(db, scan_id)
+            return details
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
 
 
 @app.get('/api/queue/status', response_model=QueueStatusResponse)
 async def get_queue_status():
     """Get current queue status"""
-    try:
-        pending = db.get_pending_scans()
-        conn = sqlite3.connect(db.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM repositories WHERE scan_status = 'in_progress'")
-        in_progress_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM repositories WHERE scan_status = 'completed'")
-        completed_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM repositories WHERE scan_status = 'failed'")
-        failed_count = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        return {
-            'pending_count': len(pending),
-            'in_progress_count': in_progress_count,
-            'completed_count': completed_count,
-            'failed_count': failed_count,
-            'pending_jobs': pending[:5] # Return first 5 pending jobs
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    with get_db() as db:
+        try:
+            pending = db_manager.get_pending_scans(db)
+            in_progress_count = db.query(Repository).filter(Repository.scan_status == 'in_progress').count()
+            completed_count = db.query(Repository).filter(Repository.scan_status == 'completed').count()
+            failed_count = db.query(Repository).filter(Repository.scan_status == 'failed').count()
+            
+            return {
+                'pending_count': len(pending),
+                'in_progress_count': in_progress_count,
+                'completed_count': completed_count,
+                'failed_count': failed_count,
+                'pending_jobs': pending[:5] # Return first 5 pending jobs
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == '__main__':
