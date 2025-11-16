@@ -14,6 +14,8 @@ interface Algorithm {
 interface ScanDetail {
   id: number;
   repo_url: string;
+  platform: string;
+  branch_name: string;
   repo_hash: string;
   last_scanned: string;
   total_files: number;
@@ -25,6 +27,9 @@ interface ScanDetail {
 interface Scan {
   id: number;
   repo_url: string;
+  repo_hash: string;
+  branch_name: string;
+  platform: string;
   scan_status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cached';
   last_scanned: string;
   total_files: number;
@@ -44,6 +49,9 @@ const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL
 
 const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
   const [repoUrl, setRepoUrl] = useState('');
+  const [branchName, setBranchName] = useState('main');
+  const [detectedPlatform, setDetectedPlatform] = useState('');
+  const [isValidating, setIsValidating] = useState(false);
   const [scans, setScans] = useState<Scan[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [scanDetailsCache, setScanDetailsCache] = useState<Map<number, ScanDetail>>(new Map());
@@ -83,6 +91,47 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
     setTimeout(() => setShowStatus(false), 5000);
   };
 
+  const validateUrl = async (url: string) => {
+    if (!url.trim()) {
+      setDetectedPlatform('');
+      return;
+    }
+  
+    setIsValidating(true);
+    try {
+      const response = await fetch(`${API_URL}/api/validate-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: url }),
+      });
+  
+      const data = await response.json();
+  
+      if (response.ok) {
+        setDetectedPlatform(data.platform);
+        setRepoUrl(data.normalized_url); // Use normalized URL
+      } else {
+        setDetectedPlatform('');
+        showStatusMessage(data.detail || 'Invalid URL', 'error');
+      }
+    } catch (error) {
+      setDetectedPlatform('');
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  // Debounce URL validation
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (repoUrl) {
+        validateUrl(repoUrl);
+      }
+    }, 800); // Wait 800ms after user stops typing
+  
+    return () => clearTimeout(timer);
+  }, [repoUrl]);
+
   const loadHistory = async () => {
     try {
       const response = await fetch(`${API_URL}/api/scans`);
@@ -102,12 +151,17 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
       return;
     }
 
+    if (!branchName.trim()) {
+      showStatusMessage('Please enter a branch name', 'error');
+      return;
+    }
+
     setIsScanning(true);
     try {
       const response = await fetch(`${API_URL}/api/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_url: repoUrl }),
+        body: JSON.stringify({ repo_url: repoUrl, branch_name: branchName }),
       });
 
       const data = await response.json();
@@ -258,12 +312,26 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
       <div className="p-6 bg-gray-50 dark:bg-gray-900">
         <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg mb-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div>
+                <strong>Branch:</strong>{' '}
+                <span className="inline-flex items-center px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs font-medium ml-2">
+                  {data.branch_name || 'main'}
+                </span>
+              </div>
+              <div>
+                <strong>Platform:</strong>{' '}
+                <span className="inline-flex items-center px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs font-medium ml-2">
+                  {data.platform || 'Unknown'}
+                </span>
+              </div>
+              <div>
+                <strong>Last Scanned:</strong> {new Date(data.last_scanned).toLocaleString()}
+              </div>
+            </div>
+            <div className="mt-3">
               <strong>Commit Hash:</strong>{' '}
               <code className="bg-white dark:bg-gray-700 px-2 py-1 rounded text-xs">{data.repo_hash}</code>
-            </div>
-            <div>
-              <strong>Last Scanned:</strong> {new Date(data.last_scanned).toLocaleString()}
             </div>
           </div>
         </div>
@@ -322,11 +390,25 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
             canView ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800' : ''
           }`}
         >
-          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{scan.repo_url}</td>
+          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+            <div className="max-w-xs truncate" title={scan.repo_url}>
+              {scan.repo_url}
+            </div>
+          </td>
+          <td className="px-4 py-3">
+            <span className="inline-flex items-center px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs font-medium">
+              {scan.branch_name || 'main'}
+            </span>
+          </td>
+          <td className="px-4 py-3">
+            <span className="inline-flex items-center px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium">
+              {scan.platform || 'Unknown'}
+            </span>
+          </td>
           <td className="px-4 py-3">
             {getStatusBadge(scan.scan_status, scan.current_status)}
           </td>
-          <td className="px-4 py-3 text-gray-900">
+          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
             {new Date(scan.last_scanned).toLocaleString()}
           </td>
           <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{fileCountDisplay}</td>
@@ -363,7 +445,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
         </tr>
         {canView && isExpanded && (
           <tr className="bg-gray-50 dark:bg-gray-800/50">
-            <td colSpan={7}>
+            <td colSpan={9}>
               {scanDetailsCache.has(scan.id) ? (
                 renderExpandedContent(scanDetailsCache.get(scan.id)!)
               ) : (
@@ -422,35 +504,64 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2" htmlFor="repoUrl">
-              GitHub Repository URL
-            </label>
-            <div className="flex gap-3">
-              <input
-                type="text"
-                id="repoUrl"
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && scanRepository()}
-                placeholder="https://github.com/username/repository"
-                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" htmlFor="repoUrl">
+                Repository URL
+              </label>
+              
+              <div className="mb-3">
+                <input
+                  type="text"
+                  id="repoUrl"
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                  placeholder="https://github.com/username/repository"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                
+                {isValidating && (
+                  <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    <RefreshCw className="w-3 h-3 inline mr-1 animate-spin" />
+                    Validating URL...
+                  </div>
+                )}
+                
+                {detectedPlatform && !isValidating && (
+                  <div className="mt-2 inline-flex items-center px-3 py-1 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 text-sm">
+                    <Shield className="w-3 h-3 mr-1" />
+                    Detected: {detectedPlatform}
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" htmlFor="branchName">
+                  Branch Name
+                </label>
+                <input
+                  type="text"
+                  id="branchName"
+                  value={branchName}
+                  onChange={(e) => setBranchName(e.target.value)}
+                  placeholder="main"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Default: main (change to develop, master, etc. if needed)
+                </p>
+              </div>
+
               <button
                 onClick={scanRepository}
-                disabled={isScanning}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                disabled={isScanning || !repoUrl.trim() || !branchName.trim()}
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors"
               >
                 {isScanning ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 inline mr-2 animate-spin" />
-                    Submitting...
-                  </>
+                  <><RefreshCw className="w-4 h-4 inline mr-2 animate-spin" /> Submitting Scan...</>
                 ) : (
-                  'Scan Repository'
+                  <><Shield className="w-4 h-4 inline mr-2" /> Scan Repository</>
                 )}
               </button>
             </div>
-          </div>
         </div>
 
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
@@ -478,6 +589,12 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
                     Repository
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Branch
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Platform
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Status
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
@@ -500,13 +617,13 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={9} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                       Loading history...
                     </td>
                   </tr>
                 ) : scans.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={9} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                       No scans yet
                     </td>
                   </tr>

@@ -291,8 +291,7 @@ const Scan = () => {
       ) : view === 'gitscan' ? (
         <GitScan
           key="gitscan"
-          // Assuming GitScan has an onBack prop like WebScan
-          // onBack={() => setView('dashboard')} 
+          onBack={() => setView('dashboard')}
         />
       ) : view === 'dashboard' ? (
         // Dashboard View - Simple Navigation

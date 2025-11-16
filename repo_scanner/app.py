@@ -18,11 +18,11 @@ from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 import uvicorn
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import sessionmaker, relationship, Session
 from sqlalchemy.ext.declarative import declarative_base
 from contextlib import contextmanager
@@ -48,10 +48,12 @@ Base = declarative_base()
 class Repository(Base):
     __tablename__ = "repositories"
     id = Column(Integer, primary_key=True, index=True)
-    repo_url = Column(String, unique=True, index=True, nullable=False)
+    repo_url = Column(String, index=True, nullable=False)
     repo_hash = Column(String, nullable=False, index=True)
+    branch_name = Column(String, default='main', nullable=False)
+    platform = Column(String, default='GitHub', nullable=False)
     last_scanned = Column(DateTime, default=datetime.utcnow)
-    scan_status = Column(String, default='pending')
+    scan_status = Column(String, default='pending', nullable=False)
     total_files = Column(Integer, default=0)
     total_algorithms = Column(Integer, default=0)
     pqc_safe_count = Column(Integer, default=0)
@@ -60,6 +62,11 @@ class Repository(Base):
     total_files_to_scan = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     scan_results = relationship("ScanResult", back_populates="repository", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint('repo_url', 'repo_hash', 'branch_name', name='uix_repo_url_hash_branch'),
+    )
+
 
 class ScanResult(Base):
     __tablename__ = "scan_results"
@@ -448,17 +455,124 @@ CODE_EXTENSIONS = {
     '.thrift', '.graphql'
 }
 
+class RepoUrlParser:
+    """Parse and identify Git repository URLs from various platforms"""
+
+    @staticmethod
+    def detect_platform(repo_url: str) -> str:
+        """Detect the Git platform from URL"""
+        url_lower = repo_url.lower()
+
+        if 'github.com' in url_lower:
+            return 'GitHub'
+        elif 'gitlab.com' in url_lower or 'gitlab' in url_lower:
+            return 'GitLab'
+        elif 'bitbucket.org' in url_lower or 'bitbucket' in url_lower:
+            return 'Bitbucket'
+        elif 'azure.com' in url_lower or 'visualstudio.com' in url_lower:
+            return 'Azure DevOps'
+        elif 'gitea' in url_lower:
+            return 'Gitea'
+        elif 'codeberg.org' in url_lower:
+            return 'Codeberg'
+        elif 'sourceforge' in url_lower:
+            return 'SourceForge'
+        else:
+            return 'Generic Git'
+
+    @staticmethod
+    def normalize_url(repo_url: str) -> str:
+        """Normalize Git URL to clone format"""
+        from urllib.parse import urlparse  # Import at function level
+        import re
+
+        repo_url = repo_url.strip()
+        repo_url = repo_url.rstrip('/')
+
+        if repo_url.startswith('http://') or repo_url.startswith('https://'):
+            if repo_url.endswith('.git'):
+                return repo_url
+
+            parsed = urlparse(repo_url)
+
+            # GitHub URL patterns
+            if 'github.com' in parsed.netloc:
+                path = re.sub(r'/tree/[^/]+/?.*$', '', parsed.path)
+                path = re.sub(r'/blob/[^/]+/?.*$', '', parsed.path)
+                return f"https://github.com{path}.git"
+
+            # GitLab URL patterns
+            elif 'gitlab' in parsed.netloc:
+                path = re.sub(r'/-/tree/[^/]+/?.*$', '', parsed.path)
+                path = re.sub(r'/-/blob/[^/]+/?.*$', '', parsed.path)
+                if not path.endswith('.git'):
+                    path += '.git'
+                return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+            # Bitbucket URL patterns
+            elif 'bitbucket' in parsed.netloc:
+                path = re.sub(r'/src/[^/]+/?.*$', '', parsed.path)
+                if not path.endswith('.git'):
+                    path += '.git'
+                return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+            # Azure DevOps patterns
+            elif 'dev.azure.com' in parsed.netloc or 'visualstudio.com' in parsed.netloc:
+                if not repo_url.endswith('.git'):
+                    return repo_url + '.git'
+                return repo_url
+
+            # Generic HTTPS
+            else:
+                if not repo_url.endswith('.git'):
+                    return repo_url + '.git'
+                return repo_url
+
+        elif repo_url.startswith('git@'):
+            return repo_url
+        elif repo_url.startswith('git://'):
+            return repo_url
+        elif '/' in repo_url and not repo_url.startswith('http'):
+            return f"https://github.com/{repo_url}.git"
+
+        return repo_url
+
+    @staticmethod
+    def validate_url(repo_url: str) -> Tuple[bool, str]:
+        """Validate if URL is a valid Git repository URL"""
+        if not repo_url or not repo_url.strip():
+            return False, "Repository URL is empty"
+
+        repo_url = repo_url.strip()
+
+        valid_patterns = [r'^https?://', r'^git@', r'^git://', r'^[\w-]+/[\w-]+$']
+
+        if not any(re.match(pattern, repo_url) for pattern in valid_patterns):
+            return False, "Invalid repository URL format"
+
+        if ' ' in repo_url:
+            return False, "Repository URL contains spaces"
+
+        return True, "Valid URL"
 
 class Database:
     """PostgreSQL database manager for scan results with job queue"""
 
-    def get_cached_scan(self, db: Session, repo_hash: str) -> Optional[Dict]:
-        """Check if completed scan exists for this repo hash"""
-        repo = db.query(Repository).filter(Repository.repo_hash == repo_hash, Repository.scan_status == 'completed').order_by(Repository.last_scanned.desc()).first()
+    def get_cached_scan(self, db: Session, repo_url: str, repo_hash: str, branch_name: str) -> Optional[Dict]:
+        """Check if completed scan exists for this repo hash and branch"""
+        repo = db.query(Repository).filter(
+            Repository.repo_url == repo_url,
+            Repository.repo_hash == repo_hash,
+            Repository.branch_name == branch_name,
+            Repository.scan_status == 'completed'
+        ).order_by(Repository.last_scanned.desc()).first()
+
         if repo:
             return {
                 'id': repo.id,
                 'repo_url': repo.repo_url,
+                'branch_name': repo.branch_name,
+                'platform': repo.platform,
                 'last_scanned': repo.last_scanned,
                 'scan_status': 'cached',
                 'total_files': repo.total_files,
@@ -471,11 +585,16 @@ class Database:
             }
         return None
 
-    def create_scan_record(self, db: Session, repo_url: str, repo_hash: str) -> int:
+    def create_scan_record(self, db: Session, repo_url: str, repo_hash: str, branch_name: str, platform: str) -> int:
         """Create initial scan record with 'pending' status"""
-        repo = db.query(Repository).filter(Repository.repo_url == repo_url).first()
+        repo = db.query(Repository).filter(
+            Repository.repo_url == repo_url,
+            Repository.branch_name == branch_name
+        ).first()
+
         if repo:
             repo.repo_hash = repo_hash
+            repo.platform = platform
             repo.scan_status = 'pending'
             repo.current_status = 'Queued for scanning'
             repo.created_at = datetime.utcnow()
@@ -483,6 +602,8 @@ class Database:
             repo = Repository(
                 repo_url=repo_url,
                 repo_hash=repo_hash,
+                branch_name=branch_name,
+                platform=platform,
                 scan_status='pending',
                 current_status='Queued for scanning'
             )
@@ -499,6 +620,8 @@ class Database:
                 'id': scan.id,
                 'repo_url': scan.repo_url,
                 'repo_hash': scan.repo_hash,
+                'branch_name': scan.branch_name,
+                'platform': scan.platform,
                 'created_at': scan.created_at
             } for scan in scans
         ]
@@ -588,6 +711,8 @@ class Database:
             'repo_id': repo.id,
             'repo_url': repo.repo_url,
             'repo_hash': repo.repo_hash,
+            'branch_name': repo.branch_name,
+            'platform': repo.platform,
             'last_scanned': repo.last_scanned,
             'scan_status': repo.scan_status,
             'total_files': repo.total_files,
@@ -607,6 +732,8 @@ class Database:
                 'id': scan.id,
                 'repo_url': scan.repo_url,
                 'repo_hash': scan.repo_hash,
+                'branch_name': scan.branch_name,
+                'platform': scan.platform,
                 'last_scanned': scan.last_scanned,
                 'scan_status': scan.scan_status,
                 'total_files': scan.total_files,
@@ -735,7 +862,7 @@ class CryptoScanner:
         }
 
 
-def process_scan_job(repo_id: int, repo_url: str):
+def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
     """Process a single scan job"""
     temp_dir = None
     
@@ -747,7 +874,7 @@ def process_scan_job(repo_id: int, repo_url: str):
             # Clone repository
             temp_dir = tempfile.mkdtemp()
             subprocess.run(
-                ['git', 'clone', '--depth', '1', repo_url, temp_dir],
+                ['git', 'clone', '--depth', '1', '--branch', branch_name, repo_url, temp_dir],
                 check=True,
                 capture_output=True,
                 timeout=300 # 5 minute timeout for cloning
@@ -759,7 +886,7 @@ def process_scan_job(repo_id: int, repo_url: str):
             # Get all files
             all_files_to_scan = scanner.get_all_code_files()
             total_files = len(all_files_to_scan)
-            db_manager.update_scan_progress(db, repo_id, 0, total_files, 'Preparing to scan files...')
+            db_manager.update_scan_progress(db, repo_id, 0, total_files, f'Preparing to scan branch {branch_name}...')
 
             # Perform scan
             scanned_count = 0
@@ -788,7 +915,11 @@ def process_scan_job(repo_id: int, repo_url: str):
             logger.info(f"✓ Scan completed for repo ID {repo_id}: {repo_url}")
             
         except subprocess.CalledProcessError as e:
-            error_msg = f"Failed to clone repository: {e.stderr.decode() if e.stderr else str(e)}"
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            if 'did not match any remote' in error_msg or 'not found' in error_msg.lower():
+                error_msg = f"Branch '{branch_name}' not found in repository"
+            else:
+                error_msg = f"Failed to clone repository: {error_msg}"
             logger.error(f"✗ Scan failed for ID {repo_id}: {error_msg}")
             db_manager.mark_scan_failed(db, repo_id, error_msg)
         except subprocess.TimeoutExpired:
@@ -827,10 +958,10 @@ active_scans = set()
 lock = threading.Lock()
 
 
-def process_scan_wrapper(repo_id: int, repo_url: str):
+def process_scan_wrapper(repo_id: int, repo_url: str, branch_name: str):
     """Wrapper to ensure cleanup of active_scans set even on error."""
     try:
-        process_scan_job(repo_id, repo_url)
+        process_scan_job(repo_id, repo_url, branch_name)
     finally:
         with lock:
             active_scans.discard(repo_id)
@@ -858,11 +989,11 @@ def job_queue_worker():
                         break  # Respect concurrency limit
                     active_scans.add(scan['id'])
 
-                logger.info(f"⚙️  Starting scan: {scan['repo_url']} (ID: {scan['id']})")
+                logger.info(f"⚙️  Starting scan: {scan['repo_url']} (Branch: {scan['branch_name']}, Platform: {scan['platform']}, ID: {scan['id']})")
 
                 thread = threading.Thread(
                     target=process_scan_wrapper,
-                    args=(scan['id'], scan['repo_url']),
+                    args=(scan['id'], scan['repo_url'], scan['branch_name']),
                     daemon=True
                 )
                 thread.start()
@@ -879,11 +1010,14 @@ def job_queue_worker():
 # Pydantic Models for Request/Response Validation
 class ScanRequest(BaseModel):
     repo_url: str
+    branch_name: Optional[str] = 'main'
 
 class ScanQueueResponse(BaseModel):
     repo_id: int
     repo_url: str
     repo_hash: str
+    branch_name: str
+    platform: str
     scan_status: str
     current_status: str
     message: str
@@ -899,6 +1033,8 @@ class ScanDetailsResponse(BaseModel):
     repo_id: int
     repo_url: str
     repo_hash: str
+    branch_name: str
+    platform: str
     last_scanned: datetime
     scan_status: str
     total_files: int
@@ -915,6 +1051,8 @@ class AllScansResponse(BaseModel):
     id: int
     repo_url: str
     repo_hash: str
+    branch_name: str
+    platform: str
     last_scanned: datetime
     scan_status: str
     total_files: int
@@ -949,62 +1087,106 @@ app.add_middleware(
 
 
 db_manager = Database()
+url_parser = RepoUrlParser()
 
 # Start job queue worker in background thread
 worker_thread = threading.Thread(target=job_queue_worker, daemon=True)
 worker_thread.start()
 
+@app.post('/api/validate-url', status_code=status.HTTP_200_OK)
+async def validate_url_endpoint(scan_request: ScanRequest):
+    """Validate and parse repository URL"""
+    repo_url = scan_request.repo_url.strip()
+
+    if not repo_url:
+        raise HTTPException(status_code=400, detail='Repository URL is required')
+
+    is_valid, message = url_parser.validate_url(repo_url)
+
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=message)
+
+    normalized_url = url_parser.normalize_url(repo_url)
+    platform = url_parser.detect_platform(normalized_url)
+
+    return {
+        'valid': True,
+        'normalized_url': normalized_url,
+        'platform': platform,
+        'message': f'Valid {platform} repository URL'
+    }
+
 @app.post('/api/scan', status_code=status.HTTP_200_OK)
 async def scan_repository_endpoint(scan_request: ScanRequest):
     """Queue a scan request (checks cache first)"""
-    repo_url = str(scan_request.repo_url)
+    repo_url = scan_request.repo_url
+    branch_name = scan_request.branch_name or 'main'  # Default to 'main'
+    branch_name = branch_name.strip()
+
+    if not repo_url:
+        raise HTTPException(status_code=400, detail='repo_url is required')
+
+    # Validate URL
+    is_valid, validation_msg = url_parser.validate_url(repo_url)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=validation_msg)
+
+    # Normalize URL and detect platform
+    normalized_url = url_parser.normalize_url(repo_url)
+    platform = url_parser.detect_platform(normalized_url)
+
     temp_dir = None
-    
+
     with get_db() as db:
         try:
             # Quick clone to get hash for cache checking
             temp_dir = tempfile.mkdtemp()
             subprocess.run(
-                ['git', 'clone', '--depth', '1', repo_url, temp_dir],
+                ['git', 'clone', '--depth', '1', '--branch', branch_name, normalized_url, temp_dir],
                 check=True,
                 capture_output=True,
                 timeout=60
             )
-            
+
             temp_scanner = CryptoScanner(temp_dir)
             repo_hash = temp_scanner.get_repo_hash()
-            
-            # Check cache
-            cached = db_manager.get_cached_scan(db, repo_hash)
+
+            # Check cache with branch
+            cached = db_manager.get_cached_scan(db, normalized_url, repo_hash, branch_name)
             if cached:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 details = db_manager.get_scan_details(db, cached['id'])
                 details['cached'] = True
                 details['message'] = 'Using cached scan results'
+                details['platform'] = platform
                 return details
-            
+
             # Not cached - create pending job
-            repo_id = db_manager.create_scan_record(db, repo_url, repo_hash)
-            
+            repo_id = db_manager.create_scan_record(db, normalized_url, repo_hash, branch_name, platform)
+
             # Clean up temp clone
             shutil.rmtree(temp_dir, ignore_errors=True)
-            
+
             repo = db.query(Repository).filter(Repository.id == repo_id).first()
             return ScanQueueResponse(
                 repo_id=repo.id,
                 repo_url=repo.repo_url,
                 repo_hash=repo.repo_hash,
+                branch_name=repo.branch_name,
+                platform=repo.platform,
                 scan_status=repo.scan_status,
                 current_status=repo.current_status,
-                message='Scan request queued successfully. Worker will process it shortly.',
+                message=f'Scan request queued successfully for {platform} branch "{branch_name}". Worker will process it shortly.',
                 created_at=repo.created_at
             )
-            
+
         except subprocess.CalledProcessError as e:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             error_msg = e.stderr.decode() if e.stderr else 'Failed to clone repository'
-            raise HTTPException(status_code=400, detail=f'Failed to clone repository. Please check the URL. Details: {error_msg}')
+            if 'did not match any remote' in error_msg or 'not found' in error_msg.lower():
+                error_msg = f"Branch '{branch_name}' not found in {platform} repository"
+            raise HTTPException(status_code=400, detail=f'Failed to clone repository from {platform}. Details: {error_msg}')
         except subprocess.TimeoutExpired:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1032,6 +1214,37 @@ async def get_scan_details_endpoint(scan_id: int):
             return details
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
+
+
+@app.get('/api/scans/{scan_id}/algorithm/{algorithm}/findings')
+async def get_algorithm_findings(scan_id: int, algorithm: str):
+    """Get detailed findings for a specific algorithm in a scan"""
+    with get_db() as db:
+        try:
+            # Get scan result for this algorithm
+            scan_result = db.query(ScanResult).filter(
+                ScanResult.repo_id == scan_id,
+                ScanResult.algorithm == algorithm
+            ).first()
+
+            if not scan_result:
+                raise HTTPException(status_code=404, detail='Algorithm not found in this scan')
+
+            # Get all findings for this scan result
+            findings = db.query(Finding).filter(
+                Finding.scan_result_id == scan_result.id
+            ).order_by(Finding.file_path, Finding.line_number).all()
+
+            return [
+                {
+                    'file_path': finding.file_path,
+                    'line_number': finding.line_number,
+                    'context': finding.context,
+                    'match_text': finding.match_text
+                } for finding in findings
+            ]
         except Exception as e:
             raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
 
