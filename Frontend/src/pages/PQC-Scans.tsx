@@ -1,8 +1,42 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive } from 'lucide-react';
+import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { AgentResultsPage } from '@/components/system-scan/scan-results';
+
 
 // Access environment variables
 const VITE_SYSTEM_SCAN_API_URL = import.meta.env.VITE_SYSTEM_SCAN_API_URL;
+
+// Corporate Color System
+const COLORS = {
+  primary: '#1e3a8a',      // Deep navy for primary actions
+  accent: '#3b82f6',       // Electric blue for CTAs
+  success: '#10b981',      // Green for success states
+  warning: '#f59e0b',      // Amber for warnings
+  critical: '#ef4444',     // Red for errors
+  neutral: {
+    50: '#f9fafb',
+    100: '#f3f4f6',
+    200: '#e5e7eb',
+    300: '#d1d5db',
+    400: '#9ca3af',
+    500: '#6b7280',
+    600: '#4b5563',
+    700: '#374151',
+    800: '#1f2937',
+    900: '#111827',
+  }
+};
+
+// Button Styles
+const BUTTON_STYLES = {
+  primary: "h-10 px-6 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium text-base rounded-md transition-colors duration-150 flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed",
+  secondary: "h-10 px-6 bg-white hover:bg-gray-50 active:bg-gray-100 text-slate-700 font-medium text-base rounded-md border border-slate-300 transition-colors duration-150 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
+  danger: "h-10 px-6 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-medium text-base rounded-md transition-colors duration-150 flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed",
+  ghost: "h-10 px-4 hover:bg-gray-100 active:bg-gray-200 text-slate-700 font-medium text-base rounded-md transition-colors duration-150 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
+};
 
 
 // Types
@@ -118,10 +152,10 @@ const StatusIndicator: React.FC<{ status: boolean; trueText?: string; falseText?
   status, 
   trueText = 'Yes', 
   falseText = 'No' 
-}) => (
-  <div className={`inline-flex items-center gap-1 text-sm font-medium ${status ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-    {status ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-    <span>{status ? trueText : falseText}</span>
+}) => ( // eslint-disable-line @typescript-eslint/no-unused-vars
+  <div className={`inline-flex items-center gap-1 text-sm font-medium ${status ? 'text-green-600' : 'text-red-600'}`}>
+    {status ? <CheckCircle size={14} /> : <X size={14} />}
+    <span className="text-slate-900 dark:text-slate-100">{status ? trueText : falseText}</span>
   </div>
 );
 
@@ -129,7 +163,7 @@ const StatusIndicator: React.FC<{ status: boolean; trueText?: string; falseText?
 const StatusBadge: React.FC<{ status: boolean | string; label?: string }> = ({ status, label }) => {
   if (status === true || status === 'enabled') {
     return (
-      <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full text-sm font-medium">
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-md text-sm font-medium">
         <CheckCircle size={14} />
         {label || 'Enabled'}
       </div>
@@ -137,14 +171,14 @@ const StatusBadge: React.FC<{ status: boolean | string; label?: string }> = ({ s
   }
   if (status === false || status === 'disabled') {
     return (
-      <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full text-sm font-medium">
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-md text-sm font-medium">
         <AlertCircle size={14} />
         {label || 'Disabled'}
       </div>
     );
   }
   return (
-    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-full text-sm font-medium">
+    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-md text-sm font-medium">
       <AlertCircle size={14} />
       {label || 'Warning'}
     </div>
@@ -211,7 +245,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
         icon: <Key size={18} />,
         color: 'blue',
         data: {
-          'FIPS Mode': cryptoapi.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled',
+          'FIPS Mode': cryptoapi.fips_mode_enabled ? 'Enabled' : 'Disabled',
           'Crypto Providers': cryptoapi.cryptographic_providers?.count || 0,
           'Registered Algorithms': cryptoapi.registered_oid_algorithms?.count || 0,
           'ECC Curves': cryptoapi.ecc_curves_registered?.count || 0
@@ -288,7 +322,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
           if (value.available) {
             availableAlgos.push({
               'Algorithm': key.toUpperCase(),
-              'Status': '✓ Available'
+              'Status': 'Available'
             });
           }
         });
@@ -314,7 +348,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
           .forEach((proto: any) => {
             protocols.push({
               'Protocol': proto.protocol.toUpperCase().replace('_', '.'),
-              'Status': '✓ Enabled',
+              'Status': 'Enabled',
               'Cipher Count': proto.cipher_count
             });
         });
@@ -337,7 +371,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
         color: 'green',
         data: {
           'OpenSSL Version': openssl.version_details?.split('\n')[0] || 'N/A',
-          'FIPS Mode': openssl.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled',
+          'FIPS Mode': openssl.fips_mode_enabled ? 'Enabled' : 'Disabled',
           'Total Ciphers': openssl.cipher_information?.total_ciphers || 0,
           'Platform': openssl.version_details?.split('\n').find((l: string) => l.includes('platform:'))?.split(':')[1]?.trim() || 'N/A'
         },
@@ -445,9 +479,9 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
                 'Key Algorithm': cert.crypto_information.key_algorithm,
                 'Key Size': `${cert.crypto_information.key_size} bits`,
                 'Signature Algorithm': cert.crypto_information.signature_algorithm,
-                'Uses SHA-1': cert.crypto_information.characteristics?.includes('uses_sha1_signature') ? '⚠️ Yes' : '✓ No',
-                'Uses SHA-256': cert.crypto_information.characteristics?.includes('uses_sha256_signature') ? '✓ Yes' : 'No',
-                'RSA Algorithm': cert.crypto_information.characteristics?.includes('rsa_algorithm') ? '✓ Yes' : 'No'
+                'Uses SHA-1': cert.crypto_information.characteristics?.includes('uses_sha1_signature') ? 'Yes' : 'No',
+                'Uses SHA-256': cert.crypto_information.characteristics?.includes('uses_sha256_signature') ? 'Yes' : 'No',
+                'RSA Algorithm': cert.crypto_information.characteristics?.includes('rsa_algorithm') ? 'Yes' : 'No'
               }
           };
         }) || [];
@@ -479,7 +513,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
                 'Key Size': `${cert.public_key_size} bits`,
                 'Signature': cert.signature_algorithm,
                 'Valid Until': cert.not_after,
-                'Private Key': cert.has_private_key ? '✓' : '✗'
+                'Private Key': cert.has_private_key ? 'Yes' : 'No'
               });
             });
           }
@@ -524,7 +558,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
           if (value) {
             cpuFeatures.push({
               'Feature': readableName,
-              'Status': '✓ Supported'
+              'Status': 'Supported'
             });
           }
         });
@@ -625,7 +659,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
         icon: <Shield size={18} />,
         color: 'red',
         data: {
-          'FIPS Kernel Mode': security.fips_kernel_mode ? '✓ Enabled' : '✗ Disabled',
+          'FIPS Kernel Mode': security.fips_kernel_mode ? 'Enabled' : 'Disabled',
           'System Entropy': `${security.system_entropy} bits`,
           'Crypto Libraries': security.crypto_libraries?.length || 0,
           'Kernel Algorithms': security.kernel_crypto_algorithms?.length || 0
@@ -672,6 +706,7 @@ const AgentResultsView: React.FC<{
 }> = ({ agentId, tasks, results, expandedResults, toggleResultDetails, onRetryFetch, retryingResults, getRelativeTime }) => { // eslint-disable-line @typescript-eslint/no-unused-vars
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [showRawJson, setShowRawJson] = useState(false);
+  const [activeSection, setActiveSection] = useState<string>('');
 
   const latestResult = useMemo(() => {
     const completedResults = results
@@ -687,6 +722,12 @@ const AgentResultsView: React.FC<{
     if (!latestResult) return [];
     return processAuditResults(latestResult.audit_results);
   }, [latestResult]);
+
+  useEffect(() => {
+    if (processedSections.length > 0 && !activeSection) {
+      setActiveSection(processedSections[0].title);
+    }
+  }, [processedSections, activeSection]);
 
   const toggleSection = (sectionTitle: string) => {
     setExpandedSections(prev => {
@@ -712,91 +753,92 @@ const AgentResultsView: React.FC<{
   return (
     <div className="space-y-4">
       {/* Header with metadata */}
-      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 mb-2">
+      <div className="bg-blue-50 dark:bg-blue-900/10 p-6 rounded-lg border-l-4 border-blue-500">
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div className="flex-1 min-w-0">
+            <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-3">
               Latest Audit Result
             </h4>
-            <div className="flex flex-wrap gap-4 text-sm">
-              <div>
-                <span className="text-slate-600 dark:text-slate-400">Submitted: </span>
-                <span className="text-slate-900 dark:text-slate-100">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div className="flex flex-col gap-1">
+                <span className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Submitted</span>
+                <span className="text-slate-900 dark:text-slate-100 font-semibold">
                   {new Date(latestResult.submitted_at).toLocaleString()}
                 </span>
               </div>
-              <div>
-                <span className="text-slate-600 dark:text-slate-400">Task ID: </span>
-                <code className="text-xs">{latestResult.task_id.substring(0, 16)}...</code>
+              <div className="flex flex-col gap-1">
+                <span className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Task ID</span>
+                <code className="text-slate-900 dark:text-slate-100 font-semibold">{latestResult.task_id.substring(0, 16)}...</code>
               </div>
-              <div>
-                <span className="text-slate-600 dark:text-slate-400">OS: </span>
-                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                  os === 'Windows' 
-                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
-                    : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                }`}>
-                  {os}
-                </span>
+              <div className="flex flex-col gap-1">
+                <span className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">OS</span>
+                <div className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${
+                    os === 'Windows' ? 'bg-blue-500' : 'bg-green-500'
+                  }`} />
+                  <span className="text-slate-900 dark:text-slate-100 font-semibold">
+                    {os}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
         {os === 'Linux' ? (
           <>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">OpenSSL Version</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate"
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">OpenSSL Version</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100 truncate"
                    title={(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.openssl_crypto?.version_details?.split('\n')[0] || 'N/A'}>
                 {((latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.openssl_crypto?.version_details?.split('\n')[0]?.split(' ')[1]) || 'N/A'}
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Total Ciphers</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">Total Ciphers</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
                 {(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.openssl_crypto?.cipher_information?.total_ciphers || 0}
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Certificates</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">Certificates</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
                 {(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.certificates?.certificates?.length || 0}
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">CPU Features</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">CPU Features</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
                 {(latestResult?.audit_results.with_sudo || latestResult?.audit_results.without_sudo)?.hardware_crypto?.crypto_feature_count || 0}
               </div>
             </div>
           </>
         ) : (
           <>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">FIPS Mode</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                {latestResult?.audit_results.cryptoapi_info?.fips_mode_enabled ? '✓ Enabled' : '✗ Disabled'}
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">FIPS Mode</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
+                {latestResult?.audit_results.cryptoapi_info?.fips_mode_enabled ? 'Enabled' : 'Disabled'}
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Cipher Suites</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">Cipher Suites</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
                 {latestResult?.audit_results.tls_ssl_configuration?.cipher_suites?.total_cipher_suites || 0}
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Certificates</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                {Object.values(latestResult?.audit_results.certificate_stores || {}).reduce((sum: number, store: any) => 
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">Certificates</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
+                {(Object.values(latestResult?.audit_results.certificate_stores || {}) as any[]).reduce((sum: number, store: any) => 
                   sum + (store.certificate_count || 0), 0)}
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-              <div className="text-slate-500 dark:text-slate-400 text-sm font-medium mb-1">Crypto Providers</div>
-              <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-6 shadow-sm border-l-4 border-blue-500 min-h-[120px] flex flex-col justify-between">
+              <div className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-2">Crypto Providers</div>
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
                 {latestResult?.audit_results.cryptoapi_info?.cryptographic_providers?.count || 0}
               </div>
             </div>
@@ -805,30 +847,72 @@ const AgentResultsView: React.FC<{
       </div>
 
       {/* Sections with Document 2 styling */}
-      <div className="space-y-4">
-        {processedSections.map((section) => (
-          <CollapsibleSection
-            key={section.title}
-            section={section}
-            isExpanded={expandedSections.has(section.title)}
-            onToggle={() => toggleSection(section.title)}
-          />
-        ))}
+      <div className="space-y-6">
+        <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="flex overflow-x-auto border-b border-slate-200 dark:border-slate-700">
+            {processedSections.map((section) => (
+              <button
+                key={section.title}
+                onClick={() => setActiveSection(section.title)}
+                className={`flex items-center gap-2 px-6 py-4 whitespace-nowrap font-medium transition-colors relative ${
+                  activeSection === section.title
+                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                {section.icon}
+                <span>{section.title}</span>
+                {activeSection === section.title && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                )}
+              </button>
+            ))}
+          </div>
+          
+          {/* Active Section Content */}
+          <div className="p-6">
+            {processedSections
+              .filter(section => section.title === activeSection)
+              .map(section => (
+                <div key={section.title}>
+                  {/* Main Data */}
+                  <div className="bg-white dark:bg-slate-900 rounded-lg p-4 mb-4">
+                    {Object.entries(section.data).map(([key, value]) => (
+                      <InfoRow key={key} label={key} value={value} />
+                    ))}
+                  </div>
+
+                  {/* Subsections */}
+                  {section.subsections && section.subsections.length > 0 && (
+                    <div className="space-y-4">
+                      {section.subsections.map((subsection, idx) => (
+                        <CollapsibleSubsection key={idx} subsection={subsection} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
         
         {/* Raw JSON Section */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-          <button
+        <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <button // eslint-disable-line @typescript-eslint/no-misused-promises
             onClick={() => setShowRawJson(!showRawJson)}
-            className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors duration-150"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-slate-500 to-slate-600 rounded-lg text-white">
-                <FileText size={18} />
+              <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                <FileText size={18} className="text-slate-700 dark:text-slate-300" />
               </div>
-              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Raw JSON Data</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Raw JSON Data</h3>
             </div>
-            <div className={`transition-transform duration-500 ease-in-out ${showRawJson ? 'rotate-180' : ''}`}>
-              <ChevronDown size={20} className="text-slate-400" />
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 hidden sm:inline">Click to {showRawJson ? 'hide' : 'show'}</span>
+              <ChevronRight 
+                size={20} 
+                className={`text-slate-400 transition-transform duration-200 ${showRawJson ? 'rotate-90' : ''}`}
+              />
             </div>
           </button>
           
@@ -836,12 +920,23 @@ const AgentResultsView: React.FC<{
             className={`transition-all duration-500 ease-in-out ${
               showRawJson ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
             }`}
-            style={{ overflow: showRawJson ? 'visible' : 'hidden' }}
+            style={{ overflow: showRawJson ? 'auto' : 'hidden' }}
           >
             <div className="border-t border-slate-200 dark:border-slate-700">
-              <pre className="p-4 overflow-auto max-h-96 text-xs bg-slate-900 dark:bg-slate-950 text-green-400 font-mono">
-                {JSON.stringify(latestResult.audit_results, null, 2)}
-              </pre>
+              <div className="relative p-6">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(latestResult.audit_results, null, 2));
+                  }}
+                  className="absolute top-4 right-4 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded-md transition-colors duration-150 flex items-center gap-1.5 z-10"
+                >
+                  <FileDown size={14} />
+                  Copy JSON
+                </button>
+                <pre className="overflow-auto max-h-96 text-sm bg-slate-950 text-emerald-400 font-mono leading-relaxed">
+                  {JSON.stringify(latestResult.audit_results, null, 2)}
+                </pre>
+              </div>
             </div>
           </div>
         </div>
@@ -849,8 +944,8 @@ const AgentResultsView: React.FC<{
 
       {/* Historical scans summary */}
       {results.length > 1 && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
-          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 leading-relaxed">
             <Clock size={16} />
             <span className="text-sm font-medium">
               Showing latest result. {results.length - 1} previous scan{results.length > 2 ? 's' : ''} available in history.
@@ -862,21 +957,77 @@ const AgentResultsView: React.FC<{
   );
 };
 
+const CollapsibleSubsection: React.FC<{
+  subsection: { title: string; data: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+}> = ({ subsection }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full px-6 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors duration-150"
+      >
+        <ChevronRight 
+          size={18} 
+          className={`text-slate-500 transition-transform duration-200 flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+        />
+        <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-left">{subsection.title}</h4>
+      </button>
+      
+      <div 
+        className={`transition-all duration-300 ${
+          isExpanded ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0'
+        }`}
+        style={{ overflow: isExpanded ? 'auto' : 'hidden' }}
+      >
+        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/30">
+          {Array.isArray(subsection.data) ? (
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+            {subsection.data.map((item: any, itemIdx: number) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+                <div key={itemIdx} className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-colors duration-150">
+              <div className="grid grid-cols-1">
+                    {Object.entries(item).map(([key, value]) => (
+                  <div key={key} className="flex flex-col sm:flex-row gap-2 py-1">
+                    <span className="text-sm text-slate-500 dark:text-slate-400 flex-shrink-0 sm:min-w-[100px]">{key}:</span>
+                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100 font-mono break-words min-w-0 flex-1">
+                          {String(value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white dark:bg-slate-900 rounded p-3">
+              {Object.entries(subsection.data).map(([key, value]) => (
+                <InfoRow key={key} label={key} value={value} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const InfoRow = ({ label, value }: { label: string; value: any }) => (
+  <div className="flex flex-col sm:flex-row py-4 border-b border-slate-100 dark:border-slate-800 last:border-0 gap-2">
+    <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 sm:min-w-[160px]">{label}</span>
+    <span className="text-base text-slate-900 dark:text-slate-100 font-mono break-words flex-1">
+      {String(value)}
+    </span>
+  </div>
+);
+
 const CollapsibleSection: React.FC<{
   section: SectionData;
   isExpanded: boolean;
   onToggle: () => void;
 }> = ({ section, isExpanded, onToggle }) => {
   const [expandedSubsections, setExpandedSubsections] = useState<Set<number>>(new Set());
-
-  const colorClasses = {
-    blue: 'from-blue-500 to-blue-600',
-    green: 'from-green-500 to-emerald-600',
-    purple: 'from-purple-500 to-pink-600',
-    amber: 'from-amber-500 to-orange-600',
-    indigo: 'from-indigo-500 to-purple-600',
-    red: 'from-red-500 to-rose-600',
-  }[section.color] || 'from-slate-500 to-slate-600';
 
   const toggleSubsection = (idx: number) => {
     setExpandedSubsections(prev => {
@@ -890,37 +1041,32 @@ const CollapsibleSection: React.FC<{
     });
   };
 
-  const InfoRow = ({ label, value }: { label: string; value: any }) => (
-    <div className="flex flex-col sm:flex-row py-3 border-b border-slate-200 dark:border-slate-700 last:border-0 gap-2">
-      <span className="text-sm font-medium text-slate-600 dark:text-slate-400 flex-shrink-0">{label}</span>
-      <span className="text-sm text-slate-900 dark:text-slate-100 font-mono break-words min-w-0 flex-1">
-        {String(value)}
-      </span>
-    </div>
-  );
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
       <button // eslint-disable-line @typescript-eslint/no-misused-promises
         onClick={onToggle}
-        className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+        className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors duration-150"
       >
         <div className="flex items-center gap-3">
-          <div className={`p-2 bg-gradient-to-br ${colorClasses} rounded-lg text-white`}>
-            {section.icon}
+          <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <div className="text-blue-600 dark:text-blue-400">
+              {section.icon}
+            </div>
           </div>
-          <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{section.title}</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{section.title}</h3>
         </div>
-        <div className={`transition-transform duration-500 ease-in-out ${isExpanded ? 'rotate-180' : ''}`}>
-          <ChevronDown size={20} className="text-slate-400" />
-        </div>
+        <ChevronRight 
+          size={20} 
+          className={`text-slate-400 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
+        />
       </button>
       
       <div 
-        className={`transition-all duration-500 ease-in-out ${
-          isExpanded ? 'max-h-[8000px] opacity-100' : 'max-h-0 opacity-0'
+        className={`transition-all duration-300 ${
+          isExpanded ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0'
         }`}
-        style={{ overflow: isExpanded ? 'visible' : 'hidden' }}
+        style={{ overflow: isExpanded ? 'auto' : 'hidden' }}
       >
         <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700">
           {/* Main Data */}
@@ -932,36 +1078,35 @@ const CollapsibleSection: React.FC<{
 
           {/* Subsections */}
           {section.subsections && section.subsections.length > 0 && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {section.subsections.map((subsection, idx) => (
                 <div key={idx} className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
                   <button // eslint-disable-line @typescript-eslint/no-misused-promises
                     onClick={() => toggleSubsection(idx)}
-                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                    className="w-full px-6 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors duration-150"
                   >
-                    <div className="flex items-center gap-2">
-                      <div className={`transition-transform duration-500 ease-in-out ${expandedSubsections.has(idx) ? 'rotate-90' : ''}`}>
-                        <ChevronRight size={18} className="text-slate-600 dark:text-slate-400" />
-                      </div>
-                      <h4 className="font-semibold text-slate-800 dark:text-slate-100">{subsection.title}</h4>
-                    </div>
+                    <ChevronRight 
+                      size={18} 
+                      className={`text-slate-500 transition-transform duration-200 flex-shrink-0 ${expandedSubsections.has(idx) ? 'rotate-90' : ''}`}
+                    />
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-left">{subsection.title}</h4>
                   </button>
                   
                   <div 
-                    className={`transition-all duration-500 ease-in-out ${
+                    className={`transition-all duration-300 ${
                       expandedSubsections.has(idx) ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0'
                     }`}
-                    style={{ overflow: expandedSubsections.has(idx) ? 'visible' : 'hidden' }}
+                    style={{ overflow: expandedSubsections.has(idx) ? 'auto' : 'hidden' }}
                   >
-                    <div className="px-4 py-3 bg-slate-50 dark:bg-slate-900/50">
+                    <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/30">
                       {Array.isArray(subsection.data) ? (
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                        <div className="space-y-3 max-h-96 overflow-y-auto">
                         {subsection.data.map((item: any, itemIdx: number) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                            <div key={itemIdx} className="bg-white dark:bg-slate-900 rounded p-3 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 transition-colors">
+                            <div key={itemIdx} className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-colors duration-150">
                           <div className="grid grid-cols-1">
                                 {Object.entries(item).map(([key, value]) => (
                               <div key={key} className="flex flex-col sm:flex-row gap-2 py-1">
-                                <span className="text-xs text-slate-500 dark:text-slate-400 flex-shrink-0 sm:min-w-[100px]">{key}:</span>
+                                <span className="text-sm text-slate-500 dark:text-slate-400 flex-shrink-0 sm:min-w-[100px]">{key}:</span>
                                 <span className="text-sm font-medium text-slate-900 dark:text-slate-100 font-mono break-words min-w-0 flex-1">
                                       {String(value)}
                                     </span>
@@ -991,16 +1136,17 @@ const CollapsibleSection: React.FC<{
 };
 
 const RawJsonSection: React.FC<{ auditResults: any }> = ({ auditResults }) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden animate-slideInDown mt-4">
-    <div className="p-4 bg-slate-800 dark:bg-slate-900 border-b border-slate-700"> // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden mt-4">
+    <div className="p-4 bg-slate-800 dark:bg-slate-900 border-b border-slate-700">
       <h4 className="font-semibold text-white flex items-center gap-2">
         <FileText size={18} />
         Complete Raw JSON Data
       </h4>
     </div>
-    <pre className="p-4 overflow-auto max-h-96 text-xs bg-slate-900 dark:bg-slate-950 text-green-400 font-mono max-w-full w-full break-words whitespace-pre-wrap"> // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+    {/* eslint-disable @typescript-eslint/no-unsafe-argument */}
+    <pre className="p-4 overflow-auto max-h-96 text-xs bg-slate-900 dark:bg-slate-950 text-green-400 font-mono max-w-full w-full break-words whitespace-pre-wrap">
       {JSON.stringify(auditResults, null, 2)}
-    </pre> // eslint-disable-line @typescript-eslint/no-unsafe-argument
+    </pre>
   </div>
 );
 
@@ -1025,6 +1171,8 @@ const CryptoAuditDashboard: React.FC = () => {
   const [loadingResults, setLoadingResults] = useState<Set<string>>(new Set());
   const [retryingResults, setRetryingResults] = useState<Set<string>>(new Set());
   const [tabTransition, setTabTransition] = useState(false);
+  const [currentPage, setCurrentPage] = useState<'dashboard' | 'agent-results'>('dashboard');
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
   const processedCompletionsRef = useRef<Set<string>>(new Set());
   const prevTasksRef = useRef<Task[]>([]);
@@ -1106,26 +1254,47 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
-    const [, , newTasks] = await Promise.all([fetchStats(), fetchAgents(), fetchTasks()]);
-
-    setTriggeredScans(prev => {
-      const newSet = new Set(prev);
-      const activeTasks = (newTasks || []).filter(t =>
-        t.status === 'pending' || t.status === 'in_progress'
-      ).map(t => t.agent_id);
-      prev.forEach(agentId => {
-        if (!activeTasks.includes(agentId)) newSet.delete(agentId);
+    try {
+      const [, , newTasks] = await Promise.all([fetchStats(), fetchAgents(), fetchTasks()]);
+  
+      setTriggeredScans(prev => {
+        const newSet = new Set(prev);
+        const activeTasks = (newTasks || []).filter(t =>
+          t.status === 'pending' || t.status === 'in_progress'
+        ).map(t => t.agent_id);
+        prev.forEach(agentId => {
+          if (!activeTasks.includes(agentId)) newSet.delete(agentId);
+        });
+        return newSet;
       });
-      return newSet;
-    });
-
-    const expandedAgentIds = Array.from(expandedAgents);
-    await Promise.all(expandedAgentIds.map(id => fetchAgentResults(id)));
-    
-    setLastUpdate(new Date());
-    setLoading(false);
-    setIsInitialLoad(false);
+  
+      const expandedAgentIds = Array.from(expandedAgents);
+      await Promise.all(expandedAgentIds.map(id => fetchAgentResults(id)));
+      
+      setLastUpdate(new Date());
+      setIsInitialLoad(false);
+    } finally {
+      setLoading(false);
+    }
   }, [fetchStats, fetchAgents, fetchTasks, expandedAgents, fetchAgentResults]);
+
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // R = Refresh
+      if (e.key === 'r' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        refreshAll();
+      }
+      // A = Toggle auto-refresh
+      if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setAutoRefresh(!autoRefresh);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [autoRefresh, refreshAll]);
   
   const agentTaskInfo = useMemo<Map<string, AgentTaskInfo>>(() => {
     const info = new Map<string, AgentTaskInfo>();
@@ -1297,10 +1466,11 @@ const CryptoAuditDashboard: React.FC = () => {
   };
 
   const getRelativeTime = (dateString: string): string => {
+    if (!dateString) return '';
     const diff = Date.now() - new Date(dateString).getTime();
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+    const days = Math.floor(hours / 24);
     
     if (minutes < 1) return 'just now';
     if (minutes < 60) return `${minutes}m ago`;
@@ -1309,14 +1479,15 @@ const CryptoAuditDashboard: React.FC = () => {
   };
 
   const formatTimeSince = (minutes: number): string => {
-    if (minutes < 1) return '<1 min ago';
+    if (minutes < 1) return 'Just now';
     if (minutes === 1) return '1 min ago';
     if (minutes < 60) return `${minutes} mins ago`;
     const hours = Math.floor(minutes / 60);
     if (hours === 1) return '1 hour ago';
     if (hours < 24) return `${hours} hours ago`;
     const days = Math.floor(hours / 24);
-    return `${days} day${days > 1 ? 's' : ''} ago`;
+    if (days === 1) return '1 day ago';
+    return `${days} days ago`;
   };
 
   const handleTabChange = (tab: 'dashboard' | 'downloads' | 'docs') => {
@@ -1376,28 +1547,10 @@ const CryptoAuditDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 animate-slideIn">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg">
-                <Activity className="text-white" size={24} />
-              </div>
-              <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">
-                  Crypto Audit Manager
-                </h1>
-                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-                  Enterprise Security Dashboard
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
+      
 
       <nav className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex gap-1">
             {(['dashboard', 'downloads', 'docs'] as const).map(tab => (
               <button
@@ -1413,7 +1566,7 @@ const CryptoAuditDashboard: React.FC = () => {
                 {tab === 'downloads' && 'Downloads'}
                 {tab === 'docs' && 'Documentation'}
                 {activeTab === tab && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-indigo-500 to-purple-500 animate-slideInX" />
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
                 )}
               </button>
             ))}
@@ -1421,9 +1574,9 @@ const CryptoAuditDashboard: React.FC = () => {
         </div>
       </nav>
 
-      <main className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 transition-opacity duration-300 ${tabTransition ? 'opacity-0' : 'opacity-100'}`}>
+      <main className="max-w-6xl mx-auto px-6 py-8">
         {error && (
-          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg animate-slideInDown">
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <div className="flex items-center gap-2">
               <AlertCircle className="text-red-600 dark:text-red-400" size={20} />
               <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
@@ -1432,15 +1585,24 @@ const CryptoAuditDashboard: React.FC = () => {
         )}
 
         {activeTab === 'dashboard' && (
-          <div className="space-y-6 animate-fadeIn">
+          currentPage === 'dashboard' ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-6"
+            >
+            {/* ALL YOUR EXISTING DASHBOARD CONTENT */}
+            {/* Stats cards, search, table, etc. */}
             {isInitialLoad ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 {[...Array(5)].map((_, i) => (
                   <SkeletonStatCard key={i} />
                 ))}
               </div>
             ) : stats && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <StatCard title="Total Agents" value={stats.agents.total} icon={<Server size={20} />} color="indigo" />
                 <StatCard title="Active" value={stats.agents.active} icon={<CheckCircle size={20} />} color="green" />
                 <StatCard title="Inactive" value={stats.agents.inactive} icon={<AlertCircle size={20} />} color="red" />
@@ -1449,35 +1611,35 @@ const CryptoAuditDashboard: React.FC = () => {
               </div>
             )}
 
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
               <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                 <button
                   onClick={refreshAll}
                   disabled={loading}
-                  className="px-4 py-2 rounded-lg font-medium text-sm bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2 shadow-md hover:shadow-lg"
+                  className={BUTTON_STYLES.primary}
                 >
                   <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
                   {loading ? 'Refreshing...' : 'Refresh'}
                 </button>
                 <button
                   onClick={() => setAutoRefresh(!autoRefresh)}
-                  className={`px-4 py-2 rounded-lg font-medium text-sm text-white transition-all flex items-center gap-2 shadow-md hover:shadow-lg ${
-                    autoRefresh 
-                      ? 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700' 
-                      : 'bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800'
-                  }`}
+                  className={`${BUTTON_STYLES.primary} ${autoRefresh ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-600 hover:bg-slate-700'}`}
                 >
                   <Activity size={16} className={autoRefresh ? 'animate-pulse' : ''} />
                   Auto-Refresh {autoRefresh ? 'ON' : 'OFF'}
                 </button>
                 <div className="ml-auto text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-                  Last Updated: {lastUpdate.toLocaleTimeString()}
+                  <div className="text-xs text-slate-500 hidden lg:flex items-center gap-4">
+                    <span><kbd className="px-2 py-1 bg-slate-100 rounded text-xs border border-slate-300">⌘R</kbd> Refresh</span>
+                    <span><kbd className="px-2 py-1 bg-slate-100 rounded text-xs border border-slate-300">⌘A</kbd> Auto-refresh</span>
+                  </div>
+                  <div className="lg:hidden">Last Updated: {lastUpdate.toLocaleTimeString()}</div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex flex-col sm:flex-row gap-4">
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
                   <input
@@ -1485,7 +1647,7 @@ const CryptoAuditDashboard: React.FC = () => {
                     placeholder="Search agents..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                    className="w-full pl-10 pr-10 h-14 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                   />
                   {searchQuery && (
                     <button
@@ -1499,7 +1661,7 @@ const CryptoAuditDashboard: React.FC = () => {
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-14 md:w-auto"
                 >
                   <option value="all">All Status</option>
                   <option value="active">Active</option>
@@ -1510,84 +1672,143 @@ const CryptoAuditDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
               <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
                 <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
-                  Crypt Inventory by assets ({filteredAgents.length})
+                  Crypto Inventory by Assets ({filteredAgents.length})
                 </h3>
               </div>
-              {isInitialLoad ? (
-                <LoadingState />
-              ) : filteredAgents.length === 0 ? (
-                <EmptyState message="No agents found" />
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full table-fixed">
-                    <thead className="bg-slate-50 dark:bg-slate-800/50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 w-12"></th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Hostname</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">IP Address</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">OS</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Scans</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Status</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Created</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Last Seen</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 min-w-[120px]">
-                          <span className="hidden sm:inline">Time Since Contact</span>
-                          <span className="sm:hidden">Last Contact</span>
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 w-24">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              
+              {/* Add loading overlay for smooth refresh */}
+              <div className="relative">
+                <AnimatePresence>
+                  {loading && !isInitialLoad && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-20 flex items-center justify-center"
+                    >
+                      <div className="bg-white dark:bg-slate-900 px-6 py-3 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 flex items-center gap-3">
+                        <Loader className="animate-spin text-blue-600" size={20} />
+                        <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                          Updating data...
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+            
+                {isInitialLoad ? (
+                  <div className="p-6">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="animate-pulse flex items-center gap-6 py-4 border-b border-slate-200">
+                        <div className="h-10 w-10 bg-slate-200 dark:bg-slate-700 rounded" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
+                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+                        </div>
+                        <div className="h-8 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+                      </div>
+                    ))}
+                  </div>
+                ) : filteredAgents.length === 0 ? (
+                  <EmptyState message="No agents found" />
+                ) : (
+                  <>
+                    {/* Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full table-fixed">
+                        <thead className="bg-gray-50 dark:bg-slate-800 border-b-2 border-slate-200 dark:border-slate-700">
+                          <tr style={{ height: '56px' }}>
+                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/4">
+                              Agent
+                            </th>
+                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                              IP Address
+                            </th>
+                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                              Operating System
+                            </th>
+                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                              Status
+                            </th>
+                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                              Scans
+                            </th>
+                            <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700 dark:text-slate-300 w-32">
+                              Actions
+                            </th>
+                            <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700 dark:text-slate-300 w-16">
+                              {/* Expand toggle */}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                          {filteredAgents.map((agent) => (
+                            <AgentRow
+                              key={agent.agent_id}
+                              agent={agent}
+                              info={agentTaskInfo.get(agent.agent_id)}
+                              expanded={expandedAgents.has(agent.agent_id)}
+                              onToggle={() => toggleAgentResults(agent.agent_id)}
+                              onTriggerScan={() => triggerScan(agent.agent_id)}
+                              isScanTriggered={triggeredScans.has(agent.agent_id)}
+                              results={agentResults.get(agent.agent_id) || []}
+                              tasks={tasks}
+                              expandedResults={expandedResults}
+                              toggleResultDetails={toggleResultDetails}
+                              loadingResults={loadingResults.has(agent.agent_id)}
+                              formatDateTime={formatDateTime}
+                              formatTimeSince={formatTimeSince}
+                              onRetryFetch={retryFetchResult}
+                              retryingResults={retryingResults}
+                              getRelativeTime={getRelativeTime}
+                              onNavigateToResults={(agent) => {
+                                setSelectedAgent(agent);
+                                setCurrentPage('agent-results');
+                              }}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+            
+                    {/* Mobile Cards */}
+                    <div className="block md:hidden p-4">
                       {filteredAgents.map((agent) => (
-                        <AgentRow
+                        <MobileAgentCard
                           key={agent.agent_id}
                           agent={agent}
                           info={agentTaskInfo.get(agent.agent_id)}
-                          expanded={expandedAgents.has(agent.agent_id)}
                           onToggle={() => toggleAgentResults(agent.agent_id)}
                           onTriggerScan={() => triggerScan(agent.agent_id)}
                           isScanTriggered={triggeredScans.has(agent.agent_id)}
-                          results={agentResults.get(agent.agent_id) || []}
-                          tasks={tasks}
-                          expandedResults={expandedResults}
-                          toggleResultDetails={toggleResultDetails}
-                          loadingResults={loadingResults.has(agent.agent_id)}
-                          formatDateTime={formatDateTime}
                           formatTimeSince={formatTimeSince}
-                          onRetryFetch={retryFetchResult}
-                          retryingResults={retryingResults}
-                          getRelativeTime={getRelativeTime}
                         />
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+          </motion.div>
+          ) : currentPage === 'agent-results' && selectedAgent ? (
+            <AgentResultsPage
+              agent={selectedAgent}
+              results={agentResults.get(selectedAgent.agent_id) || []}
+              onBack={() => {
+                setCurrentPage('dashboard');
+                setSelectedAgent(null);
+              }}
+              ResultCardComponent={ResultCard}
+              ExpandedResultModalComponent={ExpandedResultModal}
+            />
+          ) : null
         )}
 
         {activeTab === 'downloads' && (
-          <div className="space-y-6 animate-fadeIn">
-            <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-start gap-3">
-                <FileDown className="text-indigo-600 dark:text-indigo-400 flex-shrink-0 mt-1" size={24} />
-                <div className="flex-1">
-                  <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">Agent Downloads</h2>
-                  <p className="text-slate-600 dark:text-slate-400 mb-4">Download the agent files for your operating system. Extract and run the agent to connect to the audit system.</p>
-                  <button
-                    className="px-4 py-2 rounded-lg font-medium text-sm bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center gap-2 shadow-md hover:shadow-lg"
-                    onClick={fetchFiles}
-                  >
-                    <RefreshCw size={16} />
-                    Refresh File List
-                  </button>
-                </div>
-              </div>
-            </div>
+          <div className="space-y-6">
             <FileDownloadSection
               title="Linux Agent"
               folderType="linux"
@@ -1604,134 +1825,844 @@ const CryptoAuditDashboard: React.FC = () => {
         )}
 
         {activeTab === 'docs' && (
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-lg p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm">
             <DocumentationSection />
           </div>
         )}
       </main>
-
-      <style>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        @keyframes slideIn {
-          from {
-            opacity: 0;
-            transform: translateX(-20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-        
-        @keyframes slideInDown {
-          from {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        @keyframes slideInX {
-          from {
-            transform: scaleX(0);
-          }
-          to {
-            transform: scaleX(1);
-          }
-        }
-        
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out;
-        }
-        
-        .animate-slideIn {
-          animation: slideIn 0.4s ease-out;
-        }
-        
-        .animate-slideInDown {
-          animation: slideInDown 0.3s ease-out;
-        }
-        
-        .animate-slideInX {
-          animation: slideInX 0.3s ease-out;
-          transform-origin: left;
-        }
-      `}</style>
     </div>
   );
 };
 
 // Helper Components
 const SkeletonStatCard: React.FC = () => (
-  <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm animate-pulse">
+  <div className="bg-white dark:bg-slate-900 rounded-lg p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm animate-pulse">
     <div className="h-10 w-10 bg-slate-200 dark:bg-slate-800 rounded-lg mb-3"></div>
     <div className="h-8 bg-slate-200 dark:bg-slate-800 rounded w-16 mb-2"></div>
     <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-24"></div>
   </div>
 );
 
-const StatCard: React.FC<{ title: string; value: number; icon: React.ReactNode; color: string }> = ({ title, value, icon, color }) => {
-  const colorClasses = {
-    indigo: 'from-indigo-500 to-purple-600',
-    green: 'from-green-500 to-emerald-600',
-    amber: 'from-amber-500 to-orange-600',
-    emerald: 'from-emerald-500 to-teal-600',
-    red: 'from-red-500 to-rose-600',
+const StatCard: React.FC<{ title: string; value: number; icon: React.ReactNode; color: string }> = ({ 
+  title, value, icon, color 
+}) => {
+  const borderColors = {
+    indigo: 'border-blue-500',
+    green: 'border-green-500',
+    amber: 'border-amber-500',
+    emerald: 'border-emerald-500',
+    red: 'border-red-500',
   }[color];
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all">
-      <div className={`inline-flex p-2 rounded-lg bg-gradient-to-br ${colorClasses} mb-3`}>
-        <div className="text-white">{icon}</div>
+    <div className={`bg-white dark:bg-slate-900 rounded-lg p-6 border-l-4 ${borderColors} shadow-sm min-h-[140px] flex flex-col justify-between`}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-slate-500 dark:text-slate-400 text-sm font-medium">{title}</div>
+        <div className={`text-${color}-600`}>{icon}</div>
       </div>
-      <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-1">{value}</div>
-      <div className="text-sm text-slate-600 dark:text-slate-400">{title}</div>
+      <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">{value}</div>
     </div>
   );
 };
 
 const Badge: React.FC<{ status: string }> = ({ status }) => {
   const styles = {
-    completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-    in_progress: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-    pending: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-    active: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-    inactive: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+    completed: 'bg-green-50 text-green-700 border border-green-200',
+    in_progress: 'bg-blue-50 text-blue-700 border border-blue-200',
+    pending: 'bg-amber-50 text-amber-700 border border-amber-200',
+    active: 'bg-green-50 text-green-700 border border-green-200',
+    inactive: 'bg-red-50 text-red-700 border border-red-200',
   }[status] || 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400';
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles}`}>
-      {status.replace('_', ' ')}
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-sm font-medium border ${styles}`}>
+      {status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
     </span>
   );
 };
 
 const LoadingState: React.FC = () => (
-  <div className="flex flex-col items-center justify-center py-12">
+  <div className="flex flex-col items-center justify-center py-16">
     <Loader className="animate-spin text-indigo-600 dark:text-indigo-400 mb-4" size={32} />
     <p className="text-slate-600 dark:text-slate-400">Loading data...</p>
   </div>
 );
 
 const EmptyState: React.FC<{ message: string }> = ({ message }) => (
-  <div className="flex flex-col items-center justify-center py-12">
-    <div className="p-3 rounded-full bg-slate-100 dark:bg-slate-800 mb-4">
-      <AlertCircle className="text-slate-400" size={32} />
+  <div className="flex flex-col items-center justify-center py-16">
+    <div className="p-4 rounded-lg bg-slate-100 dark:bg-slate-800 mb-4">
+      <AlertCircle className="text-slate-400" size={40} />
     </div>
-    <p className="text-slate-600 dark:text-slate-400">{message}</p>
+    <p className="text-base font-medium text-slate-700 dark:text-slate-300 mb-2">{message}</p>
+    <p className="text-sm text-slate-500 dark:text-slate-400">Try adjusting your filters or search query</p>
+  </div>
+);
+
+const MobileAgentCard: React.FC<{
+  agent: Agent;
+  info?: AgentTaskInfo;
+  onToggle: () => void;
+  onTriggerScan: () => void;
+  isScanTriggered: boolean;
+  formatTimeSince: (minutes: number) => string;
+}> = ({ agent, info, onToggle, onTriggerScan, isScanTriggered, formatTimeSince }) => {
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-4 mb-4 shadow-sm">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-base text-slate-900 dark:text-slate-100 truncate">
+            {agent.hostname}
+          </h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{agent.ip_address}</p>
+        </div>
+        <Badge status={agent.status} />
+      </div>
+      
+      <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+        <div>
+          <span className="text-slate-500 dark:text-slate-400">OS:</span>
+          <p className="text-slate-900 dark:text-slate-100 truncate">{agent.os_info}</p>
+        </div>
+        <div>
+          <span className="text-slate-500 dark:text-slate-400">Last Seen:</span>
+          <p className="text-slate-900 dark:text-slate-100">
+            {formatTimeSince(agent.minutes_since_last_seen)}
+          </p>
+        </div>
+      </div>
+      
+      {info && info.completed_scans > 0 && (
+        <div className="mb-3 text-sm">
+          <span className="text-slate-500 dark:text-slate-400">Scans: </span>
+          <span className="text-slate-900 dark:text-slate-100 font-medium">
+            {info.completed_scans} completed
+          </span>
+        </div>
+      )}
+      
+      <div className="flex gap-2">
+        <button
+          onClick={onTriggerScan}
+          disabled={isScanTriggered}
+          className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-sm disabled:opacity-50 transition-colors"
+        >
+          {isScanTriggered ? 'Scanning...' : 'Scan'}
+        </button>
+        <button
+          onClick={onToggle}
+          className="h-10 px-4 border border-slate-300 dark:border-slate-700 rounded-md hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
+        >
+          Details
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const SimplifiedAgentView: React.FC<{
+  agent: Agent;
+  results: AuditResult[];
+  info?: AgentTaskInfo;
+  formatTimeSince: (minutes: number) => string;
+  onViewResults: () => void; // NEW PROP
+}> = ({ agent, results, info, formatTimeSince, onViewResults }) => {
+  const latestResult = results.length > 0 ? results[0] : null;
+  const successRate = results.length > 0 
+    ? ((results.filter(r => r.audit_results).length / results.length) * 100).toFixed(0)
+    : '0';
+
+  return (
+    <div className="space-y-6">
+      {/* Quick Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-slate-900 rounded-lg p-5 border-l-4 border-blue-500 shadow-sm">
+          <div className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">
+            Total Scans
+          </div>
+          <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">
+            {results.length}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 rounded-lg p-5 border-l-4 border-green-500 shadow-sm">
+          <div className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">
+            Success Rate
+          </div>
+          <div className="text-3xl font-bold text-green-600 dark:text-green-400">
+            {successRate}%
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 rounded-lg p-5 border-l-4 border-purple-500 shadow-sm">
+          <div className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">
+            Latest Scan
+          </div>
+          <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            {latestResult 
+              ? new Date(latestResult.submitted_at).toLocaleDateString() 
+              : 'N/A'}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 rounded-lg p-5 border-l-4 border-amber-500 shadow-sm">
+          <div className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">
+            Last Contact
+          </div>
+          <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            {formatTimeSince(agent.minutes_since_last_seen)}
+          </div>
+        </div>
+      </div>
+
+      {/* Agent Details Card */}
+      <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
+        <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
+          <Server size={20} className="text-blue-600" />
+          Agent Information
+        </h4>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+              Hostname
+            </span>
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {agent.hostname}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+              IP Address
+          </span> 
+            <span className="text-sm font-mono font-semibold text-slate-900 dark:text-slate-100">
+              {agent.ip_address}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+              Operating System
+            </span>
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {agent.os_info}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+              Registered
+            </span>
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {new Date(agent.registered_at).toLocaleDateString()}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* View Results Button */}
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={onViewResults}
+        className="w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-lg font-semibold text-base transition-all shadow-lg shadow-blue-500/30 flex items-center justify-center gap-3"
+      >
+        <FileText size={20} />
+        View All Scan Results ({results.length})
+        <ChevronRight size={20} />
+      </motion.button>
+    </div>
+  );
+};
+
+const ResultCard: React.FC<{
+  result: AuditResult;
+  index: number;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onViewDetails: () => void;
+}> = ({ result, index, isExpanded, onToggle, onViewDetails }) => {
+  const hasData = !!result.audit_results;
+  const os = hasData ? detectOS(result.audit_results) : 'Unknown';
+  
+  // Get key metrics
+  const getKeyMetrics = () => {
+    if (!hasData) return null;
+    
+    const normalizedData = os === 'Windows' 
+      ? result.audit_results 
+      : result.audit_results.with_sudo || result.audit_results.without_sudo || result.audit_results;
+
+    if (os === 'Linux') {
+      return {
+        opensslVersion: normalizedData.openssl_crypto?.version_details?.split('\n')[0]?.split(' ')[1] || 'N/A',
+        totalCiphers: normalizedData.openssl_crypto?.cipher_information?.total_ciphers || 0,
+        certificates: normalizedData.certificates?.certificates?.length || 0,
+        cpuFeatures: normalizedData.hardware_crypto?.crypto_feature_count || 0
+      };
+    } else {
+      return {
+        fipsMode: normalizedData.cryptoapi_info?.fips_mode_enabled ? 'Enabled' : 'Disabled',
+        cipherSuites: normalizedData.tls_ssl_configuration?.cipher_suites?.total_cipher_suites || 0,
+        certificates: (Object.values(normalizedData.certificate_stores || {}) as any[]).reduce((sum: number, store: any) => 
+          sum + (store.certificate_count || 0), 0),
+        cryptoProviders: normalizedData.cryptoapi_info?.cryptographic_providers?.count || 0
+      };
+    }
+  };
+
+  const metrics = getKeyMetrics();
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05, duration: 0.4 }}
+      whileHover={{ y: -4 }}
+      className="group"
+    >
+      <Card className={`relative overflow-hidden backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 border-2 transition-all duration-300 cursor-pointer ${
+        hasData 
+          ? 'border-green-200 dark:border-green-800 hover:border-green-400 dark:hover:border-green-600 hover:shadow-xl hover:shadow-green-500/10' 
+          : 'border-red-200 dark:border-red-800 hover:border-red-400 dark:hover:border-red-600 hover:shadow-xl hover:shadow-red-500/10'
+      }`}>
+        {/* Gradient Overlay */}
+        <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${
+          hasData 
+            ? 'bg-gradient-to-br from-green-500/5 to-emerald-500/5' 
+            : 'bg-gradient-to-br from-red-500/5 to-rose-500/5'
+        }`} />
+
+        <CardContent className="p-6 relative z-10">
+          {/* Card Header */}
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`w-3 h-3 rounded-full ${
+                  hasData 
+                    ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse' 
+                    : 'bg-red-500 shadow-lg shadow-red-500/50'
+                }`} />
+                <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">
+                  Scan #{index + 1}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <Clock size={12} />
+                <span>{new Date(result.submitted_at).toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* OS Badge */}
+            <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
+              os === 'Windows' 
+                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' 
+                : os === 'Linux'
+                ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+            }`}>
+              {os}
+            </div>
+          </div>
+
+          {/* Status Badge */}
+          <div className="mb-4">
+            {hasData ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm font-semibold">
+                <CheckCircle size={16} />
+                Scan Completed
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-semibold">
+                <AlertCircle size={16} />
+                Scan Failed
+              </div>
+            )}
+          </div>
+
+          {/* Key Metrics Grid */}
+          {hasData && metrics && (
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {os === 'Linux' ? (
+                <>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      OpenSSL
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate" title={metrics.opensslVersion}>
+                      {metrics.opensslVersion}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      Ciphers
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {metrics.totalCiphers}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      Certificates
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {metrics.certificates}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      CPU Features
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {metrics.cpuFeatures}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      FIPS Mode
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {metrics.fipsMode}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      Cipher Suites
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {metrics.cipherSuites}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      Certificates
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {metrics.certificates}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      Providers
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {metrics.cryptoProviders}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Quick Info */}
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+            <div className="grid grid-cols-2 gap-3 text-xs mb-4">
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Task ID:</span>
+                <div className="font-mono text-slate-900 dark:text-slate-100 mt-1 truncate" title={result.task_id}>
+                  {result.task_id.substring(0, 16)}...
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Received:</span>
+                <div className="font-medium text-slate-900 dark:text-slate-100 mt-1">
+                  {new Date(result.received_at).toLocaleTimeString()}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewDetails();
+                }}
+                disabled={!hasData}
+                className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm"
+              >
+                <FileText size={16} />
+                View Details
+              </motion.button>
+
+              {hasData && (
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(JSON.stringify(result.audit_results, null, 2));
+                  }}
+                  className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+                  title="Copy JSON"
+                >
+                  <Copy size={16} />
+                </motion.button>
+              )}
+            </div>
+          </div>
+
+          {/* Expand Toggle */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            className="w-full mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+          >
+            <span className="font-medium">
+              {isExpanded ? 'Hide' : 'Show'} Additional Info
+            </span>
+            <ChevronDown
+              size={14}
+              className={`transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+            />
+          </button>
+
+          {/* Expanded Additional Info */}
+          <AnimatePresence>
+            {isExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="pt-3 space-y-2 text-xs">
+                  <div className="flex justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
+                    <span className="text-slate-500 dark:text-slate-400">Result ID:</span>
+                    <span className="font-mono text-slate-900 dark:text-slate-100">
+                      {result.result_id.substring(0, 12)}...
+                    </span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
+                    <span className="text-slate-500 dark:text-slate-400">Agent ID:</span>
+                    <span className="font-mono text-slate-900 dark:text-slate-100">
+                      {result.agent_id.substring(0, 12)}...
+                    </span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
+                    <span className="text-slate-500 dark:text-slate-400">Duration:</span>
+                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                      {((new Date(result.received_at).getTime() - new Date(result.submitted_at).getTime()) / 1000).toFixed(2)}s
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+};
+
+const ExpandedResultModal: React.FC<{
+  result: AuditResult;
+  onClose: () => void;
+}> = ({ result, onClose }) => {
+  const [activeTab, setActiveTab] = useState<string>('overview');
+
+  const hasData = !!result.audit_results;
+  const os = hasData ? detectOS(result.audit_results) : 'Unknown';
+  const processedSections = hasData ? processAuditResults(result.audit_results) : [];
+
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [onClose]);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={onClose}
+        className="fixed inset-0 bg-black/70 backdrop-blur-md z-40"
+      />
+
+      {/* Modal */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        transition={{ duration: 0.3, ease: "easeOut" }}
+        className="fixed inset-4 md:inset-8 lg:inset-16 z-50 flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Card className="flex flex-col h-full shadow-2xl border-2 border-white/20 ring-1 ring-black/5 backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 overflow-hidden">
+          {/* Modal Header */}
+          <div className="flex-shrink-0 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 border-b-2 border-slate-200 dark:border-slate-700 p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-4 h-4 rounded-full ${
+                    hasData 
+                      ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse' 
+                      : 'bg-red-500 shadow-lg shadow-red-500/50'
+                  }`} />
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                    Detailed Scan Results
+                  </h2>
+                </div>
+                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600 dark:text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <Clock size={14} />
+                    <span>{new Date(result.submitted_at).toLocaleString()}</span>
+                  </div>
+                  <span>•</span>
+                  <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    os === 'Windows' 
+                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' 
+                      : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                  }`}>
+                    {os}
+                  </div>
+                  <span>•</span>
+                  <span className="font-mono text-xs">
+                    Task: {result.task_id.substring(0, 16)}...
+                  </span>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                className="flex-shrink-0 hover:bg-slate-200 dark:hover:bg-slate-700"
+              >
+                <X className="h-6 w-6" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Tabs Navigation */}
+          {hasData && (
+            <div className="flex-shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex overflow-x-auto">
+                <button
+                  onClick={() => setActiveTab('overview')}
+                  className={`px-6 py-4 font-medium text-sm transition-colors relative whitespace-nowrap ${
+                    activeTab === 'overview'
+                      ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Overview
+                  {activeTab === 'overview' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                  )}
+                </button>
+                {processedSections.map((section) => (
+                  <button
+                    key={section.title}
+                    onClick={() => setActiveTab(section.title)}
+                    className={`px-6 py-4 font-medium text-sm transition-colors relative whitespace-nowrap ${
+                      activeTab === section.title
+                        ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {section.icon}
+                      <span>{section.title}</span>
+                    </div>
+                    {activeTab === section.title && (
+                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                    )}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setActiveTab('raw')}
+                  className={`px-6 py-4 font-medium text-sm transition-colors relative whitespace-nowrap ${
+                    activeTab === 'raw'
+                      ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText size={16} />
+                    <span>Raw JSON</span>
+                  </div>
+                  {activeTab === 'raw' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Content */}
+          <CardContent className="flex-1 overflow-y-auto p-6">
+            {!hasData ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-4">
+                  <AlertCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
+                </div>
+                <p className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                  Scan Failed
+                </p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 text-center max-w-md">
+                  No audit data is available for this scan. The agent may have encountered an error during execution.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Overview Tab */}
+                {activeTab === 'overview' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-6"
+                  >
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {os === 'Linux' ? (
+                        <>
+                          <StatBox
+                            label="OpenSSL Version"
+                            value={(result.audit_results.with_sudo || result.audit_results.without_sudo)?.openssl_crypto?.version_details?.split('\n')[0]?.split(' ')[1] || 'N/A'}
+                            color="blue"
+                          />
+                          <StatBox
+                            label="Total Ciphers"
+                            value={(result.audit_results.with_sudo || result.audit_results.without_sudo)?.openssl_crypto?.cipher_information?.total_ciphers || 0}
+                            color="green"
+                          />
+                          <StatBox
+                            label="Certificates"
+                            value={(result.audit_results.with_sudo || result.audit_results.without_sudo)?.certificates?.certificates?.length || 0}
+                            color="amber"
+                          />
+                          <StatBox
+                            label="CPU Features"
+                            value={(result.audit_results.with_sudo || result.audit_results.without_sudo)?.hardware_crypto?.crypto_feature_count || 0}
+                            color="purple"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <StatBox
+                            label="FIPS Mode"
+                            value={result.audit_results.cryptoapi_info?.fips_mode_enabled ? 'Enabled' : 'Disabled'}
+                            color="blue"
+                          />
+                          <StatBox
+                            label="Cipher Suites"
+                            value={result.audit_results.tls_ssl_configuration?.cipher_suites?.total_cipher_suites || 0}
+                            color="green"
+                          />
+                          <StatBox
+                            label="Certificates"
+                            value={(Object.values(result.audit_results.certificate_stores || {}) as any[]).reduce((sum: number, store: any) => sum + (store.certificate_count || 0), 0)}
+                            color="amber"
+                          />
+                          <StatBox
+                            label="Crypto Providers"
+                            value={result.audit_results.cryptoapi_info?.cryptographic_providers?.count || 0}
+                            color="purple"
+                          />
+                        </>
+                      )}
+                    </div>
+
+                    {/* Sections Overview */}
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
+                        Available Data Sections
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {processedSections.map((section) => (
+                          <button
+                            key={section.title}
+                            onClick={() => setActiveTab(section.title)}
+                            className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-600 transition-colors group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg group-hover:bg-blue-100 dark:group-hover:bg-blue-900/50 transition-colors">
+                                <div className="text-blue-600 dark:text-blue-400">
+                                  {section.icon}
+                                </div>
+                              </div>
+                              <span className="font-medium text-slate-900 dark:text-slate-100">
+                                {section.title}
+                              </span>
+                            </div>
+                            <ChevronRight size={18} className="text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Section Tabs Content */}
+                {processedSections.map((section) => (
+                  activeTab === section.title && (
+                    <motion.div
+                      key={section.title}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="space-y-4"
+                    >
+                      <div className="bg-white dark:bg-slate-900 rounded-lg p-4 mb-4">
+                        {Object.entries(section.data).map(([key, value]) => (
+                          <InfoRow key={key} label={key} value={value} />
+                        ))}
+                      </div>
+                      {section.subsections && section.subsections.length > 0 && (
+                        <div className="space-y-4">
+                          {section.subsections.map((subsection, idx) => (
+                            <CollapsibleSubsection key={idx} subsection={subsection} />
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  )
+                ))}
+
+                {/* Raw JSON Tab */}
+                {activeTab === 'raw' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <RawJsonSection auditResults={result.audit_results} />
+                  </motion.div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+    </>
+  );
+};
+
+const StatBox: React.FC<{ label: string; value: string | number; color: string }> = ({ label, value, color }) => (
+  <div className={`bg-white dark:bg-slate-900 rounded-lg p-4 border-l-4 border-${color}-500 shadow-sm`}>
+    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">
+      {label}
+    </div>
+    <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 truncate" title={String(value)}>
+      {value}
+    </div>
   </div>
 );
 
@@ -1752,99 +2683,204 @@ const AgentRow: React.FC<{
   onRetryFetch: (agentId: string, taskId: string) => void;
   retryingResults: Set<string>;
   getRelativeTime: (date: string) => string;
-}> = ({ agent, info, expanded, onToggle, onTriggerScan, isScanTriggered, results, tasks, expandedResults, toggleResultDetails, loadingResults, formatDateTime, formatTimeSince, onRetryFetch, retryingResults, getRelativeTime }) => {
+  onNavigateToResults: (agent: Agent) => void; // NEW
+}> = ({ 
+  agent, 
+  info, 
+  expanded, 
+  onToggle, 
+  onTriggerScan, 
+  isScanTriggered, 
+  results, 
+  tasks, 
+  expandedResults, 
+  toggleResultDetails, 
+  loadingResults, 
+  formatDateTime, 
+  formatTimeSince, 
+  onRetryFetch, 
+  retryingResults, 
+  getRelativeTime,
+  onNavigateToResults // NEW
+}) => { // eslint-disable-line @typescript-eslint/no-unused-vars
   const isScanning = isScanTriggered && (info?.in_progress_tasks ?? 0) > 0;
 
   return (
     <>
-      <tr className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200 ${expanded ? 'bg-slate-50 dark:bg-slate-800/30' : ''}`}>
-        <td className="px-4 py-3">
-          <button
-            onClick={onToggle}
-            className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200"
-          >
-            {expanded ? (
-              <ChevronDown size={18} className="text-slate-700 dark:text-slate-300 transition-transform" />
-            ) : (
-              <ChevronRight size={18} className="text-slate-700 dark:text-slate-300 transition-transform" />
-            )}
-          </button>
-        </td>
-        <td className="px-4 py-3">
-          <div className="font-medium text-slate-900 dark:text-slate-100">{agent.hostname}</div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">{agent.agent_id.substring(0, 16)}...</div>
-        </td>
-        <td className="px-4 py-3 text-slate-900 dark:text-slate-100">{agent.ip_address}</td>
-        <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-sm">{agent.os_info}</td>
-        <td className="px-4 py-3">
-          <div className="flex flex-col gap-1">
-            {info && info.total_scans > 0 && (
-              <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">
-                {info.total_scans} scan{info.total_scans !== 1 ? 's' : ''}
+      <motion.tr
+        layout
+        initial={false}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className={`border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors duration-150 ${
+          expanded ? 'bg-slate-50 dark:bg-slate-800/50' : ''
+        }`}
+        style={{ minHeight: '72px' }}
+      >
+        {/* Agent Info Column */}
+        <td className="px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+              agent.status === 'active' 
+                ? 'bg-green-100 dark:bg-green-900/30' 
+                : 'bg-red-100 dark:bg-red-900/30'
+            }`}>
+              <Server size={20} className={
+                agent.status === 'active' 
+                  ? 'text-green-600 dark:text-green-400' 
+                  : 'text-red-600 dark:text-red-400'
+              } />
+            </div>
+            <div>
+              <div className="font-semibold text-base text-slate-900 dark:text-slate-100">
+                {agent.hostname}
               </div>
-            )}
-            {info && info.completed_scans > 0 && (
-              <Badge status="completed" />
-            )}
-            {info && info.in_progress_tasks > 0 && (
-              <Badge status="in_progress" />
-            )}
-            {info && info.pending_tasks > 0 && (
-              <Badge status="pending" />
-            )}
+              <div className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                ID: {agent.agent_id.substring(0, 12)}
+              </div>
+            </div>
           </div>
         </td>
-        <td className="px-4 py-3">
-          <Badge status={agent.status} />
-        </td>
-        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
-          {formatDateTime(agent.registered_at)}
-        </td>
-        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
-          {formatDateTime(agent.last_seen)}
-        </td>
-        <td className="px-4 py-3">
-          <span className={`text-xs ${
-            agent.minutes_since_last_seen < 2 ? 'text-green-600 dark:text-green-400 font-semibold' : 
-            agent.minutes_since_last_seen > 5 ? 'text-red-600 dark:text-red-400 font-semibold' : 
-            'text-slate-600 dark:text-slate-400'
-          }`}>
-            {formatTimeSince(agent.minutes_since_last_seen)}
+
+        {/* IP Address */}
+        <td className="px-6 py-4">
+          <span className="text-sm font-mono text-slate-700 dark:text-slate-300">
+            {agent.ip_address}
           </span>
         </td>
-        <td className="px-4 py-3">
+
+        {/* Operating System */}
+        <td className="px-6 py-4">
+          <span className="text-sm text-slate-700 dark:text-slate-300">
+            {agent.os_info}
+          </span>
+        </td>
+
+        {/* Status with Time */}
+        <td className="px-6 py-4">
+          <div className="flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${
+              agent.status === 'active' 
+                ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse' 
+                : 'bg-red-500 shadow-lg shadow-red-500/50'
+            }`} />
+            <div>
+              <div className={`text-sm font-semibold capitalize ${
+                agent.status === 'active' 
+                  ? 'text-green-700 dark:text-green-400' 
+                  : 'text-red-700 dark:text-red-400'
+              }`}>
+                {agent.status}
+              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {formatTimeSince(agent.minutes_since_last_seen)}
+              </div>
+            </div>
+          </div>
+        </td>
+
+        {/* Scans Count */}
+        <td className="px-6 py-4">
+          {info && info.total_scans > 0 ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 dark:bg-green-900/30 rounded-md">
+                <CheckCircle size={14} className="text-green-600 dark:text-green-400" />
+                <span className="text-sm font-semibold text-green-700 dark:text-green-300">
+                  {info.completed_scans}
+                </span>
+              </div>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                of {info.total_scans}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs text-slate-400 dark:text-slate-500">No scans</span>
+          )}
+        </td>
+
+        {/* Action Button */}
+        <td className="px-6 py-4 text-center">
           <button
-            onClick={onTriggerScan}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTriggerScan();
+            }}
             disabled={isScanning}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shadow-sm hover:shadow-md"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
-            {isScanning ? <Loader size={14} className="animate-spin" /> : <Play size={14} />}
-            {isScanning ? 'Scanning...' : 'Scan'}
+            {isScanning ? (
+              <span className="flex items-center gap-2">
+                <Loader size={14} className="animate-spin" />
+                Scanning...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Play size={14} />
+                Scan
+              </span>
+            )}
           </button>
         </td>
-      </tr>
-      {expanded && (
-        <tr className="bg-slate-50 dark:bg-slate-800/30">
-          <td colSpan={10} className="px-4 py-4 w-full">
-            {loadingResults ? (
-              <LoadingState />
-            ) : (
-              <div className="animate-slideInDown w-full overflow-x-hidden">
-                <AgentResultsView
-                  agentId={agent.agent_id}
-                  tasks={tasks}
-                  results={results}
-                  expandedResults={expandedResults}
-                  toggleResultDetails={toggleResultDetails}
-                  onRetryFetch={onRetryFetch}
-                  retryingResults={retryingResults}
-                  getRelativeTime={getRelativeTime}
-                />
-              </div>
-            )}
-          </td>
-        </tr>
-      )}
+
+        {/* Expand Toggle */}
+        <td className="px-6 py-4 text-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            className="p-2 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            title={expanded ? "Hide details" : "Show details"}
+          >
+            <ChevronRight
+              size={20}
+              className={`text-slate-500 dark:text-slate-400 transition-transform duration-300 ${
+                expanded ? 'rotate-90' : ''
+              }`}
+            />
+          </button>
+        </td>
+      </motion.tr>
+
+      {/* Expanded Details Row */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.tr
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="bg-slate-50 dark:bg-slate-800/30"
+          >
+            <td colSpan={7} className="px-6 py-0">
+              <motion.div
+                initial={{ height: 0 }}
+                animate={{ height: 'auto' }}
+                exit={{ height: 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="py-6">
+                  {loadingResults ? (
+                    <LoadingState />
+                  ) : (
+                    <SimplifiedAgentView
+                      agent={agent}
+                      results={results}
+                      info={info}
+                      formatTimeSince={formatTimeSince}
+                      onViewResults={() => {
+                        // This callback will be passed from parent
+                        onNavigateToResults(agent);
+                      }}
+                    />
+                  )}
+                </div>
+              </motion.div>
+            </td>
+          </motion.tr>
+        )}
+      </AnimatePresence>
     </>
   );
 };
@@ -1854,25 +2890,32 @@ const FileDownloadSection: React.FC<{
   folderType: string;
   files: FileInfo[];
   formatBytes: (bytes: number) => string;
-}> = ({ title, folderType, files, formatBytes }) => {
+}> = ({ title, folderType, files, formatBytes }) => { // eslint-disable-line @typescript-eslint/no-unused-vars
   const icon = folderType === 'linux' ? <Terminal size={24} /> : <Server size={24} />;
-  const color = folderType === 'linux' ? 'text-blue-600 dark:text-blue-400' : 'text-purple-600 dark:text-purple-400';
   
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-      <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className={color}>{icon}</div>
-            <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">{title}</h3>
+    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div className="p-6">
+        <div className="flex items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-lg ${folderType === 'linux' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+              {icon}
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">{title}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                {folderType === 'linux' ? 'For Ubuntu, Debian, RHEL, CentOS' : 'For Windows Server 2016+'}
+              </p>
+            </div>
           </div>
+          
           <a
             href={`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/download-zip/${folderType}`}
             download
-            className="px-4 py-2 rounded-lg font-medium text-sm bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
+            className="px-6 py-3 h-12 rounded-md font-medium text-base bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white transition-colors flex items-center gap-2 shadow-sm whitespace-nowrap" // eslint-disable-line react/jsx-no-target-blank
           >
-            <Download size={16} />
-            Download ZIP
+            <Download size={18} />
+            Download
           </a>
         </div>
       </div>
@@ -1888,14 +2931,14 @@ const DocumentationSection: React.FC = () => (
         <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-2">
           Setup Documentation
         </h2>
-        <p className="text-slate-600 dark:text-slate-400">
+        <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
           Follow these steps to install and configure the crypto audit agents on your systems.
         </p>
       </div>
     </div>
     
     <div className="space-y-6">
-      <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/10 p-6">
+      <div className="rounded-lg border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/10 p-6">
         <h3 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-400">Linux Agent Setup</h3>
         <ol className="space-y-4">
           {[
@@ -1907,13 +2950,13 @@ const DocumentationSection: React.FC = () => (
             { num: 6, text: 'Agent will automatically start and register with the server' },
           ].map(step => (
             <li key={step.num} className="flex gap-3">
-              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 dark:bg-blue-500 text-white flex items-center justify-center text-sm font-bold">
+              <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center text-base font-bold shadow-sm">
                 {step.num}
               </span>
               <div className="flex-1">
                 <span className="text-slate-900 dark:text-slate-100">{step.text}</span>
                 {step.code && (
-                  <code className="block mt-1 px-3 py-2 rounded-lg text-sm bg-slate-900 dark:bg-slate-950 text-green-400 font-mono border border-slate-700">
+                  <code className="block mt-2 px-4 py-3 rounded-md text-base bg-slate-950 text-emerald-400 font-mono leading-relaxed">
                     {step.code}
                   </code>
                 )}
@@ -1921,13 +2964,19 @@ const DocumentationSection: React.FC = () => (
             </li>
           ))}
         </ol>
-        <div className="mt-6 p-4 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800">
-          <p className="text-sm font-semibold mb-2 text-slate-700 dark:text-slate-300">Expected Files:</p>
-          <p className="text-sm text-slate-600 dark:text-slate-400">crypto_agent.py, install_crypto_agent.sh, config.json</p>
+        <div className="mt-6 p-6 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-slate-200 dark:border-slate-700">
+          <p className="text-sm font-semibold mb-3 text-blue-900 dark:text-blue-300">Expected Files:</p>
+          <div className="flex flex-wrap gap-2">
+            {['crypto_agent.py', 'install_crypto_agent.sh', 'config.json'].map(file => (
+              <code key={file} className="px-2 py-1 rounded text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono border border-slate-200 dark:border-slate-700">
+                {file}
+              </code>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="rounded-xl border-l-4 border-purple-500 bg-purple-50 dark:bg-purple-900/10 p-6">
+      <div className="rounded-lg border-l-4 border-purple-500 bg-purple-50 dark:bg-purple-900/10 p-6">
         <h3 className="text-xl font-bold mb-4 text-purple-700 dark:text-purple-400">Windows Agent Setup</h3>
         <ol className="space-y-4">
           {[
@@ -1939,13 +2988,13 @@ const DocumentationSection: React.FC = () => (
             { num: 6, text: 'The agent will be installed as a Windows service and start automatically' },
           ].map(step => (
             <li key={step.num} className="flex gap-3">
-              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 dark:bg-purple-500 text-white flex items-center justify-center text-sm font-bold">
+              <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-purple-600 text-white flex items-center justify-center text-base font-bold shadow-sm">
                 {step.num}
               </span>
               <div className="flex-1">
                 <span className="text-slate-900 dark:text-slate-100">{step.text}</span>
                 {step.code && (
-                  <code className="block mt-1 px-3 py-2 rounded-lg text-sm bg-slate-900 dark:bg-slate-950 text-green-400 font-mono border border-slate-700">
+                  <code className="block mt-2 px-4 py-3 rounded-md text-base bg-slate-950 text-emerald-400 font-mono leading-relaxed">
                     {step.code}
                   </code>
                 )}
@@ -1953,15 +3002,21 @@ const DocumentationSection: React.FC = () => (
             </li>
           ))}
         </ol>
-        <div className="mt-6 p-4 rounded-lg bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800">
-          <p className="text-sm font-semibold mb-2 text-slate-700 dark:text-slate-300">Expected Files:</p>
-          <p className="text-sm text-slate-600 dark:text-slate-400">crypto_agent.py, install.py, config.json</p>
+        <div className="mt-6 p-6 rounded-lg bg-purple-50 dark:bg-purple-900/10 border border-slate-200 dark:border-slate-700">
+          <p className="text-sm font-semibold mb-3 text-purple-900 dark:text-purple-300">Expected Files:</p>
+          <div className="flex flex-wrap gap-2">
+            {['crypto_agent.py', 'install.py', 'config.json'].map(file => (
+              <code key={file} className="px-2 py-1 rounded text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono border border-slate-200 dark:border-slate-700">
+                {file}
+              </code>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="rounded-xl border-l-4 border-green-500 bg-green-50 dark:bg-green-900/10 p-6">
+      <div className="rounded-lg border-l-4 border-green-500 bg-green-50 dark:bg-green-900/10 p-6">
         <h3 className="text-xl font-bold mb-4 text-green-700 dark:text-green-400">Configuration</h3>
-        <p className="mb-4 text-slate-900 dark:text-slate-100">
+        <p className="mb-4 text-slate-900 dark:text-slate-100 leading-relaxed">
           Edit the <code className="px-2 py-1 rounded text-sm bg-slate-900 dark:bg-slate-950 text-green-400 font-mono">config.json</code> file to configure:
         </p>
         <ul className="space-y-3">
@@ -1981,7 +3036,7 @@ const DocumentationSection: React.FC = () => (
         </ul>
       </div>
 
-      <div className="rounded-xl border-l-4 border-orange-500 bg-orange-50 dark:bg-orange-900/10 p-6">
+      <div className="rounded-lg border-l-4 border-orange-500 bg-orange-50 dark:bg-orange-900/10 p-6">
         <h3 className="text-xl font-bold mb-4 text-orange-700 dark:text-orange-400">Monitoring & Management</h3>
         <ul className="space-y-3">
           {[

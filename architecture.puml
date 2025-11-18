@@ -1,0 +1,168 @@
+@startuml Architecture Diagram
+!theme plain
+
+' Define colors for clarity
+skinparam class {
+    BackgroundColor White
+    BorderColor #232F3E
+    ArrowColor #232F3E
+    FontColor #232F3E
+}
+skinparam component {
+    BackgroundColor #FF9900
+    BorderColor #232F3E
+    FontColor #232F3E
+}
+skinparam database {
+    BackgroundColor #0073BB
+    BorderColor #232F3E
+    FontColor White
+}
+skinparam package {
+    BackgroundColor #E0E0E0
+    BorderColor #232F3E
+    FontColor #232F3E
+}
+
+title End-to-End Project Architecture Overview
+
+' Define Services as Components
+component "Frontend (Web UI)" as Frontend #LightBlue
+component "db-service (FastAPI)" as DBService #LightGreen
+component "repo_scanner (FastAPI)" as RepoScanner #LightGreen
+component "system-scaner (FastAPI)" as SystemScaner #LightGreen
+component "scan-service (FastAPI)" as ScanService #LightGreen
+component "System Agent (Linux/Windows)" as SystemAgent #LightCoral
+
+database "PostgreSQL Instance" as PostgresDB {
+    package "scandb" as Scandb {
+        class "ScanBatch" as ScanBatch {
+            + PK id: Integer
+            --
+            __tablename__: Unknown
+            batch_id (Unique) (NN): String
+            total_urls (NN): Integer
+            successful_count: Integer
+            failed_count: Integer
+            max_concurrent: Integer
+            status: Unknown
+            created_at: Unknown
+            updated_at: Unknown
+            scan_results: Unknown
+        }
+
+    }
+
+    package "repo_scanner_db" as Repo_scanner_db {
+        class "Repository" as Repository {
+            + PK id: Integer
+            --
+            __tablename__: Unknown
+            repo_url (Unique) (NN): String
+            repo_hash (NN): String
+            last_scanned: DateTime
+            scan_status: String
+            total_files: Integer
+            total_algorithms: Integer
+            pqc_safe_count: Integer
+            pqc_vulnerable_count: Integer
+            current_status: String
+            total_files_to_scan: Integer
+            created_at: DateTime
+            scan_results: Unknown
+        }
+
+        class "ScanResult" as ScanResult {
+            + PK id: Integer
+            --
+            __tablename__: Unknown
+            + FK repo_id (NN): Integer
+            algorithm (NN): String
+            category (NN): String
+            is_pqc_safe (NN): Boolean
+            occurrences (NN): Integer
+            files_affected (NN): Integer
+            repository: Unknown
+            findings: Unknown
+        }
+
+        class "Finding" as Finding {
+            + PK id: Integer
+            --
+            __tablename__: Unknown
+            + FK scan_result_id (NN): Integer
+            file_path (NN): String
+            line_number (NN): Integer
+            context: Text
+            match_text: String
+            scan_result: Unknown
+        }
+
+    }
+
+    package "system_scanner_db" as System_scanner_db {
+        class "Agent" as Agent {
+            + PK agent_id: String
+            --
+            __tablename__: Unknown
+            hostname (NN): String
+            ip_address (NN): String
+            os_info (NN): String
+            registered_at (NN): DateTime
+            last_seen (NN): DateTime
+            tasks: Unknown
+            results: Unknown
+        }
+
+        class "Task" as Task {
+            + PK task_id: String
+            --
+            __tablename__: Unknown
+            + FK agent_id (NN): String
+            status (NN): String
+            created_at (NN): DateTime
+            started_at: DateTime
+            completed_at: DateTime
+            agent: Unknown
+            result: Unknown
+        }
+
+        class "Result" as Result {
+            + PK result_id: String
+            --
+            __tablename__: Unknown
+            + FK agent_id (NN): String
+            + FK task_id (NN) (Unique): String
+            audit_results (NN): Text
+            received_at (NN): DateTime
+            submitted_at (NN): DateTime
+            agent: Unknown
+            task: Unknown
+        }
+
+    }
+
+
+' Define relationships between tables
+Repository "1" -- "*" ScanResult : "repo_id (NN)"
+ScanResult "1" -- "*" Finding : "scan_result_id (NN)"
+Agent "1" -- "*" Task : "agent_id (NN)"
+Agent "1" -- "*" Result : "agent_id (NN)"
+Task "1" -- "*" Result : "task_id (NN) (Unique)"
+
+
+} ' End of PostgreSQL Instance
+
+' Define service interactions
+Frontend --> DBService : "API Calls (URL Scans)"
+Frontend --> RepoScanner : "API Calls (Repo Scans)"
+Frontend --> SystemScaner : "API Calls (Agent Mgmt)"
+
+DBService --> Scandb : "SQLAlchemy (scandb)"
+RepoScanner --> RepoScannerDb : "SQLAlchemy (repo_scanner_db)"
+SystemScaner --> SystemScannerDb : "SQLAlchemy (system_scanner_db)"
+
+ScanService .right.> DBService : "HTTP API Calls (Store Results)"
+SystemAgent .up.> SystemScaner : "HTTP API Calls (Register, Heartbeat, Tasks, Results)"
+
+@enduml
