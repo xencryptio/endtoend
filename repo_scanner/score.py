@@ -365,9 +365,9 @@ class PQCAnalyzer:
             elif key_size >= 521: return 15.0
         
         if "AES" in algo_upper:
-            if key_size == 128: return 0.0
-            elif key_size == 192: return 10.0
-            elif key_size == 256: return 20.0
+            if key_size == 128: return -20.0  # ❌ Insufficient for quantum
+            elif key_size == 192: return 5.0   # ⚠️ Marginal
+            elif key_size == 256: return 20.0  # ✅ Quantum-safe
         
         if "CHACHA" in algo_upper:
             if key_size == 256: return 15.0

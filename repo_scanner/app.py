@@ -117,7 +117,7 @@ class CategoryScore(Base):
 
 
 # Create tables
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 @contextmanager
 def get_db():
@@ -497,6 +497,26 @@ CODE_EXTENSIONS = {
     '.md', '.rst', '.txt', '.asciidoc', '.asm', '.s', '.sql', '.proto', 
     '.thrift', '.graphql'
 }
+
+def extract_key_size(algorithm: str, match_text: str) -> Optional[int]:
+    """Extract key size from algorithm name or context"""
+    # Try to find numeric key size (128, 192, 256, 2048, 3072, 4096)
+    sizes = re.findall(r'\b(128|192|256|384|512|1024|2048|3072|4096|8192)\b', 
+                       match_text.upper())
+    if sizes:
+        return int(sizes[0])
+    
+    # Default key sizes based on algorithm
+    defaults = {
+        'AES': 256, 'CHACHA20': 256, 'RSA': 2048,
+        'ECDSA': 256, 'SHA256': 256, 'SHA512': 512
+    }
+    
+    for algo, size in defaults.items():
+        if algo in algorithm.upper():
+            return size
+    
+    return None
 
 class RepoUrlParser:
     """Parse and identify Git repository URLs from various platforms"""
@@ -937,7 +957,8 @@ class CryptoScanner:
                                     'file': str(file_path.relative_to(self.repo_path)),
                                     'line': line_num,
                                     'context': line.strip(),
-                                    'match': match.group()
+                                    'match': match.group(),
+                                    'key_size': extract_key_size(algo, match.group())
                                 })
         except Exception:
             pass
@@ -947,8 +968,6 @@ class CryptoScanner:
     def get_results(self) -> Dict:
         """Get structured scan results"""
         quantum_resistant_algos = []  # Type-based (AES, SHA-256, Kyber)
-        quantum_vulnerable_algos = []  # Type-based (RSA, ECDSA, DH)
-        pqc_algorithms = []  # TRUE PQC only (Kyber, Dilithium, SPHINCS+)
         algorithms_data = {}
         
         for algo in self.findings.keys():
@@ -959,6 +978,12 @@ class CryptoScanner:
             # ✓ FIXED: Check the renamed field
             is_quantum_resistant = info.get('quantum_resistant', False)
             is_true_pqc = info.get('is_pqc', False)
+
+            # Get the most common key size for this algorithm
+            key_sizes = [occ.get('key_size') for occ in occurrences if occ.get('key_size')]
+            most_common_key_size = None
+            if key_sizes:
+                most_common_key_size = max(set(key_sizes), key=key_sizes.count)
             
             algo_data = {
                 'name': algo,
@@ -967,26 +992,18 @@ class CryptoScanner:
                 'is_pqc': is_true_pqc,  # True PQC flag
                 'occurrences': len(occurrences),
                 'files': list(unique_files),
-                'findings': occurrences
+                'findings': occurrences,
+                'key_size': most_common_key_size
             }
             
             algorithms_data[algo] = algo_data
             
-            # ✓ FIXED: Categorize correctly
-            if is_quantum_resistant:
-                quantum_resistant_algos.append(algo)
-                if is_true_pqc:
-                    pqc_algorithms.append(algo)
-            else:
-                quantum_vulnerable_algos.append(algo)
-        
         return {
             'total_files': self.file_count,
             'total_algorithms': len(self.findings),
-            # ✓ FIXED: More accurate counts
-            'quantum_resistant_count': len(quantum_resistant_algos),  # Includes AES, SHA-256, Kyber
-            'quantum_vulnerable_count': len(quantum_vulnerable_algos),  # RSA, ECDSA, DH
-            'true_pqc_count': len(pqc_algorithms),  # ONLY Kyber, Dilithium, etc.
+            # Counts will be recalculated after scoring
+            'quantum_resistant_count': 0,
+            'quantum_vulnerable_count': 0,
             'algorithms': algorithms_data
         }
 
@@ -1045,31 +1062,57 @@ def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
             for algo_name, algo_data in results['algorithms'].items():
                 score = pqc_analyzer.score_repository_algorithm(
                     algorithm=algo_name,
-                    category=algo_data['category']
+                    category=algo_data['category'],
+                    key_size=algo_data.get('key_size')
                 )
                 
-                # ✓ FIXED: Determine quantum_safe based on SCORE + TYPE
+                # ✓ FIXED: Determine quantum_safe based on SCORE + TYPE + KEYSIZE
                 is_quantum_resistant = algo_data.get('quantum_resistant', False)
-                is_pqc = algo_data.get('is_pqc', False)
+                final_score = score.final_score
+
+                # Check minimum key sizes for quantum safety
+                min_key_sizes = {
+                    'AES': 256,      # AES-128 becomes 64-bit effective
+                    'CHACHA': 256,
+                    'SHA': 256,      # SHA-256 minimum
+                }
+
+                algo_upper = algo_name.upper()
+                has_sufficient_keysize = True
+
+                # Check key size requirements
+                for prefix, min_size in min_key_sizes.items():
+                    if prefix in algo_upper:
+                        # Extract key size from name (e.g., "AES-128" → 128)
+                        match = re.search(r'\b(\d{3,4})\b', algo_name)
+                        if match:
+                            actual_size = int(match.group(1))
+                            if actual_size < min_size:
+                                has_sufficient_keysize = False
+                        break
                 
                 # ✓ KEY LOGIC: quantum_safe = TRUE if:
                 # 1. Algorithm is quantum-resistant by type (symmetric/hash/PQC)
                 # 2. AND has good security score (>= 85)
-                quantum_safe = is_quantum_resistant and score.final_score >= 85
+                # 3. AND has sufficient key size
+                quantum_safe = (
+                    is_quantum_resistant and 
+                    final_score >= 85 and 
+                    has_sufficient_keysize
+                )
                 
                 scored_results[algo_name] = {
                     **algo_data,
                     **asdict(score),
                     'quantum_safe': quantum_safe,  # ✓ CORRECT calculation
                 }
-            
-            # Replace original algorithms with scored ones and calculate overall score
-            # Get comprehensive scoring (overall + categories)
+
             results['algorithms'] = scored_results
+            results['quantum_resistant_count'] = sum(1 for r in scored_results.values() if r.get('quantum_resistant'))
+            results['quantum_vulnerable_count'] = sum(1 for r in scored_results.values() if not r.get('quantum_safe'))
+            results['true_pqc_count'] = sum(1 for r in scored_results.values() if r.get('is_pqc'))
+
             scoring_results = calculate_repo_overall_score(scored_results)
-            # ✓ FIXED: Update counts to match new field names
-            results['quantum_resistant_count'] = results.pop('quantum_resistant_count', 0)
-            results['quantum_vulnerable_count'] = results.pop('quantum_vulnerable_count', 0)
 
             results['overall_score'] = scoring_results['overall_score']
             results['overall_grade'] = scoring_results['overall_grade']

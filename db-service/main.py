@@ -10,11 +10,7 @@ import crud
 from database import engine, get_db
 
 # Create database tables on startup
-try:
-    models.Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created/verified")
-except Exception as e:
-    print(f"⚠️ Error creating tables: {e}")
+
 
 
 app = FastAPI(title="Scan Storage Service", version="1.0")
@@ -319,7 +315,7 @@ def health_check(db: Session = Depends(get_db)):
     """
     try:
         # Create all tables first (idempotent operation)
-        models.Base.metadata.create_all(bind=engine)
+        
         
         # Test database connection with a simple query
         result = db.execute(text("SELECT 1"))

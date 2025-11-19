@@ -396,6 +396,15 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
       }
     });
 
+    const quantumSafeCount = Object.values(algorithms).filter(
+      info => info.quantum_safe && info.final_score >= 85
+    ).length;
+
+    const quantumVulnerableCount = Object.values(algorithms).filter(
+      info => !info.quantum_safe
+    ).length;
+
+
     return (
       <div className="p-6 bg-gray-50 dark:bg-gray-900">
         <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg mb-4">
@@ -468,7 +477,11 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
                 </div>
               </div>
               <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
-                Percentage of cryptographic operations protected by quantum-safe algorithms
+                Percentage of cryptographic <strong>operations</strong> (by occurrence count) 
+                using quantum-safe algorithms with adequate key sizes
+                <div className="text-xs mt-1 text-gray-500 dark:text-gray-400">
+                  Based on weighted usage, not algorithm count
+                </div>
               </div>
             </div>
 
@@ -572,7 +585,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
             <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
               Quantum-Vulnerable
             </div>
-            <div className="text-3xl font-semibold text-red-600">{quantumVulnerable.length}</div>
+            <div className="text-3xl font-semibold text-red-600">{quantumVulnerableCount}</div>
           </div>
         </div>
 
@@ -983,19 +996,21 @@ const AlgorithmSection: React.FC<{
             {/* ✓ FIXED: Show correct quantum safety indicator */}
             {algo.quantum_safe !== undefined && (
               <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                {/* Type-based classification */}
                 <div className={`text-xs font-medium ${
-                  algo.quantum_safe 
-                    ? 'text-green-600 dark:text-green-400' 
-                    : 'text-red-600 dark:text-red-400'
+                  algo.quantum_resistant ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'
                 }`}>
-                  {algo.quantum_safe ? '✓ Quantum Safe' : '✗ Quantum Vulnerable'}
+                  {algo.quantum_resistant ? '🔵 Type: Quantum-Resistant' : '⚠️ Type: Quantum-Vulnerable'}
                 </div>
-                {/* ✓ NEW: Show if it's TRUE PQC */}
-                {algo.is_pqc && (
-                  <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mt-1">
-                    🔒 Post-Quantum Cryptography
-                  </div>
-                )}
+                
+                {/* Practical security assessment */}
+                <div className={`text-xs font-medium mt-1 ${
+                  algo.quantum_safe ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'
+                }`}>
+                  {algo.quantum_safe 
+                    ? '✅ Safe: Adequate Parameters' 
+                    : '⚠️ Weak: Needs Stronger Parameters'}
+                </div>
               </div>
             )}
           </div>

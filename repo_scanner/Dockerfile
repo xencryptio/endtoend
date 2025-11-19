@@ -16,5 +16,5 @@ COPY . .
 # ✅ CHANGE PORT FROM 5000 TO 8001
 EXPOSE 8001
 
-# ✅ CHANGE THIS LINE - Use uvicorn directly
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+# Run migrations and then start the application
+CMD alembic upgrade head && uvicorn app:app --host 0.0.0.0 --port 8001

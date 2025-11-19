@@ -31,5 +31,5 @@ RUN if [ -f "Linux Agent/crypto-agent.service" ]; then \
 # Expose the port for FastAPI app
 EXPOSE 9000
 
-# Default startup command
-CMD ["python", "api_server.py"]
+# Use wait-for-db.sh, run migrations, then start the application
+CMD /usr/local/bin/wait-for-db.sh db-service && alembic upgrade head && python api_server.py

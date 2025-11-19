@@ -4,3 +4,4 @@ pydantic
 python-multipart
 SQLAlchemy
 psycopg2-binary
+alembic
