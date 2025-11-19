@@ -4,27 +4,47 @@ import { Button } from "@/components/ui/button";
 
 // Types
 interface Algorithm {
-  name: string;
-  category: string;
-  pqc_safe: boolean;
-  occurrences: number;
-  files_affected: number;
-}
-
-interface ScanDetail {
-  id: number;
-  repo_url: string;
-  platform: string;
-  branch_name: string;
-  repo_hash: string;
-  last_scanned: string;
-  total_files: number;
-  algorithms: Record<string, Algorithm>;
-  pqc_safe_count: number;
-  pqc_vulnerable_count: number;
-}
-
-interface Scan {
+    name: string;
+    category: string;
+    algorithm_type: string; // NEW: kex, signature, symmetric, hash
+    pqc_safe: boolean;
+    occurrences: number;
+    files_affected: number;
+    base_score: number; // NEW: Initial score before adjustments
+    final_score: number; // NEW: Score after position weighting
+    grade: string; // NEW: Letter grade (A+, B, F, etc.)
+    deprecated: boolean; // NEW: Whether algorithm is deprecated
+    security_level: string; // NEW: critical, high, medium, low
+    quantum_safe: boolean; // NEW: Explicit quantum safety flag
+    weighted_score: number; // NEW: Position-weighted score
+  }
+  
+  interface CategoryScore {
+    score: number; // Average score for this category
+    grade: string; // Letter grade for category
+    algorithm_count: number; // How many algorithms in this category
+    best_algorithm: string; // Name of best performing algorithm
+    worst_algorithm: string; // Name of worst performing algorithm
+  }
+  
+  interface ScanDetail {
+    id: number;
+    repo_url: string;
+    platform: string;
+    branch_name: string;
+    repo_hash: string;
+    last_scanned: string;
+    total_files: number;
+    algorithms: Record<string, Algorithm>;
+    pqc_safe_count: number;
+    pqc_vulnerable_count: number;
+    overall_security_score: number; // NEW: 0-100 overall score
+    overall_grade: string; // NEW: A+ to F grade
+    quantum_readiness_percentage: number; // NEW: % of quantum-safe algorithms
+    category_scores: Record<string, CategoryScore>; // NEW: Scores by category
+  }
+  
+  interface Scan {
   id: number;
   repo_url: string;
   repo_hash: string;
@@ -46,6 +66,58 @@ interface CryptoScannerProps {
 }
 
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL
+
+// Helper function to get color for letter grades
+const getGradeColor = (grade: string): string => {
+  if (!grade) return 'text-gray-500';
+  const letter = grade.charAt(0);
+  switch (letter) {
+    case 'A': return 'text-green-600 dark:text-green-400';
+    case 'B': return 'text-blue-600 dark:text-blue-400';
+    case 'C': return 'text-yellow-600 dark:text-yellow-400';
+    case 'D': return 'text-orange-600 dark:text-orange-400';
+    case 'F': return 'text-red-600 dark:text-red-400';
+    default: return 'text-gray-600 dark:text-gray-400';
+  }
+};
+
+// Helper function to get color for score progress bars
+const getScoreBarColor = (score: number): string => {
+  if (score >= 90) return 'bg-green-500';
+  if (score >= 80) return 'bg-blue-500';
+  if (score >= 70) return 'bg-yellow-500';
+  if (score >= 60) return 'bg-orange-500';
+  return 'bg-red-500';
+};
+
+// Helper function to get risk level information
+const getRiskLevelInfo = (score: number): { label: string; color: string; description: string } => {
+  if (score >= 90) return {
+    label: 'Low Risk',
+    color: 'text-green-600 dark:text-green-400',
+    description: 'Excellent cryptographic security posture'
+  };
+  if (score >= 80) return {
+    label: 'Medium-Low Risk',
+    color: 'text-blue-600 dark:text-blue-400',
+    description: 'Good security with minor improvements needed'
+  };
+  if (score >= 70) return {
+    label: 'Medium Risk',
+    color: 'text-yellow-600 dark:text-yellow-400',
+    description: 'Adequate security but needs attention'
+  };
+  if (score >= 60) return {
+    label: 'Medium-High Risk',
+    color: 'text-orange-600 dark:text-orange-400',
+    description: 'Significant security concerns present'
+  };
+  return {
+    label: 'High Risk',
+    color: 'text-red-600 dark:text-red-400',
+    description: 'Critical security vulnerabilities detected'
+  };
+};
 
 const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
   const [repoUrl, setRepoUrl] = useState('');
@@ -336,6 +408,117 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
           </div>
         </div>
 
+        {/* NEW SECTION: Overall Security Metrics */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-6 mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+            <Shield className="w-5 h-5 text-blue-600" />
+            Overall Security Assessment
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Overall Security Score Card */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-5 shadow-sm">
+              <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                Security Score
+              </div>
+              <div className="flex items-end gap-3">
+                <div className="text-4xl font-bold text-gray-900 dark:text-gray-100">
+                  {data.overall_security_score?.toFixed(1) || 'N/A'}
+                </div>
+                <div className={`text-2xl font-semibold mb-1 ${
+                  getGradeColor(data.overall_grade)
+                }`}>
+                  {data.overall_grade || 'N/A'}
+                </div>
+              </div>
+              <div className="mt-3 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full transition-all duration-500 ${
+                    getScoreBarColor(data.overall_security_score || 0)
+                  }`}
+                  style={{ width: `${data.overall_security_score || 0}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Quantum Readiness Card */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-5 shadow-sm">
+              <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                Quantum Readiness
+              </div>
+              <div className="flex items-end gap-2">
+                <div className="text-4xl font-bold text-gray-900 dark:text-gray-100">
+                  {data.quantum_readiness_percentage?.toFixed(1) || '0'}%
+                </div>
+              </div>
+              <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+                {data.pqc_safe_count || 0} of {Object.keys(data.algorithms || {}).length} algorithms quantum-safe
+              </div>
+            </div>
+
+            {/* Risk Level Indicator */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-5 shadow-sm">
+              <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                Risk Level
+              </div>
+              <div className={`text-2xl font-semibold ${
+                getRiskLevelInfo(data.overall_security_score || 0).color
+              }`}>
+                {getRiskLevelInfo(data.overall_security_score || 0).label}
+              </div>
+              <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+                {getRiskLevelInfo(data.overall_security_score || 0).description}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* NEW SECTION: Category Breakdown */}
+        {data.category_scores && Object.keys(data.category_scores).length > 0 && (
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6 mb-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+              <Package className="w-5 h-5 text-purple-600" />
+              Security by Algorithm Category
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {Object.entries(data.category_scores).map(([category, score]) => (
+                <div key={category} className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                      {getCategoryDisplayName(category)}
+                    </div>
+                    <div className={`text-lg font-bold ${getGradeColor(score.grade)}`}>
+                      {score.grade}
+                    </div>
+                  </div>
+                  
+                  <div className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+                    {score.score.toFixed(1)}
+                  </div>
+                  
+                  <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-3">
+                    <div 
+                      className={`h-full ${getScoreBarColor(score.score)}`}
+                      style={{ width: `${score.score}%` }}
+                    />
+                  </div>
+                  
+                  <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                    <div>{score.algorithm_count} algorithm{score.algorithm_count !== 1 ? 's' : ''}</div>
+                    <div className="truncate" title={score.best_algorithm}>
+                      Best: {score.best_algorithm}
+                    </div>
+                    <div className="truncate" title={score.worst_algorithm}>
+                      Worst: {score.worst_algorithm}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
             <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
@@ -373,90 +556,101 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
     );
   };
 
-  // Create a separate component for each row to avoid Fragment issues
-  const ScanRow: React.FC<{ scan: Scan }> = ({ scan }) => {
-    const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
-    const isExpanded = expandedRows.has(scan.id);
-    const fileCountDisplay =
-      scan.scan_status === 'in_progress' && scan.total_files_to_scan > 0
-        ? `${scan.total_files || 0} / ${scan.total_files_to_scan}`
-        : scan.total_files || '-';
+  // Helper function to display category names nicely
+  const getCategoryDisplayName = (category: string): string => {
+    const names: Record<string, string> = {
+      'kex': 'Key Exchange',
+      'signature': 'Digital Signatures',
+      'symmetric': 'Symmetric Encryption',
+      'hash': 'Hash Functions'
+    };
+    return names[category] || category;
+  };
 
-    return (
-      <>
-        <tr
-          onClick={() => canView && toggleRow(scan.id)}
-          className={`border-b border-gray-200 dark:border-gray-700 ${
-            canView ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800' : ''
-          }`}
-        >
-          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
-            <div className="max-w-xs truncate" title={scan.repo_url}>
-              {scan.repo_url}
-            </div>
-          </td>
-          <td className="px-4 py-3">
-            <span className="inline-flex items-center px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs font-medium">
-              {scan.branch_name || 'main'}
-            </span>
-          </td>
-          <td className="px-4 py-3">
-            <span className="inline-flex items-center px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium">
-              {scan.platform || 'Unknown'}
-            </span>
-          </td>
-          <td className="px-4 py-3">
-            {getStatusBadge(scan.scan_status, scan.current_status)}
-          </td>
-          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
-            {new Date(scan.last_scanned).toLocaleString()}
-          </td>
-          <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{fileCountDisplay}</td>
-          <td className="px-4 py-3 text-green-600 font-semibold">
-            {scan.pqc_safe_count || '-'}
-          </td>
-          <td className="px-4 py-3 text-red-600 font-semibold">
-            {scan.pqc_vulnerable_count || '-'}
-          </td>
-          <td className="px-4 py-3">
-            {canView ? (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleRow(scan.id);
-                }}
-                className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
-              >
-                {isExpanded ? 'Hide' : 'View'}
-              </button>
-            ) : (
-              <button
-                disabled
-                className="px-3 py-1 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-500 dark:text-gray-400 text-sm cursor-not-allowed"
-              >
-                {scan.scan_status === 'pending'
-                  ? 'Queued'
-                  : scan.scan_status === 'in_progress'
-                  ? 'Scanning...'
-                  : 'Failed'}
-              </button>
-            )}
-          </td>
-        </tr>
-        {canView && isExpanded && (
-          <tr className="bg-gray-50 dark:bg-gray-800/50">
-            <td colSpan={9}>
-              {scanDetailsCache.has(scan.id) ? (
-                renderExpandedContent(scanDetailsCache.get(scan.id)!)
+    // Create a separate component for each row to avoid Fragment issues
+    const ScanRow: React.FC<{ scan: Scan }> = ({ scan }) => {
+      const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
+      const isExpanded = expandedRows.has(scan.id);
+      const fileCountDisplay =
+        scan.scan_status === 'in_progress' && scan.total_files_to_scan > 0
+          ? `${scan.total_files || 0} / ${scan.total_files_to_scan}`
+          : scan.total_files || '-';
+  
+      return (
+        <>
+          <tr
+            onClick={() => canView && toggleRow(scan.id)}
+            className={`border-b border-gray-200 dark:border-gray-700 ${
+              canView ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800' : ''
+            }`}
+          >
+            <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+              <div className="max-w-xs truncate" title={scan.repo_url}>
+                {scan.repo_url}
+              </div>
+            </td>
+            <td className="px-4 py-3">
+              <span className="inline-flex items-center px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs font-medium">
+                {scan.branch_name || 'main'}
+              </span>
+            </td>
+            <td className="px-4 py-3">
+              <span className="inline-flex items-center px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium">
+                {scan.platform || 'Unknown'}
+              </span>
+            </td>
+            <td className="px-4 py-3">
+              {getStatusBadge(scan.scan_status, scan.current_status)}
+            </td>
+            <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+              {new Date(scan.last_scanned).toLocaleString()}
+            </td>
+            <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{fileCountDisplay}</td>
+            <td className="px-4 py-3 text-green-600 font-semibold">
+              {scan.pqc_safe_count || '-'}
+            </td>
+            <td className="px-4 py-3 text-red-600 font-semibold">
+              {scan.pqc_vulnerable_count || '-'}
+            </td>
+            <td className="px-4 py-3">
+              {canView ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleRow(scan.id);
+                  }}
+                  className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  {isExpanded ? 'Hide' : 'View'}
+                </button>
               ) : (
-                <div className="p-6 text-center text-gray-600 dark:text-gray-400">Loading details...</div>
+                <button
+                  disabled
+                  className="px-3 py-1 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-500 dark:text-gray-400 text-sm cursor-not-allowed"
+                >
+                  {scan.scan_status === 'pending'
+                    ? 'Queued'
+                    : scan.scan_status === 'in_progress'
+                    ? 'Scanning...'
+                    : 'Failed'}
+                </button>
               )}
             </td>
           </tr>
-        )}
-      </>
-    );
-  };
+          {canView && isExpanded && (
+            <tr className="bg-gray-50 dark:bg-gray-800/50">
+              <td colSpan={9}>
+                {scanDetailsCache.has(scan.id) ? (
+                  renderExpandedContent(scanDetailsCache.get(scan.id)!)
+                ) : (
+                  <div className="p-6 text-center text-gray-600 dark:text-gray-400">Loading details...</div>
+                )}
+              </td>
+            </tr>
+          )}
+        </>
+      );
+    };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
@@ -661,13 +855,83 @@ const AlgorithmSection: React.FC<{
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
         {algorithms.map((algo, idx) => (
-          <div key={`${algo.name}-${idx}`} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">{algo.name}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">{algo.category}</div>
-            <div className="flex gap-4 pt-3 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400">
-              <span>{algo.occurrences} occurrences</span>
-              <span>{algo.files_affected || 0} files</span>
+          <div key={`${algo.name}-${idx}`} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-lg transition-shadow">
+            {/* Algorithm Name and Grade */}
+            <div className="flex items-start justify-between mb-2">
+              <div className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                {algo.name}
+              </div>
+              {algo.grade && (
+                <div className={`text-xl font-bold ${getGradeColor(algo.grade)}`}>
+                  {algo.grade}
+                </div>
+              )}
             </div>
+            
+            {/* Category and Type */}
+            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+              {algo.category}
+            </div>
+            
+            {/* Security Level Badge */}
+            {algo.security_level && (
+              <div className="mb-3">
+                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                  algo.security_level === 'critical' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200' :
+                  algo.security_level === 'high' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200' :
+                  algo.security_level === 'medium' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200' :
+                  'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                }`}>
+                  {algo.security_level.toUpperCase()} SECURITY
+                </span>
+                {algo.deprecated && (
+                  <span className="ml-2 inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200">
+                    DEPRECATED
+                  </span>
+                )}
+              </div>
+            )}
+            
+            {/* Score Display */}
+            {algo.final_score !== undefined && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between text-sm mb-1">
+                  <span className="text-gray-600 dark:text-gray-400">Security Score</span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">
+                    {algo.final_score.toFixed(1)}
+                  </span>
+                </div>
+                <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full ${getScoreBarColor(algo.final_score)}`}
+                    style={{ width: `${algo.final_score}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            
+            {/* Usage Statistics */}
+            <div className="flex gap-4 pt-3 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400">
+              <span title="Total occurrences in code">
+                {algo.occurrences} occurrence{algo.occurrences !== 1 ? 's' : ''}
+              </span>
+              <span title="Number of files affected">
+                {algo.files_affected || 0} file{algo.files_affected !== 1 ? 's' : ''}
+              </span>
+            </div>
+            
+            {/* Quantum Safety Indicator */}
+            {algo.quantum_safe !== undefined && (
+              <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div className={`text-xs font-medium ${
+                  algo.quantum_safe 
+                    ? 'text-green-600 dark:text-green-400' 
+                    : 'text-red-600 dark:text-red-400'
+                }`}>
+                  {algo.quantum_safe ? '✓ Quantum Safe' : '✗ Quantum Vulnerable'}
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

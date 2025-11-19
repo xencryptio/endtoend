@@ -21,8 +21,8 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
-import uvicorn
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint
+import uvicorn 
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, Float
 from sqlalchemy.orm import sessionmaker, relationship, Session
 from sqlalchemy.ext.declarative import declarative_base
 from contextlib import contextmanager
@@ -60,6 +60,8 @@ class Repository(Base):
     pqc_vulnerable_count = Column(Integer, default=0)
     current_status = Column(String, default='Queued for scanning')
     total_files_to_scan = Column(Integer, default=0)
+    overall_security_score = Column(Float, nullable=True)
+    overall_grade = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     scan_results = relationship("ScanResult", back_populates="repository", cascade="all, delete-orphan")
 
@@ -73,10 +75,18 @@ class ScanResult(Base):
     id = Column(Integer, primary_key=True, index=True)
     repo_id = Column(Integer, ForeignKey("repositories.id"), nullable=False)
     algorithm = Column(String, nullable=False)
+    algorithm_type = Column(String, nullable=True)
     category = Column(String, nullable=False)
     is_pqc_safe = Column(Boolean, nullable=False)
     occurrences = Column(Integer, nullable=False)
     files_affected = Column(Integer, nullable=False)
+    base_score = Column(Float, nullable=True)
+    final_score = Column(Float, nullable=True)
+    grade = Column(String, nullable=True)
+    security_level = Column(String, nullable=True)
+    quantum_safe = Column(Boolean, default=False)
+    deprecated = Column(Boolean, default=False)
+    weighted_score = Column(Float, nullable=True)
     repository = relationship("Repository", back_populates="scan_results")
     findings = relationship("Finding", back_populates="scan_result", cascade="all, delete-orphan")
 
@@ -90,6 +100,19 @@ class Finding(Base):
     match_text = Column(String)
     scan_result = relationship("ScanResult", back_populates="findings")
 
+class CategoryScore(Base):
+    __tablename__ = "category_scores"
+    id = Column(Integer, primary_key=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repositories.id"), nullable=False)
+    category_type = Column(String, nullable=False)  # 'kex', 'signature', 'symmetric', 'hash'
+    score = Column(Float, nullable=False)
+    grade = Column(String, nullable=False)
+    algorithm_count = Column(Integer, nullable=False)
+    best_algorithm = Column(String, nullable=True)
+    worst_algorithm = Column(String, nullable=True)
+    repository = relationship("Repository", backref="category_scores")
+
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
@@ -100,6 +123,11 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# --- PQC Scoring Integration ---
+from score import PQCAnalyzer, AlgorithmScore
+from dataclasses import asdict
 
 # Complete cryptographic patterns from original script
 CRYPTO_PATTERNS = {
@@ -656,19 +684,31 @@ class Database:
         repo.pqc_safe_count = scan_data['pqc_safe_count']
         repo.pqc_vulnerable_count = scan_data['pqc_vulnerable_count']
         repo.last_scanned = datetime.utcnow()
+        repo.overall_security_score = scan_data.get('overall_score')
+        repo.overall_grade = scan_data.get('overall_grade')
         repo.current_status = 'Scan completed successfully'
 
         # Delete old scan results
+        db.query(CategoryScore).filter(CategoryScore.repo_id == repo_id).delete()
         db.query(ScanResult).filter(ScanResult.repo_id == repo_id).delete()
 
         for algo, data in scan_data['algorithms'].items():
             scan_result = ScanResult(
                 repo_id=repo_id,
                 algorithm=algo,
+                algorithm_type=data.get('algorithm_type'),
                 category=data['category'],
                 is_pqc_safe=data['pqc_safe'],
                 occurrences=data['occurrences'],
-                files_affected=len(data['files'])
+                files_affected=len(data['files']),
+                # Add scoring data
+                base_score=data.get('base_score'),
+                final_score=data.get('final_score'),
+                grade=data.get('grade'),
+                security_level=data.get('security_level'),
+                quantum_safe=data.get('quantum_safe'),
+                deprecated=data.get('deprecated', False),
+                weighted_score=data.get('weighted_score'),
             )
             db.add(scan_result)
             db.flush()  # To get scan_result.id
@@ -682,6 +722,20 @@ class Database:
                     match_text=finding['match']
                 )
                 db.add(new_finding)
+        
+        # NEW: Save category scores
+        category_scores = scan_data.get('category_scores', {})
+        for cat_type, cat_data in category_scores.items():
+            category_score = CategoryScore(
+                repo_id=repo_id,
+                category_type=cat_type,
+                score=cat_data['score'],
+                grade=cat_data['grade'],
+                algorithm_count=cat_data['algorithm_count'],
+                best_algorithm=cat_data.get('best_algorithm'),
+                worst_algorithm=cat_data.get('worst_algorithm')
+            )
+            db.add(category_score)
         db.commit()
 
     def mark_scan_failed(self, db: Session, repo_id: int, error_message: str = None):
@@ -702,10 +756,34 @@ class Database:
         for sr in repo.scan_results:
             algorithms[sr.algorithm] = {
                 'category': sr.category,
+                'algorithm_type': sr.algorithm_type,
                 'pqc_safe': sr.is_pqc_safe,
                 'occurrences': sr.occurrences,
-                'files_affected': sr.files_affected
+                'files_affected': sr.files_affected,
+                'base_score': sr.base_score,
+                'final_score': sr.final_score,
+                'grade': sr.grade,
+                'deprecated': sr.deprecated,
+                'security_level': sr.security_level,
+                'quantum_safe': sr.quantum_safe,
+                'weighted_score': sr.weighted_score,
             }
+
+        # NEW: Get category scores
+        category_scores = {}
+        for cs in repo.category_scores:
+            category_scores[cs.category_type] = {
+                'score': cs.score,
+                'grade': cs.grade,
+                'algorithm_count': cs.algorithm_count,
+                'best_algorithm': cs.best_algorithm,
+                'worst_algorithm': cs.worst_algorithm
+            }
+
+        # Calculate quantum readiness percentage
+        quantum_safe_algos = sum(1 for sr in repo.scan_results if sr.quantum_safe)
+        total_algos = len(repo.scan_results)
+        quantum_readiness_percentage = (quantum_safe_algos / total_algos * 100) if total_algos > 0 else 0
 
         return {
             'repo_id': repo.id,
@@ -720,8 +798,12 @@ class Database:
             'pqc_safe_count': repo.pqc_safe_count,
             'pqc_vulnerable_count': repo.pqc_vulnerable_count,
             'current_status': repo.current_status,
+            'overall_security_score': repo.overall_security_score,
+            'overall_grade': repo.overall_grade,
+            'quantum_readiness_percentage': round(quantum_readiness_percentage, 2),
             'total_files_to_scan': repo.total_files_to_scan,
-            'algorithms': algorithms
+            'algorithms': algorithms,
+            'category_scores': category_scores
         }
 
     def get_all_scans(self, db: Session) -> List[Dict]:
@@ -909,6 +991,28 @@ def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
                 
             # Save results
             results = scanner.get_results()
+            pqc_analyzer = PQCAnalyzer()
+
+            # Score each algorithm
+            scored_results = {}
+            for algo_name, algo_data in results['algorithms'].items():
+                score = pqc_analyzer.score_repository_algorithm(
+                    algorithm=algo_name,
+                    category=algo_data['category']
+                )
+                scored_results[algo_name] = {
+                    **algo_data,
+                    **asdict(score)
+                }
+            
+            # Replace original algorithms with scored ones and calculate overall score
+            # Get comprehensive scoring (overall + categories)
+            results['algorithms'] = scored_results
+            scoring_results = calculate_repo_overall_score(scored_results)
+
+            results['overall_score'] = scoring_results['overall_score']
+            results['overall_grade'] = scoring_results['overall_grade']
+            results['category_scores'] = scoring_results['category_scores']
             results['total_files'] = scanned_count
             db_manager.save_scan_results(db, repo_id, results)
             
@@ -1025,9 +1129,24 @@ class ScanQueueResponse(BaseModel):
 
 class ScanResultItem(BaseModel):
     category: str
+    algorithm_type: Optional[str] = None
     pqc_safe: bool
     occurrences: int
     files_affected: int
+    base_score: Optional[float] = None
+    final_score: Optional[float] = None
+    grade: Optional[str] = None
+    deprecated: Optional[bool] = False
+    security_level: Optional[str] = None
+    quantum_safe: Optional[bool] = None
+    weighted_score: Optional[float] = None
+
+class CategoryScoreItem(BaseModel):
+    score: float
+    grade: str
+    algorithm_count: int
+    best_algorithm: Optional[str] = None
+    worst_algorithm: Optional[str] = None
 
 class ScanDetailsResponse(BaseModel):
     repo_id: int
@@ -1043,7 +1162,11 @@ class ScanDetailsResponse(BaseModel):
     pqc_vulnerable_count: int
     current_status: str
     total_files_to_scan: int
+    overall_security_score: Optional[float] = None
+    overall_grade: Optional[str] = None
+    quantum_readiness_percentage: Optional[float] = None
     algorithms: Dict[str, ScanResultItem]
+    category_scores: Optional[Dict[str, CategoryScoreItem]] = None
     cached: Optional[bool] = None
     message: Optional[str] = None
 
@@ -1084,6 +1207,88 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def calculate_repo_overall_score(scored_algorithms: Dict) -> Dict:
+    """
+    Calculate weighted overall score AND category-wise scores for a repository.
+    Returns dict with overall score, grade, and category breakdowns.
+    """
+    if not scored_algorithms:
+        return {
+            'overall_score': 0.0,
+            'overall_grade': 'F',
+            'category_scores': {}
+        }
+    
+    # Group algorithms by their algorithm_type (kex, signature, symmetric, hash)
+    categories = {}
+    for algo_name, data in scored_algorithms.items():
+        algo_type = data.get('algorithm_type', 'unknown')
+        
+        if algo_type not in categories:
+            categories[algo_type] = {
+                'algorithms': [],
+                'total_weighted_score': 0,
+                'total_weight': 0
+            }
+        
+        occurrences = data['occurrences']
+        occurrence_weight = min(occurrences, 50)
+        
+        # Higher weight for critical security categories
+        category = data['category']
+        category_weight = 2.0 if category in [
+            'Asymmetric Encryption', 'Digital Signature', 'Key Exchange',
+            'PQC Digital Signature', 'PQC Key Encapsulation', 'PQC Encryption'
+        ] else 1.0
+        
+        weight = occurrence_weight * category_weight
+        
+        categories[algo_type]['algorithms'].append({
+            'name': algo_name,
+            'final_score': data['final_score'],
+            'grade': data['grade'],
+            'weight': weight
+        })
+        categories[algo_type]['total_weighted_score'] += data['final_score'] * weight
+        categories[algo_type]['total_weight'] += weight
+    
+    # Calculate category scores
+    pqc_analyzer = PQCAnalyzer()
+    category_scores = {}
+    
+    for cat_type, cat_data in categories.items():
+        if cat_data['total_weight'] > 0:
+            avg_score = cat_data['total_weighted_score'] / cat_data['total_weight']
+            category_scores[cat_type] = {
+                'score': round(avg_score, 2),
+                'grade': pqc_analyzer.score_to_grade(avg_score),
+                'algorithm_count': len(cat_data['algorithms']),
+                'best_algorithm': max(cat_data['algorithms'], key=lambda x: x['final_score'])['name'],
+                'worst_algorithm': min(cat_data['algorithms'], key=lambda x: x['final_score'])['name'],
+            }
+    
+    # Calculate overall score from category scores
+    # Weight categories by importance
+    CATEGORY_WEIGHTS = {
+        'kex': 0.35, 'signature': 0.30, 'symmetric': 0.20, 'hash': 0.15
+    }
+    
+    total_weighted_score = 0
+    total_weight = 0
+    
+    for cat_type, cat_score_data in category_scores.items():
+        weight = CATEGORY_WEIGHTS.get(cat_type, 0.1)
+        total_weighted_score += cat_score_data['score'] * weight
+        total_weight += weight
+    
+    overall_score = total_weighted_score / total_weight if total_weight > 0 else 0.0
+    
+    return {
+        'overall_score': round(overall_score, 2),
+        'overall_grade': pqc_analyzer.score_to_grade(overall_score),
+        'category_scores': category_scores
+    }
 
 
 db_manager = Database()
