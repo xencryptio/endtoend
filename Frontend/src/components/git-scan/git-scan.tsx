@@ -6,17 +6,20 @@ import { Button } from "@/components/ui/button";
 interface Algorithm {
     name: string;
     category: string;
-    algorithm_type: string; // NEW: kex, signature, symmetric, hash
-    pqc_safe: boolean;
+    algorithm_type: string; // kex, signature, symmetric, hash
+    // ✓ FIXED: Renamed fields
+    quantum_resistant: boolean; // Type-based (was: pqc_safe)
+    is_pqc: boolean; // True ONLY for actual PQC algorithms
     occurrences: number;
     files_affected: number;
-    base_score: number; // NEW: Initial score before adjustments
-    final_score: number; // NEW: Score after position weighting
-    grade: string; // NEW: Letter grade (A+, B, F, etc.)
-    deprecated: boolean; // NEW: Whether algorithm is deprecated
-    security_level: string; // NEW: critical, high, medium, low
-    quantum_safe: boolean; // NEW: Explicit quantum safety flag
-    weighted_score: number; // NEW: Position-weighted score
+    base_score: number;
+    final_score: number;
+    grade: string;
+    deprecated: boolean;
+    security_level: string;
+    // ✓ THIS IS THE CORRECT ONE TO USE FOR DISPLAY
+    quantum_safe: boolean; // Score-based (final_score >= 85 + quantum_resistant)
+    weighted_score: number;
   }
   
   interface CategoryScore {
@@ -36,12 +39,15 @@ interface Algorithm {
     last_scanned: string;
     total_files: number;
     algorithms: Record<string, Algorithm>;
-    pqc_safe_count: number;
-    pqc_vulnerable_count: number;
-    overall_security_score: number; // NEW: 0-100 overall score
-    overall_grade: string; // NEW: A+ to F grade
-    quantum_readiness_percentage: number; // NEW: % of quantum-safe algorithms
-    category_scores: Record<string, CategoryScore>; // NEW: Scores by category
+    // ✓ FIXED: Renamed counts
+    quantum_resistant_count: number; // Type-based count (was: pqc_safe_count)
+    quantum_vulnerable_count: number; // Type-based count (was: pqc_vulnerable_count)
+    true_pqc_count: number; // NEW: Count of actual PQC algorithms
+    overall_security_score: number;
+    overall_grade: string;
+    // ✓ THIS IS THE CORRECT PERCENTAGE
+    quantum_readiness_percentage: number; // Based on occurrences, not types
+    category_scores: Record<string, CategoryScore>;
   }
   
   interface Scan {
@@ -54,7 +60,8 @@ interface Algorithm {
   last_scanned: string;
   total_files: number;
   total_files_to_scan: number;
-  pqc_safe_count: number;
+  // ✓ FIXED: Match new backend fields
+  pqc_safe_count: number; // This is quantum_resistant_count in backend
   pqc_vulnerable_count: number;
   current_status: string;
 }
@@ -369,14 +376,23 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
 
   const renderExpandedContent = (data: ScanDetail) => {
     const algorithms = data.algorithms || {};
-    const safe: (Algorithm & { name: string })[] = [];
-    const unsafe: (Algorithm & { name: string })[] = [];
-
+    // ✓ FIXED: Categorize into 3 groups, not 2
+    const truePQC: (Algorithm & { name: string })[] = [];
+    const quantumResistant: (Algorithm & { name: string })[] = [];
+    const quantumVulnerable: (Algorithm & { name: string })[] = [];
+    
     Object.entries(algorithms).forEach(([name, info]) => {
-      if (info.pqc_safe) {
-        safe.push({ name, ...info });
+      const algoWithName = { name, ...info };
+      // ✓ FIXED: 3-way categorization
+      if (info.is_pqc) {
+        // TRUE PQC: Kyber, Dilithium, SPHINCS+
+        truePQC.push(algoWithName);
+      } else if (info.quantum_resistant) {
+        // Quantum-Resistant (Classical): AES, SHA-256, ChaCha20
+        quantumResistant.push(algoWithName);
       } else {
-        unsafe.push({ name, ...info });
+        // Quantum-Vulnerable: RSA, ECDSA, DH
+        quantumVulnerable.push(algoWithName);
       }
     });
 
@@ -441,18 +457,18 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
               </div>
             </div>
 
-            {/* Quantum Readiness Card */}
+            {/* ✓ FIXED: Quantum Readiness Card with Correct Explanation */}
             <div className="bg-white dark:bg-gray-800 rounded-lg p-5 shadow-sm">
               <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
                 Quantum Readiness
               </div>
               <div className="flex items-end gap-2">
                 <div className="text-4xl font-bold text-gray-900 dark:text-gray-100">
-                  {data.quantum_readiness_percentage?.toFixed(1) || '0'}%
+                  {data.quantum_readiness_percentage?.toFixed(1) || '0.0'}%
                 </div>
               </div>
               <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
-                {data.pqc_safe_count || 0} of {Object.keys(data.algorithms || {}).length} algorithms quantum-safe
+                Percentage of cryptographic operations protected by quantum-safe algorithms
               </div>
             </div>
 
@@ -519,38 +535,56 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* ✓ FIXED: Summary Statistics with 3 Categories */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
             <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
               Files Scanned
             </div>
             <div className="text-3xl font-semibold text-gray-900 dark:text-gray-100">{data.total_files || 0}</div>
           </div>
+          
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
             <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-              Algorithms Found
+              Total Algorithms
             </div>
             <div className="text-3xl font-semibold text-gray-900 dark:text-gray-100">{Object.keys(algorithms).length}</div>
           </div>
+          
+          {/* ✓ NEW: True PQC Count */}
+          <div className="bg-white dark:bg-gray-800 border-l-4 border-purple-500 rounded-lg p-5">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+              Post-Quantum (PQC)
+            </div>
+            <div className="text-3xl font-semibold text-purple-600">{truePQC.length}</div>
+          </div>
+          
+          {/* ✓ RENAMED: Quantum-Resistant (Not PQC) */}
           <div className="bg-white dark:bg-gray-800 border-l-4 border-green-500 rounded-lg p-5">
             <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-              PQC Safe
+              Quantum-Resistant
             </div>
-            <div className="text-3xl font-semibold text-green-600">{safe.length}</div>
+            <div className="text-3xl font-semibold text-green-600">{quantumResistant.length}</div>
           </div>
+          
+          {/* Quantum-Vulnerable */}
           <div className="bg-white dark:bg-gray-800 border-l-4 border-red-500 rounded-lg p-5">
             <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-              PQC Vulnerable
+              Quantum-Vulnerable
             </div>
-            <div className="text-3xl font-semibold text-red-600">{unsafe.length}</div>
+            <div className="text-3xl font-semibold text-red-600">{quantumVulnerable.length}</div>
           </div>
         </div>
 
-        {unsafe.length > 0 && (
-          <AlgorithmSection title="PQC Vulnerable Algorithms" algorithms={unsafe} type="unsafe" />
+        {/* ✓ FIXED: Display 3 Sections */}
+        {quantumVulnerable.length > 0 && (
+          <AlgorithmSection title="⚠️ Quantum-Vulnerable Algorithms" description="Will be broken by quantum computers (RSA, ECDSA, DH)" algorithms={quantumVulnerable} type="unsafe" />
         )}
-        {safe.length > 0 && (
-          <AlgorithmSection title="PQC Safe Algorithms" algorithms={safe} type="safe" />
+        {truePQC.length > 0 && (
+          <AlgorithmSection title="✓ Post-Quantum Cryptography (PQC)" description="Designed to resist quantum computer attacks" algorithms={truePQC} type="pqc" />
+        )}
+        {quantumResistant.length > 0 && (
+          <AlgorithmSection title="✓ Quantum-Resistant (Classical)" description="Symmetric/hash algorithms safe with sufficient key sizes" algorithms={quantumResistant} type="safe" />
         )}
       </div>
     );
@@ -835,21 +869,47 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
 
 const AlgorithmSection: React.FC<{
   title: string;
+  description: string; // ✓ NEW: Add description
   algorithms: (Algorithm & { name: string })[];
-  type: 'safe' | 'unsafe';
-}> = ({ title, algorithms, type }) => {
-  const borderColor = type === 'safe' ? 'border-green-500' : 'border-red-500';
-  const badgeColor = type === 'safe' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200' : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200';
-  const icon = type === 'safe' ? <Shield className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />;
+  type: 'safe' | 'unsafe' | 'pqc'; // ✓ FIXED: Added 'pqc' type
+}> = ({ title, description, algorithms, type }) => {
+  // ✓ FIXED: Define colors for 3 types
+  const getBorderColor = () => {
+    switch (type) {
+      case 'pqc': return 'border-purple-500';
+      case 'safe': return 'border-green-500';
+      case 'unsafe': return 'border-red-500';
+    }
+  };
+  const getBadgeColor = () => {
+    switch (type) {
+      case 'pqc': return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200';
+      case 'safe': return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200';
+      case 'unsafe': return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200';
+    }
+  };
+  const getIcon = () => {
+    switch (type) {
+      case 'pqc': return <Shield className="w-5 h-5 text-purple-600" />;
+      case 'safe': return <Shield className="w-5 h-5 text-green-600" />;
+      case 'unsafe': return <AlertTriangle className="w-5 h-5 text-red-600" />;
+    }
+  };
 
   return (
     <div className="mb-6">
-      <div className={`flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 border ${borderColor} border-l-4 rounded-lg`}>
-        <div className="flex items-center gap-3 text-lg font-semibold text-gray-900 dark:text-gray-100">
-          {icon}
-          <span>{title}</span>
+      <div className={`flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 border ${getBorderColor()} border-l-4 rounded-lg`}>
+        <div>
+          <div className="flex items-center gap-3 text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
+            {getIcon()}
+            <span>{title}</span>
+          </div>
+          {/* ✓ NEW: Show description */}
+          <div className="text-sm text-gray-600 dark:text-gray-400 ml-8">
+            {description}
+          </div>
         </div>
-        <span className={`px-3 py-1 rounded text-sm font-medium ${badgeColor}`}>
+        <span className={`px-3 py-1 rounded text-sm font-medium ${getBadgeColor()}`}>
           {algorithms.length} Found
         </span>
       </div>
@@ -869,7 +929,7 @@ const AlgorithmSection: React.FC<{
             </div>
             
             {/* Category and Type */}
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+            <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">
               {algo.category}
             </div>
             
@@ -920,7 +980,7 @@ const AlgorithmSection: React.FC<{
               </span>
             </div>
             
-            {/* Quantum Safety Indicator */}
+            {/* ✓ FIXED: Show correct quantum safety indicator */}
             {algo.quantum_safe !== undefined && (
               <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                 <div className={`text-xs font-medium ${
@@ -930,6 +990,12 @@ const AlgorithmSection: React.FC<{
                 }`}>
                   {algo.quantum_safe ? '✓ Quantum Safe' : '✗ Quantum Vulnerable'}
                 </div>
+                {/* ✓ NEW: Show if it's TRUE PQC */}
+                {algo.is_pqc && (
+                  <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mt-1">
+                    🔒 Post-Quantum Cryptography
+                  </div>
+                )}
               </div>
             )}
           </div>

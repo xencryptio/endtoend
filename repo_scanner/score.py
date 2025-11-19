@@ -299,9 +299,19 @@ class PQCAnalyzer:
         }
         
         self.DEPRECATED_ALGORITHMS = {
-            "MD5", "MD4", "MD2", "SHA1", "SHA-1", "DES", "3DES", "RC4", "RC2",
-            "SSL 2.0", "SSL 3.0", "TLS 1.0", "TLS 1.1", "DSA", "DSS",
-            "ANON-DH", "IDEA", "RAINBOW", "SIKE", "DSA-1024",
+            # Broken hashes
+            "MD5", "MD4", "MD2",
+            "SHA1", "SHA-1",
+            # Weak/broken symmetric
+            "DES", "3DES", "RC4", "RC2", "IDEA",
+            # Deprecated protocols
+            "SSL 2.0", "SSL 3.0", "TLS 1.0", "TLS 1.1",
+            # Deprecated signatures
+            "DSA", "DSS", "DSA-1024",
+            # Insecure key exchange
+            "ANON-DH",
+            # Broken PQC candidates
+            "RAINBOW", "SIKE",
         }
 
     def score_to_grade(self, score: float) -> str:

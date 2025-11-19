@@ -77,14 +77,17 @@ class ScanResult(Base):
     algorithm = Column(String, nullable=False)
     algorithm_type = Column(String, nullable=True)
     category = Column(String, nullable=False)
-    is_pqc_safe = Column(Boolean, nullable=False)
+    # ✓ FIXED: Renamed field to avoid confusion
+    is_quantum_resistant = Column(Boolean, nullable=False)  # Was: is_pqc_safe
+    # ✓ NEW: Explicit PQC flag
+    is_pqc = Column(Boolean, default=False)  # True ONLY for Kyber, Dilithium, etc.
     occurrences = Column(Integer, nullable=False)
     files_affected = Column(Integer, nullable=False)
     base_score = Column(Float, nullable=True)
     final_score = Column(Float, nullable=True)
     grade = Column(String, nullable=True)
     security_level = Column(String, nullable=True)
-    quantum_safe = Column(Boolean, default=False)
+    quantum_safe = Column(Boolean, default=False) # Add new accurate field # True if score >= 85 AND quantum_resistant
     deprecated = Column(Boolean, default=False)
     weighted_score = Column(Float, nullable=True)
     repository = relationship("Repository", back_populates="scan_results")
@@ -134,340 +137,352 @@ CRYPTO_PATTERNS = {
     # Symmetric algorithms (PQC Safe)
     'AES': {
         'patterns': [r'\bAES\b', r'\baes[-_]?(128|192|256)\b', r'AES_', r'Cipher\.AES', r'EVP_aes'],
-        'pqc_safe': True,
+        'quantum_resistant': True,  # ✓ FIXED: Survives quantum, but NOT PQC
         'category': 'Symmetric Encryption'
     },
     'ChaCha20': {
         'patterns': [r'\bChaCha20\b', r'\bchacha20\b', r'CHACHA20', r'EVP_chacha'],
-        'pqc_safe': True,
+        'quantum_resistant': True,  # ✓ FIXED
         'category': 'Symmetric Encryption'
     },
     'ChaCha20-Poly1305': {
         'patterns': [r'\bChaCha20[-_]?Poly1305\b', r'chacha20[-_]poly1305', r'CHACHA20_POLY1305'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Authenticated Encryption'
     },
     'Salsa20': {
         'patterns': [r'\bSalsa20\b', r'\bsalsa20\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Symmetric Encryption'
     },
     'Twofish': {
         'patterns': [r'\bTwofish\b', r'\btwofish\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Symmetric Encryption'
     },
     'Blowfish': {
         'patterns': [r'\bBlowfish\b', r'\bblowfish\b', r'BF_'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Symmetric Encryption'
     },
     'Camellia': {
         'patterns': [r'\bCamellia\b', r'\bcamellia\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Symmetric Encryption'
     },
     'ARIA': {
         'patterns': [r'\bARIA\b(?!-)'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Symmetric Encryption'
     },
     '3DES': {
         'patterns': [r'\b3DES\b', r'\bDES3\b', r'\bTripleDES\b', r'DES_EDE', r'EVP_des_ede'],
-        'pqc_safe': True,
+        'quantum_resistant': True, # Technically, but weak
         'category': 'Symmetric Encryption (Weak)'
     },
     'DES': {
         'patterns': [r'\bDES\b(?!3|_EDE|C)', r'DES_encrypt', r'EVP_des_'],
-        'pqc_safe': True,
+        'quantum_resistant': False, # Broken
         'category': 'Symmetric Encryption (Broken)'
     },
     'RC4': {
         'patterns': [r'\bRC4\b', r'\brc4\b', r'ARC4', r'ARCFOUR'],
-        'pqc_safe': True,
+        'quantum_resistant': False, # Broken
         'category': 'Stream Cipher (Broken)'
     },
     
     # Block cipher modes
     'GCM': {
         'patterns': [r'\bGCM\b', r'\bgcm\b', r'Galois.*Counter', r'AES.*GCM'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Cipher Mode (AEAD)'
     },
     'CBC': {
         'patterns': [r'\bCBC\b', r'\bcbc\b', r'Cipher.*Block.*Chaining'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Cipher Mode'
     },
     'CTR': {
         'patterns': [r'\bCTR\b(?!L)', r'\bctr\b', r'Counter.*Mode'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Cipher Mode'
     },
     'CCM': {
         'patterns': [r'\bCCM\b', r'\bccm\b', r'Counter.*CBC.*MAC'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Cipher Mode (AEAD)'
     },
     'ECB': {
         'patterns': [r'\bECB\b', r'\becb\b', r'Electronic.*Codebook'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Cipher Mode (Insecure)'
     },
     
     # Hash functions (PQC Safe)
     'SHA-256': {
         'patterns': [r'\bSHA256\b', r'\bsha256\b', r'SHA-256', r'sha_256', r'EVP_sha256'],
-        'pqc_safe': True,
+        'quantum_resistant': True,  # ✓ FIXED
         'category': 'Hash Function'
     },
     'SHA-384': {
         'patterns': [r'\bSHA384\b', r'\bsha384\b', r'SHA-384', r'EVP_sha384'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'SHA-512': {
         'patterns': [r'\bSHA512\b', r'\bsha512\b', r'SHA-512', r'EVP_sha512'],
-        'pqc_safe': True,
+        'quantum_resistant': True,  # ✓ FIXED
         'category': 'Hash Function'
     },
     'SHA-224': {
         'patterns': [r'\bSHA224\b', r'\bsha224\b', r'SHA-224'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'SHA3-256': {
         'patterns': [r'\bSHA3[-_]256\b', r'\bsha3[-_]256\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'SHA3-384': {
         'patterns': [r'\bSHA3[-_]384\b', r'\bsha3[-_]384\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'SHA3-512': {
         'patterns': [r'\bSHA3[-_]512\b', r'\bsha3[-_]512\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'BLAKE2': {
         'patterns': [r'\bBLAKE2\b', r'\bblake2[bs]\b', r'BLAKE2b', r'BLAKE2s'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'BLAKE3': {
         'patterns': [r'\bBLAKE3\b', r'\bblake3\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,  # ✓ FIXED
         'category': 'Hash Function'
     },
     'Keccak': {
         'patterns': [r'\bKeccak\b', r'\bkeccak\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'RIPEMD-160': {
         'patterns': [r'\bRIPEMD[-_]?160\b', r'\bripemd160\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'Whirlpool': {
         'patterns': [r'\bWhirlpool\b', r'\bwhirlpool\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Hash Function'
     },
     'MD5': {
         'patterns': [r'\bMD5\b', r'\bmd5\b', r'EVP_md5'],
-        'pqc_safe': True,
+        'quantum_resistant': False,  # Already broken classically
         'category': 'Hash Function (Broken)'
     },
     'MD4': {
         'patterns': [r'\bMD4\b', r'\bmd4\b'],
-        'pqc_safe': True,
+        'quantum_resistant': False,
         'category': 'Hash Function (Broken)'
     },
     'SHA-1': {
         'patterns': [r'\bSHA1\b', r'\bsha1\b', r'SHA-1', r'EVP_sha1'],
-        'pqc_safe': True,
+        'quantum_resistant': False,  # Weak even classically
         'category': 'Hash Function (Weak)'
     },
     
     # MAC algorithms
     'HMAC': {
         'patterns': [r'\bHMAC\b', r'\bhmac\b', r'HMAC_'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Message Authentication Code'
     },
     'CMAC': {
         'patterns': [r'\bCMAC\b', r'\bcmac\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Message Authentication Code'
     },
     'Poly1305': {
         'patterns': [r'\bPoly1305\b', r'\bpoly1305\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Message Authentication Code'
     },
     
     # Key derivation functions
     'PBKDF2': {
         'patterns': [r'\bPBKDF2\b', r'\bpbkdf2\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Key Derivation Function'
     },
     'scrypt': {
         'patterns': [r'\bscrypt\b', r'\bSCRYPT\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Key Derivation Function'
     },
     'Argon2': {
         'patterns': [r'\bArgon2\b', r'\bargon2[id]?\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Key Derivation Function'
     },
     'bcrypt': {
         'patterns': [r'\bbcrypt\b', r'\bBCRYPT\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Password Hashing'
     },
     'HKDF': {
         'patterns': [r'\bHKDF\b', r'\bhkdf\b'],
-        'pqc_safe': True,
+        'quantum_resistant': True,
         'category': 'Key Derivation Function'
     },
     
     # Asymmetric algorithms (NOT PQC Safe)
     'RSA': {
         'patterns': [r'\bRSA\b', r'\brsa[-_]?(1024|2048|3072|4096)\b', r'RSA_', r'PKCS1', r'EVP_PKEY_RSA'],
-        'pqc_safe': False,
+        'quantum_resistant': False,  # ✓ FIXED: Quantum computers break this
         'category': 'Asymmetric Encryption'
     },
     'ECDSA': {
         'patterns': [r'\bECDSA\b', r'\becdsa\b', r'EC_DSA', r'secp256[kr]1', r'prime256v1'],
-        'pqc_safe': False,
+        'quantum_resistant': False,  # ✓ FIXED
         'category': 'Digital Signature'
     },
     'ECDH': {
         'patterns': [r'\bECDH\b', r'\becdh\b', r'EC_DH', r'ECDHE'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Key Exchange'
     },
     'DSA': {
         'patterns': [r'\bDSA\b(?!A)', r'DSA_', r'Digital Signature Algorithm'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Digital Signature'
     },
     'DH': {
         'patterns': [r'\bDiffie[-_]?Hellman\b', r'\bDH\b', r'DHE', r'EVP_PKEY_DH'],
-        'pqc_safe': False,
+        'quantum_resistant': False,  # ✓ FIXED
         'category': 'Key Exchange'
     },
     'ElGamal': {
         'patterns': [r'\bElGamal\b', r'\belgamal\b'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Asymmetric Encryption'
     },
     'Ed25519': {
         'patterns': [r'\bEd25519\b', r'\bed25519\b', r'EdDSA'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Digital Signature'
     },
     'Ed448': {
         'patterns': [r'\bEd448\b', r'\bed448\b'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Digital Signature'
     },
     'Curve25519': {
         'patterns': [r'\bCurve25519\b', r'\bcurve25519\b', r'X25519'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Key Exchange'
     },
     'Curve448': {
         'patterns': [r'\bCurve448\b', r'\bcurve448\b', r'X448'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Key Exchange'
     },
     'P-256': {
         'patterns': [r'\bP-256\b', r'\bsecp256r1\b', r'prime256v1'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Elliptic Curve'
     },
     'P-384': {
         'patterns': [r'\bP-384\b', r'\bsecp384r1\b'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Elliptic Curve'
     },
     'P-521': {
         'patterns': [r'\bP-521\b', r'\bsecp521r1\b'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Elliptic Curve'
     },
     'secp256k1': {
         'patterns': [r'\bsecp256k1\b'],
-        'pqc_safe': False,
+        'quantum_resistant': False,
         'category': 'Elliptic Curve (Bitcoin)'
     },
     
     # PQC algorithms (PQC Safe)
     'Kyber': {
         'patterns': [r'\bKyber\b', r'\bkyber\b', r'ML-KEM', r'CRYSTALS-Kyber'],
-        'pqc_safe': True,
-        'category': 'PQC Key Encapsulation'
+        'quantum_resistant': True,  # True PQC
+        'category': 'PQC Key Encapsulation',
+        'is_pqc': True  # ✓ NEW FLAG
     },
     'Dilithium': {
         'patterns': [r'\bDilithium\b', r'\bdilithium\b', r'ML-DSA', r'CRYSTALS-Dilithium'],
-        'pqc_safe': True,
-        'category': 'PQC Digital Signature'
+        'quantum_resistant': True,  # True PQC
+        'category': 'PQC Digital Signature',
+        'is_pqc': True  # ✓ NEW FLAG
     },
     'SPHINCS+': {
         'patterns': [r'\bSPHINCS\+?\b', r'\bsphincs\b', r'SLH-DSA'],
-        'pqc_safe': True,
-        'category': 'PQC Digital Signature'
+        'quantum_resistant': True,  # True PQC
+        'category': 'PQC Digital Signature',
+        'is_pqc': True  # ✓ NEW FLAG
     },
     'NTRU': {
         'patterns': [r'\bNTRU\b', r'\bntru\b', r'NTRUEncrypt'],
-        'pqc_safe': True,
-        'category': 'PQC Encryption'
+        'quantum_resistant': True,
+        'category': 'PQC Encryption',
+        'is_pqc': True
     },
     'Falcon': {
         'patterns': [r'\bFalcon\b(?!.*[Bb]ird)', r'\bfalcon\b(?!.*bird)'],
-        'pqc_safe': True,
-        'category': 'PQC Digital Signature'
+        'quantum_resistant': True,
+        'category': 'PQC Digital Signature',
+        'is_pqc': True
     },
     'SABER': {
         'patterns': [r'\bSABER\b', r'\bSaber\b(?!tooth)'],
-        'pqc_safe': True,
-        'category': 'PQC Key Encapsulation'
+        'quantum_resistant': True,
+        'category': 'PQC Key Encapsulation',
+        'is_pqc': True
     },
     'FrodoKEM': {
         'patterns': [r'\bFrodoKEM\b', r'\bFrodo\b'],
-        'pqc_safe': True,
-        'category': 'PQC Key Encapsulation'
+        'quantum_resistant': True,
+        'category': 'PQC Key Encapsulation',
+        'is_pqc': True
     },
     'BIKE': {
         'patterns': [r'\bBIKE\b(?!-)'],
-        'pqc_safe': True,
-        'category': 'PQC Key Encapsulation'
+        'quantum_resistant': True,
+        'category': 'PQC Key Encapsulation',
+        'is_pqc': True
     },
     'HQC': {
         'patterns': [r'\bHQC\b'],
-        'pqc_safe': True,
-        'category': 'PQC Key Encapsulation'
+        'quantum_resistant': True,
+        'category': 'PQC Key Encapsulation',
+        'is_pqc': True
     },
     'Rainbow': {
         'patterns': [r'\bRainbow\b(?!.*color)'],
-        'pqc_safe': True,
-        'category': 'PQC Digital Signature (Broken)'
+        'quantum_resistant': False, # Broken
+        'category': 'PQC Digital Signature (Broken)',
+        'is_pqc': True
     },
     'XMSS': {
         'patterns': [r'\bXMSS\b', r'\bxmss\b'],
-        'pqc_safe': True,
-        'category': 'PQC Digital Signature'
+        'quantum_resistant': True,
+        'category': 'PQC Digital Signature',
+        'is_pqc': True
     },
     'LMS': {
         'patterns': [r'\bLMS\b(?!-)'],
-        'pqc_safe': True,
-        'category': 'PQC Digital Signature'
+        'quantum_resistant': True,
+        'category': 'PQC Digital Signature',
+        'is_pqc': True
     },
 }
 
@@ -681,8 +696,9 @@ class Database:
         repo.scan_status = 'completed'
         repo.total_files = scan_data['total_files']
         repo.total_algorithms = scan_data['total_algorithms']
-        repo.pqc_safe_count = scan_data['pqc_safe_count']
-        repo.pqc_vulnerable_count = scan_data['pqc_vulnerable_count']
+        # ✓ FIXED: Use new field names
+        repo.pqc_safe_count = scan_data.get('quantum_resistant_count', 0)  # Type-based count
+        repo.pqc_vulnerable_count = scan_data.get('quantum_vulnerable_count', 0)
         repo.last_scanned = datetime.utcnow()
         repo.overall_security_score = scan_data.get('overall_score')
         repo.overall_grade = scan_data.get('overall_grade')
@@ -698,7 +714,9 @@ class Database:
                 algorithm=algo,
                 algorithm_type=data.get('algorithm_type'),
                 category=data['category'],
-                is_pqc_safe=data['pqc_safe'],
+                # ✓ FIXED: Map to new fields
+                is_quantum_resistant=data.get('quantum_resistant', False),  # Type-based
+                is_pqc=data.get('is_pqc', False),  # True PQC flag
                 occurrences=data['occurrences'],
                 files_affected=len(data['files']),
                 # Add scoring data
@@ -706,7 +724,7 @@ class Database:
                 final_score=data.get('final_score'),
                 grade=data.get('grade'),
                 security_level=data.get('security_level'),
-                quantum_safe=data.get('quantum_safe'),
+                quantum_safe=data.get('quantum_safe', False), # ✓ CORRECT: Score-based quantum safety
                 deprecated=data.get('deprecated', False),
                 weighted_score=data.get('weighted_score'),
             )
@@ -757,7 +775,8 @@ class Database:
             algorithms[sr.algorithm] = {
                 'category': sr.category,
                 'algorithm_type': sr.algorithm_type,
-                'pqc_safe': sr.is_pqc_safe,
+                'quantum_resistant': sr.is_quantum_resistant,  # Type-based
+                'is_pqc': sr.is_pqc,  # True PQC flag
                 'occurrences': sr.occurrences,
                 'files_affected': sr.files_affected,
                 'base_score': sr.base_score,
@@ -765,7 +784,7 @@ class Database:
                 'grade': sr.grade,
                 'deprecated': sr.deprecated,
                 'security_level': sr.security_level,
-                'quantum_safe': sr.quantum_safe,
+                'quantum_safe': sr.quantum_safe,  # ✓ Score-based (THE CORRECT ONE)
                 'weighted_score': sr.weighted_score,
             }
 
@@ -780,10 +799,24 @@ class Database:
                 'worst_algorithm': cs.worst_algorithm
             }
 
-        # Calculate quantum readiness percentage
-        quantum_safe_algos = sum(1 for sr in repo.scan_results if sr.quantum_safe)
-        total_algos = len(repo.scan_results)
-        quantum_readiness_percentage = (quantum_safe_algos / total_algos * 100) if total_algos > 0 else 0
+        # ✓✓✓ FIXED: CORRECT Quantum Readiness Calculation
+        # Based on OCCURRENCES, not algorithm types
+        total_crypto_occurrences = sum(sr.occurrences for sr in repo.scan_results)
+        # Count occurrences of algorithms that are ACTUALLY quantum-safe (score >= 85)
+        quantum_safe_occurrences = sum(
+            sr.occurrences for sr in repo.scan_results
+            if sr.quantum_safe and sr.final_score >= 85
+        )
+        quantum_readiness_percentage = (
+            (quantum_safe_occurrences / total_crypto_occurrences * 100)
+            if total_crypto_occurrences > 0 else 0
+        )
+
+        # ✓ FIXED: Count algorithms by TYPE (for display)
+        quantum_resistant_count = sum(1 for sr in repo.scan_results if sr.is_quantum_resistant)
+        quantum_vulnerable_count = sum(1 for sr in repo.scan_results if not sr.is_quantum_resistant)
+        true_pqc_count = sum(1 for sr in repo.scan_results if sr.is_pqc)
+
 
         return {
             'repo_id': repo.id,
@@ -794,12 +827,15 @@ class Database:
             'last_scanned': repo.last_scanned,
             'scan_status': repo.scan_status,
             'total_files': repo.total_files,
-            'total_algorithms': repo.total_algorithms,
-            'pqc_safe_count': repo.pqc_safe_count,
-            'pqc_vulnerable_count': repo.pqc_vulnerable_count,
+            'total_algorithms': len(repo.scan_results),
+            # ✓ FIXED: Renamed counts
+            'quantum_resistant_count': quantum_resistant_count,
+            'quantum_vulnerable_count': quantum_vulnerable_count,
+            'true_pqc_count': true_pqc_count,
             'current_status': repo.current_status,
             'overall_security_score': repo.overall_security_score,
             'overall_grade': repo.overall_grade,
+            # ✓✓✓ THIS IS THE KEY FIX
             'quantum_readiness_percentage': round(quantum_readiness_percentage, 2),
             'total_files_to_scan': repo.total_files_to_scan,
             'algorithms': algorithms,
@@ -910,8 +946,9 @@ class CryptoScanner:
     
     def get_results(self) -> Dict:
         """Get structured scan results"""
-        pqc_safe = []
-        pqc_unsafe = []
+        quantum_resistant_algos = []  # Type-based (AES, SHA-256, Kyber)
+        quantum_vulnerable_algos = []  # Type-based (RSA, ECDSA, DH)
+        pqc_algorithms = []  # TRUE PQC only (Kyber, Dilithium, SPHINCS+)
         algorithms_data = {}
         
         for algo in self.findings.keys():
@@ -919,10 +956,15 @@ class CryptoScanner:
             occurrences = self.findings[algo]
             unique_files = set(occ['file'] for occ in occurrences)
             
+            # ✓ FIXED: Check the renamed field
+            is_quantum_resistant = info.get('quantum_resistant', False)
+            is_true_pqc = info.get('is_pqc', False)
+            
             algo_data = {
                 'name': algo,
                 'category': info['category'],
-                'pqc_safe': info['pqc_safe'],
+                'quantum_resistant': is_quantum_resistant,  # Type-based
+                'is_pqc': is_true_pqc,  # True PQC flag
                 'occurrences': len(occurrences),
                 'files': list(unique_files),
                 'findings': occurrences
@@ -930,16 +972,21 @@ class CryptoScanner:
             
             algorithms_data[algo] = algo_data
             
-            if info['pqc_safe']:
-                pqc_safe.append(algo)
+            # ✓ FIXED: Categorize correctly
+            if is_quantum_resistant:
+                quantum_resistant_algos.append(algo)
+                if is_true_pqc:
+                    pqc_algorithms.append(algo)
             else:
-                pqc_unsafe.append(algo)
+                quantum_vulnerable_algos.append(algo)
         
         return {
             'total_files': self.file_count,
             'total_algorithms': len(self.findings),
-            'pqc_safe_count': len(pqc_safe),
-            'pqc_vulnerable_count': len(pqc_unsafe),
+            # ✓ FIXED: More accurate counts
+            'quantum_resistant_count': len(quantum_resistant_algos),  # Includes AES, SHA-256, Kyber
+            'quantum_vulnerable_count': len(quantum_vulnerable_algos),  # RSA, ECDSA, DH
+            'true_pqc_count': len(pqc_algorithms),  # ONLY Kyber, Dilithium, etc.
             'algorithms': algorithms_data
         }
 
@@ -993,22 +1040,36 @@ def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
             results = scanner.get_results()
             pqc_analyzer = PQCAnalyzer()
 
-            # Score each algorithm
+            # ✓ FIXED: Score each algorithm AND calculate quantum_safe
             scored_results = {}
             for algo_name, algo_data in results['algorithms'].items():
                 score = pqc_analyzer.score_repository_algorithm(
                     algorithm=algo_name,
                     category=algo_data['category']
                 )
+                
+                # ✓ FIXED: Determine quantum_safe based on SCORE + TYPE
+                is_quantum_resistant = algo_data.get('quantum_resistant', False)
+                is_pqc = algo_data.get('is_pqc', False)
+                
+                # ✓ KEY LOGIC: quantum_safe = TRUE if:
+                # 1. Algorithm is quantum-resistant by type (symmetric/hash/PQC)
+                # 2. AND has good security score (>= 85)
+                quantum_safe = is_quantum_resistant and score.final_score >= 85
+                
                 scored_results[algo_name] = {
                     **algo_data,
-                    **asdict(score)
+                    **asdict(score),
+                    'quantum_safe': quantum_safe,  # ✓ CORRECT calculation
                 }
             
             # Replace original algorithms with scored ones and calculate overall score
             # Get comprehensive scoring (overall + categories)
             results['algorithms'] = scored_results
             scoring_results = calculate_repo_overall_score(scored_results)
+            # ✓ FIXED: Update counts to match new field names
+            results['quantum_resistant_count'] = results.pop('quantum_resistant_count', 0)
+            results['quantum_vulnerable_count'] = results.pop('quantum_vulnerable_count', 0)
 
             results['overall_score'] = scoring_results['overall_score']
             results['overall_grade'] = scoring_results['overall_grade']
@@ -1130,7 +1191,9 @@ class ScanQueueResponse(BaseModel):
 class ScanResultItem(BaseModel):
     category: str
     algorithm_type: Optional[str] = None
-    pqc_safe: bool
+    # ✓ FIXED: Renamed fields
+    quantum_resistant: bool # Type-based (was: pqc_safe)
+    is_pqc: bool # True ONLY for actual PQC algorithms
     occurrences: int
     files_affected: int
     base_score: Optional[float] = None
@@ -1138,7 +1201,7 @@ class ScanResultItem(BaseModel):
     grade: Optional[str] = None
     deprecated: Optional[bool] = False
     security_level: Optional[str] = None
-    quantum_safe: Optional[bool] = None
+    quantum_safe: Optional[bool] = None # ✓ THIS IS THE CORRECT ONE TO USE FOR DISPLAY
     weighted_score: Optional[float] = None
 
 class CategoryScoreItem(BaseModel):
@@ -1157,11 +1220,12 @@ class ScanDetailsResponse(BaseModel):
     last_scanned: datetime
     scan_status: str
     total_files: int
-    total_algorithms: int
-    pqc_safe_count: int
-    pqc_vulnerable_count: int
+    total_algorithms: int # ✓ FIXED: Renamed counts
+    quantum_resistant_count: int # Type-based count (was: pqc_safe_count)
+    quantum_vulnerable_count: int # Type-based count (was: pqc_vulnerable_count)
+    true_pqc_count: int # NEW: Count of actual PQC algorithms
     current_status: str
-    total_files_to_scan: int
+    total_files_to_scan: int # ✓ THIS IS THE CORRECT PERCENTAGE
     overall_security_score: Optional[float] = None
     overall_grade: Optional[str] = None
     quantum_readiness_percentage: Optional[float] = None
