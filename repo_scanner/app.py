@@ -56,8 +56,8 @@ class Repository(Base):
     scan_status = Column(String, default='pending', nullable=False)
     total_files = Column(Integer, default=0)
     total_algorithms = Column(Integer, default=0)
-    pqc_safe_count = Column(Integer, default=0)
-    pqc_vulnerable_count = Column(Integer, default=0)
+    quantum_safe_count = Column(Integer, default=0)  # ✅ RENAMED from pqc_safe_count
+    quantum_vulnerable_count = Column(Integer, default=0)  # ✅ RENAMED from pqc_vulnerable_count
     current_status = Column(String, default='Queued for scanning')
     total_files_to_scan = Column(Integer, default=0)
     overall_security_score = Column(Float, nullable=True)
@@ -77,17 +77,17 @@ class ScanResult(Base):
     algorithm = Column(String, nullable=False)
     algorithm_type = Column(String, nullable=True)
     category = Column(String, nullable=False)
-    # ✓ FIXED: Renamed field to avoid confusion
-    is_quantum_resistant = Column(Boolean, nullable=False)  # Was: is_pqc_safe
-    # ✓ NEW: Explicit PQC flag
-    is_pqc = Column(Boolean, default=False)  # True ONLY for Kyber, Dilithium, etc.
+    # ✅ REMOVED: is_quantum_resistant (replaced by quantum_resistance_type)
+    is_pqc = Column(Boolean, default=False)  # True ONLY for actual PQC algorithms
     occurrences = Column(Integer, nullable=False)
     files_affected = Column(Integer, nullable=False)
     base_score = Column(Float, nullable=True)
     final_score = Column(Float, nullable=True)
     grade = Column(String, nullable=True)
     security_level = Column(String, nullable=True)
-    quantum_safe = Column(Boolean, default=False) # Add new accurate field # True if score >= 85 AND quantum_resistant
+    quantum_safe = Column(Boolean, default=False)  # ✅ PRIMARY field: Is it actually quantum-safe?
+    quantum_safety_reason = Column(String, nullable=True)  # ✅ NEW: Why is it safe/unsafe?
+    quantum_resistance_type = Column(String, nullable=True)  # ✅ NEW: fully_resistant/grover_resistant/vulnerable/deprecated
     deprecated = Column(Boolean, default=False)
     weighted_score = Column(Float, nullable=True)
     repository = relationship("Repository", back_populates="scan_results")
@@ -117,7 +117,7 @@ class CategoryScore(Base):
 
 
 # Create tables
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 @contextmanager
 def get_db():
@@ -134,353 +134,406 @@ from dataclasses import asdict
 
 # Complete cryptographic patterns from original script
 CRYPTO_PATTERNS = {
-    # Symmetric algorithms (PQC Safe)
+    # Symmetric algorithms
     'AES': {
         'patterns': [r'\bAES\b', r'\baes[-_]?(128|192|256)\b', r'AES_', r'Cipher\.AES', r'EVP_aes'],
-        'quantum_resistant': True,  # ✓ FIXED: Survives quantum, but NOT PQC
+        'quantum_resistance_type': 'grover_resistant',  # NEW: Resistant if key >= 256 bits
+        'min_quantum_safe_keysize': 256,  # NEW: Minimum for quantum safety
         'category': 'Symmetric Encryption'
     },
     'ChaCha20': {
         'patterns': [r'\bChaCha20\b', r'\bchacha20\b', r'CHACHA20', r'EVP_chacha'],
-        'quantum_resistant': True,  # ✓ FIXED
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     'ChaCha20-Poly1305': {
         'patterns': [r'\bChaCha20[-_]?Poly1305\b', r'chacha20[-_]poly1305', r'CHACHA20_POLY1305'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Authenticated Encryption'
     },
     'Salsa20': {
         'patterns': [r'\bSalsa20\b', r'\bsalsa20\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     'Twofish': {
         'patterns': [r'\bTwofish\b', r'\btwofish\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     'Blowfish': {
         'patterns': [r'\bBlowfish\b', r'\bblowfish\b', r'BF_'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     'Camellia': {
         'patterns': [r'\bCamellia\b', r'\bcamellia\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     'ARIA': {
         'patterns': [r'\bARIA\b(?!-)'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     '3DES': {
         'patterns': [r'\b3DES\b', r'\bDES3\b', r'\bTripleDES\b', r'DES_EDE', r'EVP_des_ede'],
-        'quantum_resistant': True, # Technically, but weak
+        'quantum_resistance_type': 'deprecated',  # Weak even classically
+        'min_quantum_safe_keysize': None,
         'category': 'Symmetric Encryption (Weak)'
     },
     'DES': {
         'patterns': [r'\bDES\b(?!3|_EDE|C)', r'DES_encrypt', r'EVP_des_'],
-        'quantum_resistant': False, # Broken
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
         'category': 'Symmetric Encryption (Broken)'
     },
     'RC4': {
         'patterns': [r'\bRC4\b', r'\brc4\b', r'ARC4', r'ARCFOUR'],
-        'quantum_resistant': False, # Broken
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
         'category': 'Stream Cipher (Broken)'
     },
-    
-    # Block cipher modes
     'GCM': {
         'patterns': [r'\bGCM\b', r'\bgcm\b', r'Galois.*Counter', r'AES.*GCM'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'mode',  # Not an algorithm itself
+        'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode (AEAD)'
     },
     'CBC': {
         'patterns': [r'\bCBC\b', r'\bcbc\b', r'Cipher.*Block.*Chaining'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'mode',
+        'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode'
     },
     'CTR': {
         'patterns': [r'\bCTR\b(?!L)', r'\bctr\b', r'Counter.*Mode'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'mode',
+        'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode'
     },
     'CCM': {
         'patterns': [r'\bCCM\b', r'\bccm\b', r'Counter.*CBC.*MAC'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'mode',
+        'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode (AEAD)'
     },
     'ECB': {
         'patterns': [r'\bECB\b', r'\becb\b', r'Electronic.*Codebook'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'mode',
+        'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode (Insecure)'
     },
-    
-    # Hash functions (PQC Safe)
     'SHA-256': {
         'patterns': [r'\bSHA256\b', r'\bsha256\b', r'SHA-256', r'sha_256', r'EVP_sha256'],
-        'quantum_resistant': True,  # ✓ FIXED
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,  # Need 384+ bits output for quantum safety
         'category': 'Hash Function'
     },
     'SHA-384': {
         'patterns': [r'\bSHA384\b', r'\bsha384\b', r'SHA-384', r'EVP_sha384'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'SHA-512': {
         'patterns': [r'\bSHA512\b', r'\bsha512\b', r'SHA-512', r'EVP_sha512'],
-        'quantum_resistant': True,  # ✓ FIXED
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'SHA-224': {
         'patterns': [r'\bSHA224\b', r'\bsha224\b', r'SHA-224'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'SHA3-256': {
         'patterns': [r'\bSHA3[-_]256\b', r'\bsha3[-_]256\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'SHA3-384': {
         'patterns': [r'\bSHA3[-_]384\b', r'\bsha3[-_]384\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'SHA3-512': {
         'patterns': [r'\bSHA3[-_]512\b', r'\bsha3[-_]512\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'BLAKE2': {
         'patterns': [r'\bBLAKE2\b', r'\bblake2[bs]\b', r'BLAKE2b', r'BLAKE2s'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'BLAKE3': {
         'patterns': [r'\bBLAKE3\b', r'\bblake3\b'],
-        'quantum_resistant': True,  # ✓ FIXED
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'Keccak': {
         'patterns': [r'\bKeccak\b', r'\bkeccak\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'RIPEMD-160': {
         'patterns': [r'\bRIPEMD[-_]?160\b', r'\bripemd160\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'Whirlpool': {
         'patterns': [r'\bWhirlpool\b', r'\bwhirlpool\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 384,
         'category': 'Hash Function'
     },
     'MD5': {
         'patterns': [r'\bMD5\b', r'\bmd5\b', r'EVP_md5'],
-        'quantum_resistant': False,  # Already broken classically
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
         'category': 'Hash Function (Broken)'
     },
     'MD4': {
         'patterns': [r'\bMD4\b', r'\bmd4\b'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
         'category': 'Hash Function (Broken)'
     },
     'SHA-1': {
         'patterns': [r'\bSHA1\b', r'\bsha1\b', r'SHA-1', r'EVP_sha1'],
-        'quantum_resistant': False,  # Weak even classically
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
         'category': 'Hash Function (Weak)'
     },
-    
-    # MAC algorithms
     'HMAC': {
         'patterns': [r'\bHMAC\b', r'\bhmac\b', r'HMAC_'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',  # Safety depends on underlying hash
+        'min_quantum_safe_keysize': None,
         'category': 'Message Authentication Code'
     },
     'CMAC': {
         'patterns': [r'\bCMAC\b', r'\bcmac\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',
+        'min_quantum_safe_keysize': None,
         'category': 'Message Authentication Code'
     },
     'Poly1305': {
         'patterns': [r'\bPoly1305\b', r'\bpoly1305\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',
+        'min_quantum_safe_keysize': None,
         'category': 'Message Authentication Code'
     },
-    
-    # Key derivation functions
     'PBKDF2': {
         'patterns': [r'\bPBKDF2\b', r'\bpbkdf2\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Derivation Function'
     },
     'scrypt': {
         'patterns': [r'\bscrypt\b', r'\bSCRYPT\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Derivation Function'
     },
     'Argon2': {
         'patterns': [r'\bArgon2\b', r'\bargon2[id]?\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Derivation Function'
     },
     'bcrypt': {
         'patterns': [r'\bbcrypt\b', r'\bBCRYPT\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',
+        'min_quantum_safe_keysize': None,
         'category': 'Password Hashing'
     },
     'HKDF': {
         'patterns': [r'\bHKDF\b', r'\bhkdf\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'construction',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Derivation Function'
     },
-    
-    # Asymmetric algorithms (NOT PQC Safe)
     'RSA': {
         'patterns': [r'\bRSA\b', r'\brsa[-_]?(1024|2048|3072|4096)\b', r'RSA_', r'PKCS1', r'EVP_PKEY_RSA'],
-        'quantum_resistant': False,  # ✓ FIXED: Quantum computers break this
+        'quantum_resistance_type': 'vulnerable',  # Broken by Shor's algorithm
+        'min_quantum_safe_keysize': None,
         'category': 'Asymmetric Encryption'
     },
     'ECDSA': {
         'patterns': [r'\bECDSA\b', r'\becdsa\b', r'EC_DSA', r'secp256[kr]1', r'prime256v1'],
-        'quantum_resistant': False,  # ✓ FIXED
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Digital Signature'
     },
     'ECDH': {
         'patterns': [r'\bECDH\b', r'\becdh\b', r'EC_DH', r'ECDHE'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Exchange'
     },
     'DSA': {
         'patterns': [r'\bDSA\b(?!A)', r'DSA_', r'Digital Signature Algorithm'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Digital Signature'
     },
     'DH': {
         'patterns': [r'\bDiffie[-_]?Hellman\b', r'\bDH\b', r'DHE', r'EVP_PKEY_DH'],
-        'quantum_resistant': False,  # ✓ FIXED
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Exchange'
     },
     'ElGamal': {
         'patterns': [r'\bElGamal\b', r'\belgamal\b'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Asymmetric Encryption'
     },
     'Ed25519': {
         'patterns': [r'\bEd25519\b', r'\bed25519\b', r'EdDSA'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Digital Signature'
     },
     'Ed448': {
         'patterns': [r'\bEd448\b', r'\bed448\b'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Digital Signature'
     },
     'Curve25519': {
         'patterns': [r'\bCurve25519\b', r'\bcurve25519\b', r'X25519'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Exchange'
     },
     'Curve448': {
         'patterns': [r'\bCurve448\b', r'\bcurve448\b', r'X448'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Key Exchange'
     },
     'P-256': {
         'patterns': [r'\bP-256\b', r'\bsecp256r1\b', r'prime256v1'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Elliptic Curve'
     },
     'P-384': {
         'patterns': [r'\bP-384\b', r'\bsecp384r1\b'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Elliptic Curve'
     },
     'P-521': {
         'patterns': [r'\bP-521\b', r'\bsecp521r1\b'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Elliptic Curve'
     },
     'secp256k1': {
         'patterns': [r'\bsecp256k1\b'],
-        'quantum_resistant': False,
+        'quantum_resistance_type': 'vulnerable',
+        'min_quantum_safe_keysize': None,
         'category': 'Elliptic Curve (Bitcoin)'
     },
-    
-    # PQC algorithms (PQC Safe)
     'Kyber': {
         'patterns': [r'\bKyber\b', r'\bkyber\b', r'ML-KEM', r'CRYSTALS-Kyber'],
-        'quantum_resistant': True,  # True PQC
+        'quantum_resistance_type': 'fully_resistant',  # TRUE PQC
+        'min_quantum_safe_keysize': None,  # PQC algorithms don't use traditional key sizes
         'category': 'PQC Key Encapsulation',
-        'is_pqc': True  # ✓ NEW FLAG
+        'is_pqc': True
     },
     'Dilithium': {
         'patterns': [r'\bDilithium\b', r'\bdilithium\b', r'ML-DSA', r'CRYSTALS-Dilithium'],
-        'quantum_resistant': True,  # True PQC
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature',
-        'is_pqc': True  # ✓ NEW FLAG
+        'is_pqc': True
     },
     'SPHINCS+': {
         'patterns': [r'\bSPHINCS\+?\b', r'\bsphincs\b', r'SLH-DSA'],
-        'quantum_resistant': True,  # True PQC
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature',
-        'is_pqc': True  # ✓ NEW FLAG
+        'is_pqc': True
     },
     'NTRU': {
         'patterns': [r'\bNTRU\b', r'\bntru\b', r'NTRUEncrypt'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Encryption',
         'is_pqc': True
     },
     'Falcon': {
         'patterns': [r'\bFalcon\b(?!.*[Bb]ird)', r'\bfalcon\b(?!.*bird)'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature',
         'is_pqc': True
     },
     'SABER': {
         'patterns': [r'\bSABER\b', r'\bSaber\b(?!tooth)'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Key Encapsulation',
         'is_pqc': True
     },
     'FrodoKEM': {
         'patterns': [r'\bFrodoKEM\b', r'\bFrodo\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Key Encapsulation',
         'is_pqc': True
     },
     'BIKE': {
         'patterns': [r'\bBIKE\b(?!-)'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Key Encapsulation',
         'is_pqc': True
     },
     'HQC': {
         'patterns': [r'\bHQC\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Key Encapsulation',
         'is_pqc': True
     },
     'Rainbow': {
         'patterns': [r'\bRainbow\b(?!.*color)'],
-        'quantum_resistant': False, # Broken
+        'quantum_resistance_type': 'deprecated',  # Broken PQC
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature (Broken)',
         'is_pqc': True
     },
     'XMSS': {
         'patterns': [r'\bXMSS\b', r'\bxmss\b'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature',
         'is_pqc': True
     },
     'LMS': {
         'patterns': [r'\bLMS\b(?!-)'],
-        'quantum_resistant': True,
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature',
         'is_pqc': True
     },
@@ -716,9 +769,9 @@ class Database:
         repo.scan_status = 'completed'
         repo.total_files = scan_data['total_files']
         repo.total_algorithms = scan_data['total_algorithms']
-        # ✓ FIXED: Use new field names
-        repo.pqc_safe_count = scan_data.get('quantum_resistant_count', 0)  # Type-based count
-        repo.pqc_vulnerable_count = scan_data.get('quantum_vulnerable_count', 0)
+        # ✅ CORRECTED: Use new field names
+        repo.quantum_safe_count = scan_data.get('quantum_safe_count', 0)  # Actually quantum-safe
+        repo.quantum_vulnerable_count = scan_data.get('quantum_vulnerable_count', 0)  # Actually vulnerable
         repo.last_scanned = datetime.utcnow()
         repo.overall_security_score = scan_data.get('overall_score')
         repo.overall_grade = scan_data.get('overall_grade')
@@ -734,17 +787,18 @@ class Database:
                 algorithm=algo,
                 algorithm_type=data.get('algorithm_type'),
                 category=data['category'],
-                # ✓ FIXED: Map to new fields
-                is_quantum_resistant=data.get('quantum_resistant', False),  # Type-based
-                is_pqc=data.get('is_pqc', False),  # True PQC flag
+                # ✅ REMOVED: is_quantum_resistant field (no longer exists)
+                is_pqc=data.get('is_pqc', False),  # True ONLY for actual PQC
                 occurrences=data['occurrences'],
                 files_affected=len(data['files']),
-                # Add scoring data
+                # Scoring data
                 base_score=data.get('base_score'),
                 final_score=data.get('final_score'),
                 grade=data.get('grade'),
                 security_level=data.get('security_level'),
-                quantum_safe=data.get('quantum_safe', False), # ✓ CORRECT: Score-based quantum safety
+                quantum_safe=data.get('quantum_safe', False),  # ✅ Correctly calculated
+                quantum_safety_reason=data.get('quantum_safety_reason'),  # ✅ NEW
+                quantum_resistance_type=data.get('quantum_resistance_type'),  # ✅ NEW
                 deprecated=data.get('deprecated', False),
                 weighted_score=data.get('weighted_score'),
             )
@@ -795,8 +849,8 @@ class Database:
             algorithms[sr.algorithm] = {
                 'category': sr.category,
                 'algorithm_type': sr.algorithm_type,
-                'quantum_resistant': sr.is_quantum_resistant,  # Type-based
-                'is_pqc': sr.is_pqc,  # True PQC flag
+                # ✅ REMOVED: is_quantum_resistant field (no longer exists)
+                'is_pqc': sr.is_pqc,  # True ONLY for actual PQC
                 'occurrences': sr.occurrences,
                 'files_affected': sr.files_affected,
                 'base_score': sr.base_score,
@@ -804,10 +858,13 @@ class Database:
                 'grade': sr.grade,
                 'deprecated': sr.deprecated,
                 'security_level': sr.security_level,
-                'quantum_safe': sr.quantum_safe,  # ✓ Score-based (THE CORRECT ONE)
+                'quantum_safe': sr.quantum_safe,  # ✅ PRIMARY field
+                'quantum_safety_reason': sr.quantum_safety_reason,  # ✅ NEW
+                'quantum_resistance_type': sr.quantum_resistance_type,  # ✅ NEW
                 'weighted_score': sr.weighted_score,
             }
 
+        # ... category scores code (keep as is) ...
         # NEW: Get category scores
         category_scores = {}
         for cs in repo.category_scores:
@@ -819,23 +876,22 @@ class Database:
                 'worst_algorithm': cs.worst_algorithm
             }
 
-        # ✓✓✓ FIXED: CORRECT Quantum Readiness Calculation
-        # Based on OCCURRENCES, not algorithm types
+        # ✅ CORRECTED: Quantum Readiness Calculation
+        # Based on OCCURRENCES of quantum-safe algorithms
         total_crypto_occurrences = sum(sr.occurrences for sr in repo.scan_results)
-        # Count occurrences of algorithms that are ACTUALLY quantum-safe (score >= 85)
         quantum_safe_occurrences = sum(
             sr.occurrences for sr in repo.scan_results
-            if sr.quantum_safe and sr.final_score >= 85
+            if sr.quantum_safe == True  # Already correctly calculated
         )
         quantum_readiness_percentage = (
             (quantum_safe_occurrences / total_crypto_occurrences * 100)
             if total_crypto_occurrences > 0 else 0
         )
 
-        # ✓ FIXED: Count algorithms by TYPE (for display)
-        quantum_resistant_count = sum(1 for sr in repo.scan_results if sr.is_quantum_resistant)
-        quantum_vulnerable_count = sum(1 for sr in repo.scan_results if not sr.is_quantum_resistant)
-        true_pqc_count = sum(1 for sr in repo.scan_results if sr.is_pqc)
+        # ✅ CORRECTED: Count by ACTUAL quantum safety
+        quantum_safe_count = sum(1 for sr in repo.scan_results if sr.quantum_safe == True)
+        quantum_vulnerable_count = sum(1 for sr in repo.scan_results if sr.quantum_safe == False)
+        true_pqc_count = sum(1 for sr in repo.scan_results if sr.is_pqc == True)
 
 
         return {
@@ -848,9 +904,9 @@ class Database:
             'scan_status': repo.scan_status,
             'total_files': repo.total_files,
             'total_algorithms': len(repo.scan_results),
-            # ✓ FIXED: Renamed counts
-            'quantum_resistant_count': quantum_resistant_count,
-            'quantum_vulnerable_count': quantum_vulnerable_count,
+            # ✅ CORRECTED: Use new field names
+            'quantum_safe_count': quantum_safe_count,  # Actually quantum-safe
+            'quantum_vulnerable_count': quantum_vulnerable_count,  # Actually vulnerable
             'true_pqc_count': true_pqc_count,
             'current_status': repo.current_status,
             'overall_security_score': repo.overall_security_score,
@@ -875,8 +931,8 @@ class Database:
                 'last_scanned': scan.last_scanned,
                 'scan_status': scan.scan_status,
                 'total_files': scan.total_files,
-                'pqc_safe_count': scan.pqc_safe_count,
-                'pqc_vulnerable_count': scan.pqc_vulnerable_count,
+                'quantum_safe_count': scan.quantum_safe_count,  # ✅ RENAMED
+                'quantum_vulnerable_count': scan.quantum_vulnerable_count,  # ✅ RENAMED
                 'current_status': scan.current_status,
                 'total_files_to_scan': scan.total_files_to_scan
             } for scan in scans
@@ -967,16 +1023,14 @@ class CryptoScanner:
     
     def get_results(self) -> Dict:
         """Get structured scan results"""
-        quantum_resistant_algos = []  # Type-based (AES, SHA-256, Kyber)
         algorithms_data = {}
         
         for algo in self.findings.keys():
-            info = CRYPTO_PATTERNS[algo]
+            info = CRYPTO_PATTERNS.get(algo, {})
             occurrences = self.findings[algo]
             unique_files = set(occ['file'] for occ in occurrences)
             
-            # ✓ FIXED: Check the renamed field
-            is_quantum_resistant = info.get('quantum_resistant', False)
+            # ✅ Get classification from pattern (not safety determination yet)
             is_true_pqc = info.get('is_pqc', False)
 
             # Get the most common key size for this algorithm
@@ -987,8 +1041,8 @@ class CryptoScanner:
             
             algo_data = {
                 'name': algo,
-                'category': info['category'],
-                'quantum_resistant': is_quantum_resistant,  # Type-based
+                'category': info.get('category', 'Unknown'),
+                # ✅ REMOVED: quantum_resistant field
                 'is_pqc': is_true_pqc,  # True PQC flag
                 'occurrences': len(occurrences),
                 'files': list(unique_files),
@@ -1001,8 +1055,8 @@ class CryptoScanner:
         return {
             'total_files': self.file_count,
             'total_algorithms': len(self.findings),
-            # Counts will be recalculated after scoring
-            'quantum_resistant_count': 0,
+            # ✅ Counts will be calculated after scoring with correct logic
+            'quantum_safe_count': 0,
             'quantum_vulnerable_count': 0,
             'algorithms': algorithms_data
         }
@@ -1057,60 +1111,67 @@ def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
             results = scanner.get_results()
             pqc_analyzer = PQCAnalyzer()
 
-            # ✓ FIXED: Score each algorithm AND calculate quantum_safe
+            # ✅ NEW: Score each algorithm with correct quantum safety determination
             scored_results = {}
             for algo_name, algo_data in results['algorithms'].items():
+                # Get algorithm pattern info
+                pattern_info = CRYPTO_PATTERNS.get(algo_name, {})
+                
+                # Score the algorithm
                 score = pqc_analyzer.score_repository_algorithm(
                     algorithm=algo_name,
                     category=algo_data['category'],
                     key_size=algo_data.get('key_size')
                 )
                 
-                # ✓ FIXED: Determine quantum_safe based on SCORE + TYPE + KEYSIZE
-                is_quantum_resistant = algo_data.get('quantum_resistant', False)
-                final_score = score.final_score
-
-                # Check minimum key sizes for quantum safety
-                min_key_sizes = {
-                    'AES': 256,      # AES-128 becomes 64-bit effective
-                    'CHACHA': 256,
-                    'SHA': 256,      # SHA-256 minimum
-                }
-
-                algo_upper = algo_name.upper()
-                has_sufficient_keysize = True
-
-                # Check key size requirements
-                for prefix, min_size in min_key_sizes.items():
-                    if prefix in algo_upper:
-                        # Extract key size from name (e.g., "AES-128" → 128)
-                        match = re.search(r'\b(\d{3,4})\b', algo_name)
-                        if match:
-                            actual_size = int(match.group(1))
-                            if actual_size < min_size:
-                                has_sufficient_keysize = False
-                        break
-                
-                # ✓ KEY LOGIC: quantum_safe = TRUE if:
-                # 1. Algorithm is quantum-resistant by type (symmetric/hash/PQC)
-                # 2. AND has good security score (>= 85)
-                # 3. AND has sufficient key size
-                quantum_safe = (
-                    is_quantum_resistant and 
-                    final_score >= 85 and 
-                    has_sufficient_keysize
+                # ✅ NEW: Use corrected quantum safety determination
+                is_quantum_safe, safety_reason = pqc_analyzer.determine_quantum_safety(
+                    algorithm=algo_name,
+                    algo_type=score.algorithm_type,
+                    key_size=algo_data.get('key_size'),
+                    final_score=score.final_score,
+                    pattern_info=pattern_info
                 )
+                
+                # Get classification from pattern
+                resistance_type = pattern_info.get('quantum_resistance_type', 'vulnerable')
+                is_true_pqc = pattern_info.get('is_pqc', False)
                 
                 scored_results[algo_name] = {
                     **algo_data,
                     **asdict(score),
-                    'quantum_safe': quantum_safe,  # ✓ CORRECT calculation
+                    'quantum_safe': is_quantum_safe,  # ✅ Correctly calculated
+                    'quantum_safety_reason': safety_reason,  # NEW: Explanation
+                    'quantum_resistance_type': resistance_type,  # NEW: Classification
+                    'is_pqc': is_true_pqc,  # TRUE only for actual PQC algorithms
                 }
 
             results['algorithms'] = scored_results
-            results['quantum_resistant_count'] = sum(1 for r in scored_results.values() if r.get('quantum_resistant'))
-            results['quantum_vulnerable_count'] = sum(1 for r in scored_results.values() if not r.get('quantum_safe'))
-            results['true_pqc_count'] = sum(1 for r in scored_results.values() if r.get('is_pqc'))
+            
+            # ✅ CORRECTED: Count by ACTUAL quantum safety (not type classification)
+            results['quantum_safe_count'] = sum(
+                1 for r in scored_results.values() 
+                if r.get('quantum_safe') == True
+            )
+            
+            results['quantum_vulnerable_count'] = sum(
+                1 for r in scored_results.values() 
+                if r.get('quantum_safe') == False
+            )
+            
+            results['true_pqc_count'] = sum(
+                1 for r in scored_results.values() 
+                if r.get('is_pqc') == True
+            )
+            
+            # ✅ VERIFICATION: Ensure counts add up correctly
+            total_counted = results['quantum_safe_count'] + results['quantum_vulnerable_count']
+            if total_counted != results['total_algorithms']:
+                logger.warning(
+                    f"⚠️ Count mismatch: {results['quantum_safe_count']} safe + "
+                    f"{results['quantum_vulnerable_count']} vulnerable = {total_counted}, "
+                    f"but total_algorithms = {results['total_algorithms']}"
+                )
 
             scoring_results = calculate_repo_overall_score(scored_results)
 
@@ -1234,9 +1295,8 @@ class ScanQueueResponse(BaseModel):
 class ScanResultItem(BaseModel):
     category: str
     algorithm_type: Optional[str] = None
-    # ✓ FIXED: Renamed fields
-    quantum_resistant: bool # Type-based (was: pqc_safe)
-    is_pqc: bool # True ONLY for actual PQC algorithms
+    # ✅ REMOVED: quantum_resistant field
+    is_pqc: bool  # True ONLY for actual PQC algorithms (Kyber, Dilithium, etc.)
     occurrences: int
     files_affected: int
     base_score: Optional[float] = None
@@ -1244,7 +1304,9 @@ class ScanResultItem(BaseModel):
     grade: Optional[str] = None
     deprecated: Optional[bool] = False
     security_level: Optional[str] = None
-    quantum_safe: Optional[bool] = None # ✓ THIS IS THE CORRECT ONE TO USE FOR DISPLAY
+    quantum_safe: Optional[bool] = None  # ✅ PRIMARY field: Actually quantum-safe?
+    quantum_safety_reason: Optional[str] = None  # ✅ NEW: Explanation
+    quantum_resistance_type: Optional[str] = None  # ✅ NEW: Classification
     weighted_score: Optional[float] = None
 
 class CategoryScoreItem(BaseModel):
@@ -1263,10 +1325,10 @@ class ScanDetailsResponse(BaseModel):
     last_scanned: datetime
     scan_status: str
     total_files: int
-    total_algorithms: int # ✓ FIXED: Renamed counts
-    quantum_resistant_count: int # Type-based count (was: pqc_safe_count)
-    quantum_vulnerable_count: int # Type-based count (was: pqc_vulnerable_count)
-    true_pqc_count: int # NEW: Count of actual PQC algorithms
+    total_algorithms: int
+    quantum_safe_count: int  # ✅ RENAMED: Actually quantum-safe
+    quantum_vulnerable_count: int  # ✅ RENAMED: Actually vulnerable
+    true_pqc_count: int  # Count of actual PQC algorithms
     current_status: str
     total_files_to_scan: int # ✓ THIS IS THE CORRECT PERCENTAGE
     overall_security_score: Optional[float] = None
@@ -1286,8 +1348,8 @@ class AllScansResponse(BaseModel):
     last_scanned: datetime
     scan_status: str
     total_files: int
-    pqc_safe_count: int
-    pqc_vulnerable_count: int
+    quantum_safe_count: int  # ✅ RENAMED
+    quantum_vulnerable_count: int  # ✅ RENAMED
     current_status: str
     total_files_to_scan: int
 

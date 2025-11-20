@@ -48,6 +48,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-service:
+        condition: service_healthy
     command: ["/usr/local/bin/wait-for-db.sh", "postgres", "python", "api_server.py"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/api/v1/admin/stats"]
@@ -130,6 +132,8 @@ services:
     restart: always
     depends_on:
       postgres:
+        condition: service_healthy
+      db-service:
         condition: service_healthy
 
   # ======================

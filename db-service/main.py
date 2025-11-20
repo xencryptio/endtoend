@@ -315,7 +315,7 @@ def health_check(db: Session = Depends(get_db)):
     """
     try:
         # Create all tables first (idempotent operation)
-        
+        models.Base.metadata.create_all(bind=engine)
         
         # Test database connection with a simple query
         result = db.execute(text("SELECT 1"))

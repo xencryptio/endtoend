@@ -80,11 +80,7 @@ class Result(Base):
     task = relationship("Task", back_populates="result")
 
 # Create tables
-
-
-
-
-# Pydantic Models
+Base.metadata.create_all(bind=engine)# Pydantic Models
 class AgentRegistration(BaseModel):
     agent_id: str
     hostname: str

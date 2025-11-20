@@ -5,7 +5,7 @@ Complete implementation with all algorithms and full CLI
 """
 
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from datetime import datetime
@@ -605,6 +605,76 @@ class PQCAnalyzer:
         return self.score_individual_algorithm(
             algorithm=algorithm, algo_type=algo_type, key_size=key_size, position=0
         )
+
+    def determine_quantum_safety(
+        self, 
+        algorithm: str, 
+        algo_type: str, 
+        key_size: Optional[int], 
+        final_score: float,
+        pattern_info: Dict
+    ) -> Tuple[bool, str]:
+        """
+        Determine if algorithm is quantum-safe based on:
+        1. Algorithm family (PQC vs classical)
+        2. Key/output size requirements
+        3. Security score
+        
+        Returns: (is_quantum_safe, reason)
+        """
+        algo_upper = algorithm.upper()
+        resistance_type = pattern_info.get('quantum_resistance_type', 'vulnerable')
+        min_safe_size = pattern_info.get('min_quantum_safe_keysize')
+        
+        # TRUE PQC algorithms (fully resistant)
+        if resistance_type == 'fully_resistant':
+            if final_score >= 85:
+                return True, "Post-quantum algorithm with strong security parameters"
+            return False, f"Post-quantum algorithm with weak parameters (score: {final_score})"
+        
+        # Deprecated/broken algorithms
+        if resistance_type == 'deprecated':
+            return False, "Cryptographically broken or deprecated algorithm"
+        
+        # Modes and constructions (not standalone algorithms)
+        if resistance_type in ['mode', 'construction']:
+            return False, "Not a standalone cryptographic algorithm (mode/construction only)"
+        
+        # Vulnerable to quantum attacks (all classical asymmetric)
+        if resistance_type == 'vulnerable':
+            return False, "Vulnerable to Shor's algorithm (quantum computers can break this)"
+        
+        # Grover-resistant algorithms (symmetric/hash)
+        if resistance_type == 'grover_resistant':
+            if not min_safe_size:
+                return False, "No minimum quantum-safe size defined"
+            
+            # For symmetric algorithms, check key size
+            if algo_type == 'symmetric':
+                if not key_size:
+                    return False, "Key size unknown - cannot verify quantum safety"
+                
+                if key_size >= min_safe_size:
+                    return True, f"Symmetric cipher with {key_size}-bit key (Grover-resistant, ≥{min_safe_size} required)"
+                return False, f"Symmetric cipher with {key_size}-bit key (insufficient, need ≥{min_safe_size} for quantum safety)"
+            
+            # For hash functions, extract output size from name
+            if algo_type == 'hash':
+                # Extract output size (e.g., SHA-256 → 256, SHA3-512 → 512)
+                match = re.search(r'[-_]?(\d{3,4})(?:\b|$)', algorithm)
+                if match:
+                    output_bits = int(match.group(1))
+                else:
+                    # Default mappings for algorithms without explicit size in name
+                    output_bits = 256  # Conservative default
+                
+                if output_bits >= min_safe_size:
+                    return True, f"Hash with {output_bits}-bit output (Grover-resistant, ≥{min_safe_size} required)"
+                return False, f"Hash with {output_bits}-bit output (insufficient, need ≥{min_safe_size} for quantum safety)"
+        
+        # Unknown/unclassified
+        return False, "Unknown quantum resistance classification"
+
 
     def score_individual_algorithm(self, algorithm: str, algo_type: str, 
                                    key_size: Optional[int] = None, curve: Optional[str] = None,
