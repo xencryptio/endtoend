@@ -1546,10 +1546,10 @@ const CryptoAuditDashboard: React.FC = () => {
   }, [tasks, fetchAgentResults, fetchStats]);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
+    <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
       
 
-      <nav className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+      <nav className="bg-card border-b">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex gap-1">
             {(['dashboard', 'downloads', 'docs'] as const).map(tab => (
@@ -1611,7 +1611,7 @@ const CryptoAuditDashboard: React.FC = () => {
               </div>
             )}
 
-            <div className="bg-white dark:bg-slate-900 rounded-lg p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6 border shadow-sm">
               <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                 <button
                   onClick={refreshAll}
@@ -1638,7 +1638,7 @@ const CryptoAuditDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 rounded-lg p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6 border shadow-sm">
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
@@ -1647,7 +1647,7 @@ const CryptoAuditDashboard: React.FC = () => {
                     placeholder="Search agents..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 h-14 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                    className="w-full pl-10 pr-10 h-14 rounded-lg border bg-muted text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                   />
                   {searchQuery && (
                     <button
@@ -1661,7 +1661,7 @@ const CryptoAuditDashboard: React.FC = () => {
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-14 md:w-auto"
+                  className="px-4 py-2 rounded-lg border bg-muted text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-14 md:w-auto"
                 >
                   <option value="all">All Status</option>
                   <option value="active">Active</option>
@@ -1672,8 +1672,8 @@ const CryptoAuditDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-              <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800">
+            <div className="bg-card text-card-foreground rounded-lg border shadow-sm overflow-hidden">
+              <div className="p-4 sm:p-6 border-b">
                 <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
                   Crypto Inventory by Assets ({filteredAgents.length})
                 </h3>
@@ -1702,7 +1702,7 @@ const CryptoAuditDashboard: React.FC = () => {
                 {isInitialLoad ? (
                   <div className="p-6">
                     {[...Array(5)].map((_, i) => (
-                      <div key={i} className="animate-pulse flex items-center gap-6 py-4 border-b border-slate-200">
+                      <div key={i} className="animate-pulse flex items-center gap-6 py-4 border-b">
                         <div className="h-10 w-10 bg-slate-200 dark:bg-slate-700 rounded" />
                         <div className="flex-1 space-y-2">
                           <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
@@ -1719,7 +1719,7 @@ const CryptoAuditDashboard: React.FC = () => {
                     {/* Desktop Table */}
                     <div className="hidden md:block overflow-x-auto">
                       <table className="w-full table-fixed">
-                        <thead className="bg-gray-50 dark:bg-slate-800 border-b-2 border-slate-200 dark:border-slate-700">
+                        <thead className="bg-muted border-b-2">
                           <tr style={{ height: '56px' }}>
                             <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/4">
                               Agent
@@ -1744,7 +1744,7 @@ const CryptoAuditDashboard: React.FC = () => {
                             </th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        <tbody className="divide-y">
                           {filteredAgents.map((agent) => (
                             <AgentRow
                               key={agent.agent_id}
@@ -1825,7 +1825,7 @@ const CryptoAuditDashboard: React.FC = () => {
         )}
 
         {activeTab === 'docs' && (
-          <div className="bg-white dark:bg-slate-900 rounded-lg p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="bg-card text-card-foreground rounded-lg p-6 sm:p-8 border shadow-sm">
             <DocumentationSection />
           </div>
         )}
@@ -1836,7 +1836,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
 // Helper Components
 const SkeletonStatCard: React.FC = () => (
-  <div className="bg-white dark:bg-slate-900 rounded-lg p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm animate-pulse">
+  <div className="bg-card rounded-lg p-4 sm:p-6 border shadow-sm animate-pulse">
     <div className="h-10 w-10 bg-slate-200 dark:bg-slate-800 rounded-lg mb-3"></div>
     <div className="h-8 bg-slate-200 dark:bg-slate-800 rounded w-16 mb-2"></div>
     <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-24"></div>
@@ -1855,7 +1855,7 @@ const StatCard: React.FC<{ title: string; value: number; icon: React.ReactNode; 
   }[color];
 
   return (
-    <div className={`bg-white dark:bg-slate-900 rounded-lg p-6 border-l-4 ${borderColors} shadow-sm min-h-[140px] flex flex-col justify-between`}>
+    <div className={`bg-card text-card-foreground rounded-lg p-6 border-l-4 ${borderColors} shadow-sm min-h-[140px] flex flex-col justify-between`}>
       <div className="flex items-center justify-between mb-4">
         <div className="text-slate-500 dark:text-slate-400 text-sm font-medium">{title}</div>
         <div className={`text-${color}-600`}>{icon}</div>
@@ -1907,7 +1907,7 @@ const MobileAgentCard: React.FC<{
   formatTimeSince: (minutes: number) => string;
 }> = ({ agent, info, onToggle, onTriggerScan, isScanTriggered, formatTimeSince }) => {
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-4 mb-4 shadow-sm">
+    <div className="bg-card text-card-foreground rounded-lg border p-4 mb-4 shadow-sm">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-base text-slate-900 dark:text-slate-100 truncate">
@@ -2015,7 +2015,7 @@ const SimplifiedAgentView: React.FC<{
       </div>
 
       {/* Agent Details Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
+      <div className="bg-card text-card-foreground rounded-lg p-6 border shadow-sm">
         <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
           <Server size={20} className="text-blue-600" />
           Agent Information
@@ -2894,7 +2894,7 @@ const FileDownloadSection: React.FC<{
   const icon = folderType === 'linux' ? <Terminal size={24} /> : <Server size={24} />;
   
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+    <div className="bg-card text-card-foreground rounded-lg border shadow-sm overflow-hidden">
       <div className="p-6">
         <div className="flex items-center justify-between gap-6">
           <div className="flex items-center gap-4">

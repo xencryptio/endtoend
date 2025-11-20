@@ -15,6 +15,7 @@ import threading
 import shutil
 import time
 from datetime import datetime
+import requests
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional, Any
@@ -1281,6 +1282,13 @@ class ScanRequest(BaseModel):
     repo_url: str
     branch_name: Optional[str] = 'main'
 
+class BranchListResponse(BaseModel):
+    branches: List[str]
+    default_branch: str
+    total_count: int
+    platform: str
+    message: Optional[str] = None
+
 class ScanQueueResponse(BaseModel):
     repo_id: int
     repo_url: str
@@ -1459,6 +1467,109 @@ def calculate_repo_overall_score(scored_algorithms: Dict) -> Dict:
         'category_scores': category_scores
     }
 
+class GitHubBranchFetcher:
+    """Fetch branches from GitHub/GitLab/Bitbucket APIs"""
+    
+    @staticmethod
+    def extract_owner_repo(repo_url: str, platform: str) -> Tuple[Optional[str], Optional[str]]:
+        """Extract owner and repo name from URL"""
+        import re
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(repo_url)
+        path = parsed.path.strip('/')
+        
+        if platform in ['GitHub', 'GitLab', 'Bitbucket']:
+            # Remove .git suffix
+            path = re.sub(r'\.git$', '', path)
+            parts = path.split('/')
+            if len(parts) >= 2:
+                # For GitLab, owner can be nested, e.g., group/subgroup/repo
+                if platform == 'GitLab':
+                    return ('/'.join(parts[:-1]), parts[-1])
+                return parts[0], parts[1]
+        
+        return None, None
+    
+    @staticmethod
+    def fetch_github_branches(owner: str, repo: str) -> Dict:
+        """Fetch branches from GitHub API"""
+        url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+        headers = {}
+        
+        github_token = os.getenv("GITHUB_TOKEN")
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+        
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 404:
+                return {"error": "Repository not found or is private"}
+            elif response.status_code == 403:
+                return {"error": "API rate limit exceeded. Please try again later."}
+            response.raise_for_status()
+            
+            branches_data = response.json()
+            branch_names = [b["name"] for b in branches_data]
+            
+            repo_url = f"https://api.github.com/repos/{owner}/{repo}"
+            repo_response = requests.get(repo_url, headers=headers, timeout=10)
+            repo_response.raise_for_status()
+            default_branch = repo_response.json().get("default_branch", "main")
+            
+            return {
+                "branches": branch_names,
+                "default_branch": default_branch,
+                "total_count": len(branch_names)
+            }
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Network error while fetching branches: {e}"}
+
+    @staticmethod
+    def fetch_gitlab_branches(owner: str, repo: str) -> Dict:
+        """Fetch branches from GitLab API"""
+        project_path = f"{owner}/{repo}"
+        try:
+            # URL-encode the project path
+            encoded_project_path = requests.utils.quote(project_path, safe='')
+            url = f"https://gitlab.com/api/v4/projects/{encoded_project_path}/repository/branches"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            
+            branches_data = response.json()
+            branch_names = [b["name"] for b in branches_data]
+            
+            repo_url = f"https://gitlab.com/api/v4/projects/{encoded_project_path}"
+            repo_response = requests.get(repo_url, timeout=10)
+            repo_response.raise_for_status()
+            default_branch = repo_response.json().get("default_branch", "main")
+            
+            return {
+                "branches": branch_names,
+                "default_branch": default_branch,
+                "total_count": len(branch_names)
+            }
+        except requests.exceptions.RequestException as e:
+            return {"error": f"GitLab API error: {e}"}
+
+    @staticmethod
+    def fetch_bitbucket_branches(owner: str, repo: str) -> Dict:
+        """Fetch branches from Bitbucket API"""
+        try:
+            url = f"https://api.bitbucket.org/2.0/repositories/{owner}/{repo}/refs/branches"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            branches_data = response.json()
+            branch_names = [b["name"] for b in branches_data.get("values", [])]
+            
+            repo_url = f"https://api.bitbucket.org/2.0/repositories/{owner}/{repo}"
+            repo_response = requests.get(repo_url, timeout=10)
+            repo_response.raise_for_status()
+            default_branch = repo_response.json().get("mainbranch", {}).get("name", "main")
+            return {"branches": branch_names, "default_branch": default_branch, "total_count": len(branch_names)}
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Bitbucket API error: {e}"}
 
 db_manager = Database()
 url_parser = RepoUrlParser()
@@ -1489,6 +1600,58 @@ async def validate_url_endpoint(scan_request: ScanRequest):
         'platform': platform,
         'message': f'Valid {platform} repository URL'
     }
+
+@app.post('/api/fetch-branches', status_code=status.HTTP_200_OK)
+async def fetch_branches_endpoint(scan_request: ScanRequest):
+    """Fetch available branches from Git repository"""
+    repo_url = scan_request.repo_url.strip()
+
+    if not repo_url:
+        raise HTTPException(status_code=400, detail='Repository URL is required')
+
+    # Validate URL
+    is_valid, validation_msg = url_parser.validate_url(repo_url)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=validation_msg)
+
+    # Normalize URL and detect platform
+    normalized_url = url_parser.normalize_url(repo_url)
+    platform = url_parser.detect_platform(normalized_url)
+
+    # Extract owner and repo
+    fetcher = GitHubBranchFetcher()
+    owner, repo = fetcher.extract_owner_repo(normalized_url, platform)
+
+    if not owner or not repo:
+        raise HTTPException(
+            status_code=400, 
+            detail='Could not extract repository owner and name from URL'
+        )
+
+    # Fetch branches based on platform
+    if platform == 'GitHub':
+        result = fetcher.fetch_github_branches(owner, repo)
+    elif platform == 'GitLab':
+        result = fetcher.fetch_gitlab_branches(owner, repo)
+    elif platform == 'Bitbucket':
+        result = fetcher.fetch_bitbucket_branches(owner, repo)
+    else:
+        raise HTTPException(
+            status_code=400, 
+            detail=f'Branch fetching not supported for {platform} yet. Please enter branch name manually.'
+        )
+
+    # Check for errors
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return BranchListResponse(
+        branches=result["branches"],
+        default_branch=result["default_branch"],
+        total_count=result["total_count"],
+        platform=platform,
+        message=f'Found {result["total_count"]} branches in {platform} repository'
+    )
 
 @app.post('/api/scan', status_code=status.HTTP_200_OK)
 async def scan_repository_endpoint(scan_request: ScanRequest):

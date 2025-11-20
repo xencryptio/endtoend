@@ -345,8 +345,8 @@ const Scan = () => {
                 >
                   <CardHeader>
                     <div className="flex items-center gap-4 mb-4">
-                      <div className="p-3 bg-gray-800/10 dark:bg-gray-200/10 rounded-lg">
-                        <Github className="h-8 w-8 text-gray-800 dark:text-gray-200" />
+                      <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                        <Github className="h-8 w-8 text-blue-600 dark:text-blue-400" />
                       </div>
                       <div>
                         <CardTitle className="text-2xl">Git Scan</CardTitle>
