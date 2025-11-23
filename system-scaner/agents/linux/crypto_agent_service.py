@@ -14,7 +14,7 @@ import os
 from linux_server import crypto_information_audit
 
 # Configuration - Read from environment variables
-API_BASE_URL = os.getenv("CRYPTO_API_BASE_URL", "http://system-scan:9000")
+API_BASE_URL = os.getenv("CRYPTO_API_BASE_URL")
 POLL_INTERVAL = int(os.getenv("CRYPTO_POLL_INTERVAL", "10"))
 LOG_FILE = os.getenv("CRYPTO_LOG_FILE", "/var/log/crypto_agent.log")
 AGENT_ID_FILE = os.getenv("CRYPTO_AGENT_ID_FILE", "/var/lib/crypto_agent/agent_id")
@@ -74,6 +74,7 @@ class CryptoAgentService:
         try:
             os_info = f"{platform.system()} {platform.release()}"
             
+            # Try to get more detailed OS info on Linux
             if platform.system() == "Linux":
                 try:
                     with open('/etc/os-release', 'r') as f:
@@ -114,11 +115,14 @@ class CryptoAgentService:
                 self.registered = True
                 return True
             else:
-                logger.error(f"Registration failed: {response.status_code}")
+                logger.error(f"Registration failed: {response.status_code} - {response.text}")
                 return False
                 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logger.error(f"Registration request failed: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error during registration: {e}")
             return False
     
     def send_system_info(self):
@@ -160,16 +164,23 @@ class CryptoAgentService:
             return None
     
     def perform_crypto_audit(self):
-        """Execute cryptographic audit"""
+        """Execute cryptographic audit locally."""
         try:
             logger.info("Starting cryptographic audit...")
-            audit_results, hostname = crypto_information_audit("root", None)
+            
+            # Get sudo password and username from environment
+            sudo_pass = os.getenv("CRYPTO_AUDIT_SUDO", "kali")
+            username = os.getenv("CRYPTO_AUDIT_USER", "kali")
+            
+            # Run the audit
+            audit_results, hostname = crypto_information_audit(username, sudo_pass)
             
             if "error" in audit_results:
                 logger.error(f"Audit failed: {audit_results['error']}")
                 return None
             
             logger.info("Cryptographic audit completed successfully")
+            
             return audit_results
             
         except Exception as e:
@@ -177,42 +188,61 @@ class CryptoAgentService:
             return None
     
     def send_audit_results(self, task_id, audit_results):
-        """Send audit results to API server"""
+        """Send audit results to API server - FIXED VERSION"""
         try:
             url = f"{API_BASE_URL}/api/v1/audit/result"
             
+            # ✅ FIX: Ensure 'os' field is present and correctly formatted at the TOP LEVEL
             payload = {
                 "agent_id": self.agent_id,
                 "task_id": task_id,
+                "os": "Linux",  # ✅ MUST be "Linux" or "Windows" (capitalized)
                 "audit_results": audit_results,
                 "timestamp": datetime.now().isoformat()
             }
+            
+            # Debug logging
+            logger.info(f"Sending payload with os field: {payload.get('os')}")
+            logger.debug(f"Full payload keys: {list(payload.keys())}")
             
             response = requests.post(url, json=payload, timeout=30)
             
             if response.status_code == 200:
                 logger.info(f"Audit results sent successfully (Task: {task_id})")
                 return True
+            elif response.status_code == 422:
+                # Validation error - log details
+                logger.error(f"Validation error (422): {response.text}")
+                try:
+                    error_detail = response.json()
+                    logger.error(f"Validation details: {json.dumps(error_detail, indent=2)}")
+                except:
+                    pass
+                return False
             else:
-                logger.error(f"Failed to send audit results: {response.status_code}")
+                logger.error(f"Failed to send audit results: {response.status_code} - {response.text}")
                 return False
                 
         except Exception as e:
             logger.error(f"Error sending audit results: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def run(self):
         """Main service loop"""
         logger.info(f"Crypto Agent Service started (Agent ID: {self.agent_id})")
         logger.info(f"API Base URL: {API_BASE_URL}")
+        logger.info(f"Hostname: {self.hostname}, IP: {self.ip_address}")
         
-        # Registration
+        # Initial registration and system info
         retry_count = 0
         max_retries = 5
         
         while not self.registered and retry_count < max_retries:
             logger.info(f"Attempting registration (attempt {retry_count + 1}/{max_retries})...")
             if self.register_agent():
+                # Send initial system info
                 self.send_system_info()
                 break
             retry_count += 1
@@ -227,19 +257,27 @@ class CryptoAgentService:
         
         while self.running:
             try:
+                # Fetch action from server
                 action_data = self.fetch_action()
                 
                 if action_data and action_data.get("scan_flag"):
                     task_id = action_data.get("task_id")
                     logger.info(f"Scan requested (Task ID: {task_id})")
                     
+                    # Perform crypto audit
                     audit_results = self.perform_crypto_audit()
                     
                     if audit_results:
-                        self.send_audit_results(task_id, audit_results)
+                        # Send results back to server
+                        success = self.send_audit_results(task_id, audit_results)
+                        if success:
+                            logger.info(f"Successfully completed task {task_id}")
+                        else:
+                            logger.error(f"Failed to send results for task {task_id}")
                     else:
                         logger.error("Audit failed, no results to send")
                 
+                # Sleep for polling interval
                 time.sleep(POLL_INTERVAL)
                 
             except KeyboardInterrupt:
@@ -248,17 +286,21 @@ class CryptoAgentService:
                 break
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 time.sleep(POLL_INTERVAL)
         
         logger.info("Crypto Agent Service stopped")
 
 def main():
     """Entry point for the service"""
+    import traceback
     try:
         service = CryptoAgentService()
         service.run()
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 if __name__ == "__main__":

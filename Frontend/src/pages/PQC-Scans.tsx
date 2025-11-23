@@ -1585,226 +1585,235 @@ const CryptoAuditDashboard: React.FC = () => {
         )}
 
         {activeTab === 'dashboard' && (
-          currentPage === 'dashboard' ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="space-y-6"
-            >
-            {/* ALL YOUR EXISTING DASHBOARD CONTENT */}
-            {/* Stats cards, search, table, etc. */}
-            {isInitialLoad ? (
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                {[...Array(5)].map((_, i) => (
-                  <SkeletonStatCard key={i} />
-                ))}
-              </div>
-            ) : stats && (
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <StatCard title="Total Agents" value={stats.agents.total} icon={<Server size={20} />} color="indigo" />
-                <StatCard title="Active" value={stats.agents.active} icon={<CheckCircle size={20} />} color="green" />
-                <StatCard title="Inactive" value={stats.agents.inactive} icon={<AlertCircle size={20} />} color="red" />
-                <StatCard title="Pending" value={stats.tasks.pending} icon={<Clock size={20} />} color="amber" />
-                <StatCard title="Completed" value={stats.tasks.completed} icon={<CheckCircle size={20} />} color="emerald" />
-              </div>
-            )}
-
-            <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6 border shadow-sm">
-              <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-                <button
-                  onClick={refreshAll}
-                  disabled={loading}
-                  className={BUTTON_STYLES.primary}
-                >
-                  <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                  {loading ? 'Refreshing...' : 'Refresh'}
-                </button>
-                <button
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                  className={`${BUTTON_STYLES.primary} ${autoRefresh ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-600 hover:bg-slate-700'}`}
-                >
-                  <Activity size={16} className={autoRefresh ? 'animate-pulse' : ''} />
-                  Auto-Refresh {autoRefresh ? 'ON' : 'OFF'}
-                </button>
-                <div className="ml-auto text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-                  <div className="text-xs text-slate-500 hidden lg:flex items-center gap-4">
-                    <span><kbd className="px-2 py-1 bg-slate-100 rounded text-xs border border-slate-300">⌘R</kbd> Refresh</span>
-                    <span><kbd className="px-2 py-1 bg-slate-100 rounded text-xs border border-slate-300">⌘A</kbd> Auto-refresh</span>
-                  </div>
-                  <div className="lg:hidden">Last Updated: {lastUpdate.toLocaleTimeString()}</div>
+          <AnimatePresence mode="wait">
+            {currentPage === 'dashboard' ? (
+              <motion.div
+                key="dashboard"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+                className="space-y-6"
+              >
+              {/* ALL YOUR EXISTING DASHBOARD CONTENT */}
+              {/* Stats cards, search, table, etc. */}
+              {isInitialLoad ? (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  {[...Array(5)].map((_, i) => (
+                    <SkeletonStatCard key={i} />
+                  ))}
                 </div>
-              </div>
-            </div>
-
-            <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6 border shadow-sm">
-              <div className="flex flex-col md:flex-row gap-4">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
-                  <input
-                    type="text"
-                    placeholder="Search agents..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 h-14 rounded-lg border bg-muted text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                    >
-                      <X size={20} />
-                    </button>
-                  )}
+              ) : stats && (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <StatCard title="Total Agents" value={stats.agents.total} icon={<Server size={20} />} color="indigo" />
+                  <StatCard title="Active" value={stats.agents.active} icon={<CheckCircle size={20} />} color="green" />
+                  <StatCard title="Inactive" value={stats.agents.inactive} icon={<AlertCircle size={20} />} color="red" />
+                  <StatCard title="Pending" value={stats.tasks.pending} icon={<Clock size={20} />} color="amber" />
+                  <StatCard title="Completed" value={stats.tasks.completed} icon={<CheckCircle size={20} />} color="emerald" />
                 </div>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-4 py-2 rounded-lg border bg-muted text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-14 md:w-auto"
-                >
-                  <option value="all">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="has_pending">Has Pending Tasks</option>
-                  <option value="has_completed">Has Completed Scans</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="bg-card text-card-foreground rounded-lg border shadow-sm overflow-hidden">
-              <div className="p-4 sm:p-6 border-b">
-                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
-                  Crypto Inventory by Assets ({filteredAgents.length})
-                </h3>
-              </div>
-              
-              {/* Add loading overlay for smooth refresh */}
-              <div className="relative">
-                <AnimatePresence>
-                  {loading && !isInitialLoad && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-20 flex items-center justify-center"
-                    >
-                      <div className="bg-white dark:bg-slate-900 px-6 py-3 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 flex items-center gap-3">
-                        <Loader className="animate-spin text-blue-600" size={20} />
-                        <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                          Updating data...
-                        </span>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-            
-                {isInitialLoad ? (
-                  <div className="p-6">
-                    {[...Array(5)].map((_, i) => (
-                      <div key={i} className="animate-pulse flex items-center gap-6 py-4 border-b">
-                        <div className="h-10 w-10 bg-slate-200 dark:bg-slate-700 rounded" />
-                        <div className="flex-1 space-y-2">
-                          <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
-                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
-                        </div>
-                        <div className="h-8 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
-                      </div>
-                    ))}
-                  </div>
-                ) : filteredAgents.length === 0 ? (
-                  <EmptyState message="No agents found" />
-                ) : (
-                  <>
-                    {/* Desktop Table */}
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full table-fixed">
-                        <thead className="bg-muted border-b-2">
-                          <tr style={{ height: '56px' }}>
-                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/4">
-                              Agent
-                            </th>
-                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
-                              IP Address
-                            </th>
-                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
-                              Operating System
-                            </th>
-                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
-                              Status
-                            </th>
-                            <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
-                              Scans
-                            </th>
-                            <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700 dark:text-slate-300 w-32">
-                              Actions
-                            </th>
-                            <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700 dark:text-slate-300 w-16">
-                              {/* Expand toggle */}
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {filteredAgents.map((agent) => (
-                            <AgentRow
-                              key={agent.agent_id}
-                              agent={agent}
-                              info={agentTaskInfo.get(agent.agent_id)}
-                              expanded={expandedAgents.has(agent.agent_id)}
-                              onToggle={() => toggleAgentResults(agent.agent_id)}
-                              onTriggerScan={() => triggerScan(agent.agent_id)}
-                              isScanTriggered={triggeredScans.has(agent.agent_id)}
-                              results={agentResults.get(agent.agent_id) || []}
-                              tasks={tasks}
-                              expandedResults={expandedResults}
-                              toggleResultDetails={toggleResultDetails}
-                              loadingResults={loadingResults.has(agent.agent_id)}
-                              formatDateTime={formatDateTime}
-                              formatTimeSince={formatTimeSince}
-                              onRetryFetch={retryFetchResult}
-                              retryingResults={retryingResults}
-                              getRelativeTime={getRelativeTime}
-                              onNavigateToResults={(agent) => {
-                                setSelectedAgent(agent);
-                                setCurrentPage('agent-results');
-                              }}
-                            />
-                          ))}
-                        </tbody>
-                      </table>
+              )}
+  
+              <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6 border shadow-sm">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                  <button
+                    onClick={refreshAll}
+                    disabled={loading}
+                    className={BUTTON_STYLES.primary}
+                  >
+                    <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                    {loading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                  <button
+                    onClick={() => setAutoRefresh(!autoRefresh)}
+                    className={`${BUTTON_STYLES.primary} ${autoRefresh ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-600 hover:bg-slate-700'}`}
+                  >
+                    <Activity size={16} className={autoRefresh ? 'animate-pulse' : ''} />
+                    Auto-Refresh {autoRefresh ? 'ON' : 'OFF'}
+                  </button>
+                  <div className="ml-auto text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+                    <div className="text-xs text-slate-500 hidden lg:flex items-center gap-4">
+                      <span><kbd className="px-2 py-1 bg-slate-100 rounded text-xs border border-slate-300">⌘R</kbd> Refresh</span>
+                      <span><kbd className="px-2 py-1 bg-slate-100 rounded text-xs border border-slate-300">⌘A</kbd> Auto-refresh</span>
                     </div>
-            
-                    {/* Mobile Cards */}
-                    <div className="block md:hidden p-4">
-                      {filteredAgents.map((agent) => (
-                        <MobileAgentCard
-                          key={agent.agent_id}
-                          agent={agent}
-                          info={agentTaskInfo.get(agent.agent_id)}
-                          onToggle={() => toggleAgentResults(agent.agent_id)}
-                          onTriggerScan={() => triggerScan(agent.agent_id)}
-                          isScanTriggered={triggeredScans.has(agent.agent_id)}
-                          formatTimeSince={formatTimeSince}
-                        />
+                    <div className="lg:hidden">Last Updated: {lastUpdate.toLocaleTimeString()}</div>
+                  </div>
+                </div>
+              </div>
+  
+              <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6 border shadow-sm">
+                <div className="flex flex-col md:flex-row gap-4">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Search agents..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-10 h-14 rounded-lg border bg-muted text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                      >
+                        <X size={20} />
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-4 py-2 rounded-lg border bg-muted text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-14 md:w-auto"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="has_pending">Has Pending Tasks</option>
+                    <option value="has_completed">Has Completed Scans</option>
+                  </select>
+                </div>
+              </div>
+  
+              <div className="bg-card text-card-foreground rounded-lg border shadow-sm overflow-hidden">
+                <div className="p-4 sm:p-6 border-b">
+                  <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
+                    Crypto Inventory by Assets ({filteredAgents.length})
+                  </h3>
+                </div>
+                
+                {/* Add loading overlay for smooth refresh */}
+                <div className="relative">
+                  <AnimatePresence>
+                    {loading && !isInitialLoad && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-20 flex items-center justify-center"
+                      >
+                        <div className="bg-white dark:bg-slate-900 px-6 py-3 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 flex items-center gap-3">
+                          <Loader className="animate-spin text-blue-600" size={20} />
+                          <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                            Updating data...
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+              
+                  {isInitialLoad ? (
+                    <div className="p-6">
+                      {[...Array(5)].map((_, i) => (
+                        <div key={i} className="animate-pulse flex items-center gap-6 py-4 border-b">
+                          <div className="h-10 w-10 bg-slate-200 dark:bg-slate-700 rounded" />
+                          <div className="flex-1 space-y-2">
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
+                            <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+                          </div>
+                          <div className="h-8 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+                        </div>
                       ))}
                     </div>
-                  </>
-                )}
+                  ) : filteredAgents.length === 0 ? (
+                    <EmptyState message="No agents found" />
+                  ) : (
+                    <>
+                      {/* Desktop Table */}
+                      <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full table-fixed">
+                          <thead className="bg-muted border-b-2">
+                            <tr style={{ height: '56px' }}>
+                              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/4">
+                                Agent
+                              </th>
+                              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                                IP Address
+                              </th>
+                              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                                Operating System
+                              </th>
+                              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                                Status
+                              </th>
+                              <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700 dark:text-slate-300 w-1/6">
+                                Scans
+                              </th>
+                              <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700 dark:text-slate-300 w-32">
+                                Actions
+                              </th>
+                              <th className="px-6 py-4 text-center text-sm font-semibold text-slate-700 dark:text-slate-300 w-16">
+                                {/* Expand toggle */}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {filteredAgents.map((agent) => (
+                              <AgentRow
+                                key={agent.agent_id}
+                                agent={agent}
+                                info={agentTaskInfo.get(agent.agent_id)}
+                                expanded={expandedAgents.has(agent.agent_id)}
+                                onToggle={() => toggleAgentResults(agent.agent_id)}
+                                onTriggerScan={() => triggerScan(agent.agent_id)}
+                                isScanTriggered={triggeredScans.has(agent.agent_id)}
+                                results={agentResults.get(agent.agent_id) || []}
+                                tasks={tasks}
+                                expandedResults={expandedResults}
+                                toggleResultDetails={toggleResultDetails}
+                                loadingResults={loadingResults.has(agent.agent_id)}
+                                formatDateTime={formatDateTime}
+                                formatTimeSince={formatTimeSince}
+                                onRetryFetch={retryFetchResult}
+                                retryingResults={retryingResults}
+                                getRelativeTime={getRelativeTime}
+                                onNavigateToResults={(agent) => {
+                                  setSelectedAgent(agent);
+                                  setCurrentPage('agent-results');
+                                }}
+                              />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+              
+                      {/* Mobile Cards */}
+                      <div className="block md:hidden p-4">
+                        {filteredAgents.map((agent) => (
+                          <MobileAgentCard
+                            key={agent.agent_id}
+                            agent={agent}
+                            info={agentTaskInfo.get(agent.agent_id)}
+                            onToggle={() => toggleAgentResults(agent.agent_id)}
+                            onTriggerScan={() => triggerScan(agent.agent_id)}
+                            isScanTriggered={triggeredScans.has(agent.agent_id)}
+                            formatTimeSince={formatTimeSince}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          </motion.div>
-          ) : currentPage === 'agent-results' && selectedAgent ? (
-            <AgentResultsPage
-              agent={selectedAgent}
-              results={agentResults.get(selectedAgent.agent_id) || []}
-              onBack={() => {
-                setCurrentPage('dashboard');
-                setSelectedAgent(null);
-              }}
-              ResultCardComponent={ResultCard}
-              ExpandedResultModalComponent={ExpandedResultModal}
-            />
-          ) : null
+            </motion.div>
+            ) : currentPage === 'agent-results' && selectedAgent ? (
+              <motion.div
+                key="agent-results"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <AgentResultsPage
+                  agent={selectedAgent}
+                  results={agentResults.get(selectedAgent.agent_id) || []}
+                  onBack={() => {
+                    setCurrentPage('dashboard');
+                    setSelectedAgent(null);
+                  }}
+                />
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         )}
 
         {activeTab === 'downloads' && (
@@ -2872,8 +2881,7 @@ const AgentRow: React.FC<{
                       onViewResults={() => {
                         // This callback will be passed from parent
                         onNavigateToResults(agent);
-                      }}
-                    />
+                      }} />
                   )}
                 </div>
               </motion.div>

@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+
+"""
+Windows Crypto Agent Service
+Runs as a Windows service with administrator privileges
+Polls API for commands and sends crypto audit results
+"""
+
 import time
 import socket
 import platform
@@ -9,17 +15,22 @@ from datetime import datetime
 import logging
 import sys
 import os
+import servicemanager
+import win32event
+import win32service
+import win32serviceutil
 
-# Import the crypto audit function from your existing module
-from linux_server import crypto_information_audit
+# Import the crypto audit function
+from windows_audit import crypto_information_audit
 
-# Configuration - Read from environment variables
-API_BASE_URL = os.getenv("CRYPTO_API_BASE_URL", "http://system-scan:9000")
-POLL_INTERVAL = int(os.getenv("CRYPTO_POLL_INTERVAL", "10"))
-LOG_FILE = os.getenv("CRYPTO_LOG_FILE", "/var/log/crypto_agent.log")
-AGENT_ID_FILE = os.getenv("CRYPTO_AGENT_ID_FILE", "/var/lib/crypto_agent/agent_id")
+# Configuration
+API_BASE_URL = "http://192.168.91.128:9000"  # Change this to your API server URL
+POLL_INTERVAL = 5  # seconds
+LOG_FILE = "C:\\ProgramData\\CryptoAgent\\crypto_agent.log"
+AGENT_ID_FILE = "C:\\ProgramData\\CryptoAgent\\agent_id.txt"
 
 # Setup logging
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -28,14 +39,23 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-logger = logging.getLogger("CryptoAgent")
+logger = logging.getLogger("CryptoAgentWindows")
 
-class CryptoAgentService:
-    def __init__(self):
+
+class CryptoAgentService(win32serviceutil.ServiceFramework):
+    """Windows Service for Crypto Agent"""
+    
+    _svc_name_ = "CryptoAgentService"
+    _svc_display_name_ = "Crypto Agent Service"
+    _svc_description_ = "Monitors and audits cryptographic configurations on Windows systems"
+    
+    def __init__(self, args):
+        win32serviceutil.ServiceFramework.__init__(self, args)
+        self.stop_event = win32event.CreateEvent(None, 0, 0, None)
+        self.running = True
         self.agent_id = self.get_or_create_agent_id()
         self.hostname = socket.gethostname()
         self.ip_address = self.get_ip_address()
-        self.running = True
         self.registered = False
         
     def get_or_create_agent_id(self):
@@ -74,24 +94,25 @@ class CryptoAgentService:
         try:
             os_info = f"{platform.system()} {platform.release()}"
             
-            if platform.system() == "Linux":
-                try:
-                    with open('/etc/os-release', 'r') as f:
-                        for line in f:
-                            if line.startswith('PRETTY_NAME='):
-                                os_info = line.split('=')[1].strip().strip('"')
-                                break
-                except:
-                    pass
-            
-            kernel_version = platform.release()
+            # Get Windows version info
+            try:
+                import winreg
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
+                                    r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+                product_name = winreg.QueryValueEx(key, "ProductName")[0]
+                build = winreg.QueryValueEx(key, "CurrentBuild")[0]
+                os_info = f"{product_name} (Build {build})"
+                winreg.CloseKey(key)
+            except:
+                pass
             
             return {
                 "agent_id": self.agent_id,
                 "hostname": self.hostname,
                 "ip_address": self.ip_address,
+                "platform": self.platform,  # ✅ EXPLICIT PLATFORM
                 "os_info": os_info,
-                "kernel_version": kernel_version,
+                "kernel_version": platform.release(),
                 "timestamp": datetime.now().isoformat()
             }
         except Exception as e:
@@ -114,11 +135,14 @@ class CryptoAgentService:
                 self.registered = True
                 return True
             else:
-                logger.error(f"Registration failed: {response.status_code}")
+                logger.error(f"Registration failed: {response.status_code} - {response.text}")
                 return False
                 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logger.error(f"Registration request failed: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error during registration: {e}")
             return False
     
     def send_system_info(self):
@@ -160,18 +184,27 @@ class CryptoAgentService:
             return None
     
     def perform_crypto_audit(self):
-        """Execute cryptographic audit"""
+        """Execute cryptographic audit locally - NO LOCAL STORAGE"""
         try:
             logger.info("Starting cryptographic audit...")
-            audit_results, hostname = crypto_information_audit("root", None)
+            
+            # Run the audit - returns results directly, no file saving
+            audit_results, hostname = crypto_information_audit()
             
             if "error" in audit_results:
                 logger.error(f"Audit failed: {audit_results['error']}")
                 return None
             
             logger.info("Cryptographic audit completed successfully")
-            return audit_results
             
+            # ✅ VERIFY PLATFORM IN METADATA
+            if '_metadata' in audit_results:
+                logger.info(f"Platform in audit results: {audit_results['_metadata'].get('platform', 'NOT FOUND')}")
+            else:
+                logger.warning("No _metadata found in audit results!")
+            
+            return audit_results
+
         except Exception as e:
             logger.error(f"Error performing crypto audit: {e}")
             return None
@@ -184,42 +217,77 @@ class CryptoAgentService:
             payload = {
                 "agent_id": self.agent_id,
                 "task_id": task_id,
+                "os": "Windows",  # ✅ ADD PLATFORM TO PAYLOAD
                 "audit_results": audit_results,
                 "timestamp": datetime.now().isoformat()
             }
+            
+            logger.info(f"Sending audit results with os: {payload.get('os')}")
             
             response = requests.post(url, json=payload, timeout=30)
             
             if response.status_code == 200:
                 logger.info(f"Audit results sent successfully (Task: {task_id})")
                 return True
+            elif response.status_code == 422:
+                # Validation error - log details
+                logger.error(f"Validation error (422): {response.text}")
+                try:
+                    error_detail = response.json()
+                    logger.error(f"Validation details: {json.dumps(error_detail, indent=2)}")
+                except:
+                    pass
+                return False
             else:
-                logger.error(f"Failed to send audit results: {response.status_code}")
+                logger.error(f"Failed to send audit results: {response.status_code} - {response.text}")
                 return False
                 
         except Exception as e:
             logger.error(f"Error sending audit results: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
-    def run(self):
+    def SvcStop(self):
+        """Called when the service is being stopped"""
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        win32event.SetEvent(self.stop_event)
+        self.running = False
+        logger.info("Service stop requested")
+    
+    def SvcDoRun(self):
+        """Main service execution method"""
+        servicemanager.LogMsg(
+            servicemanager.EVENTLOG_INFORMATION_TYPE,
+            servicemanager.PYS_SERVICE_STARTED,
+            (self._svc_name_, '')
+        )
+        self.main()
+    
+    def main(self):
         """Main service loop"""
         logger.info(f"Crypto Agent Service started (Agent ID: {self.agent_id})")
-        logger.info(f"API Base URL: {API_BASE_URL}")
+        # The 'self.platform' attribute does not exist, removing this line.
+        # logger.info(f"Platform: {self.platform}")
+        logger.info(f"Hostname: {self.hostname}, IP: {self.ip_address}")
+        logger.info(f"Running with Administrator privileges: {self.is_admin()}")
         
-        # Registration
+        # Initial registration and system info
         retry_count = 0
         max_retries = 5
         
-        while not self.registered and retry_count < max_retries:
+        while not self.registered and retry_count < max_retries and self.running:
             logger.info(f"Attempting registration (attempt {retry_count + 1}/{max_retries})...")
             if self.register_agent():
+                # Send initial system info
                 self.send_system_info()
                 break
             retry_count += 1
-            time.sleep(10)
+            if self.running:
+                time.sleep(10)
         
         if not self.registered:
-            logger.error("Failed to register agent after multiple attempts. Exiting.")
+            logger.error("Failed to register agent after multiple attempts.")
             return
         
         # Main polling loop
@@ -227,39 +295,56 @@ class CryptoAgentService:
         
         while self.running:
             try:
+                # Check if service stop was requested
+                if win32event.WaitForSingleObject(self.stop_event, 0) == win32event.WAIT_OBJECT_0:
+                    break
+                
+                # Fetch action from server
                 action_data = self.fetch_action()
                 
                 if action_data and action_data.get("scan_flag"):
                     task_id = action_data.get("task_id")
                     logger.info(f"Scan requested (Task ID: {task_id})")
                     
+                    # Perform crypto audit (no local storage)
                     audit_results = self.perform_crypto_audit()
                     
                     if audit_results:
-                        self.send_audit_results(task_id, audit_results)
+                        # Send results directly to API
+                        success = self.send_audit_results(task_id, audit_results)
+                        if success:
+                            logger.info(f"Successfully completed task {task_id}")
+                        else:
+                            logger.error(f"Failed to send results for task {task_id}")
                     else:
                         logger.error("Audit failed, no results to send")
                 
+                # Sleep for polling interval
                 time.sleep(POLL_INTERVAL)
                 
-            except KeyboardInterrupt:
-                logger.info("Received shutdown signal")
-                self.running = False
-                break
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
-                time.sleep(POLL_INTERVAL)
+                import traceback
+                logger.error(traceback.format_exc())
+                if self.running:
+                    time.sleep(POLL_INTERVAL)
         
         logger.info("Crypto Agent Service stopped")
+    
+    @staticmethod
+    def is_admin():
+        """Check if running with administrator privileges"""
+        try:
+            import ctypes
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except:
+            return False
 
-def main():
-    """Entry point for the service"""
-    try:
-        service = CryptoAgentService()
-        service.run()
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        sys.exit(1)
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        servicemanager.Initialize()
+        servicemanager.PrepareToHostSingle(CryptoAgentService)
+        servicemanager.StartServiceCtrlDispatcher()
+    else:
+        win32serviceutil.HandleCommandLine(CryptoAgentService)

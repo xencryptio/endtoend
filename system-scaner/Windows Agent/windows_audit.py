@@ -576,6 +576,14 @@ def crypto_information_audit():
         else:
             print("OK")
     
+    # ✅ ADD METADATA
+    results["_metadata"] = {
+        "hostname": hostname,
+        "platform": "Windows",
+        "timestamp": datetime.now().isoformat(),
+        "audit_version": "1.0"
+    }
+    
     print()
     print("=" * 60)
     print("AUDIT COMPLETED - Results ready for API transmission")

@@ -15,7 +15,7 @@ from linux_server import crypto_information_audit
 
 # Configuration - Read from environment variables
 API_BASE_URL = os.getenv("CRYPTO_API_BASE_URL")
-POLL_INTERVAL = int(os.getenv("CRYPTO_POLL_INTERVAL", "5"))
+POLL_INTERVAL = int(os.getenv("CRYPTO_POLL_INTERVAL", "10"))
 LOG_FILE = os.getenv("CRYPTO_LOG_FILE", "/var/log/crypto_agent.log")
 AGENT_ID_FILE = os.getenv("CRYPTO_AGENT_ID_FILE", "/var/lib/crypto_agent/agent_id")
 
@@ -188,29 +188,45 @@ class CryptoAgentService:
             return None
     
     def send_audit_results(self, task_id, audit_results):
-        """Send audit results to API server"""
+        """Send audit results to API server - FIXED VERSION"""
         try:
             url = f"{API_BASE_URL}/api/v1/audit/result"
             
+            # ✅ FIX: Ensure 'os' field is present and correctly formatted at the TOP LEVEL
             payload = {
                 "agent_id": self.agent_id,
                 "task_id": task_id,
-                "os": "Linux",
+                "os": "Linux",  # ✅ MUST be "Linux" or "Windows" (capitalized)
                 "audit_results": audit_results,
                 "timestamp": datetime.now().isoformat()
             }
+            
+            # Debug logging
+            logger.info(f"Sending payload with os field: {payload.get('os')}")
+            logger.debug(f"Full payload keys: {list(payload.keys())}")
             
             response = requests.post(url, json=payload, timeout=30)
             
             if response.status_code == 200:
                 logger.info(f"Audit results sent successfully (Task: {task_id})")
                 return True
+            elif response.status_code == 422:
+                # Validation error - log details
+                logger.error(f"Validation error (422): {response.text}")
+                try:
+                    error_detail = response.json()
+                    logger.error(f"Validation details: {json.dumps(error_detail, indent=2)}")
+                except:
+                    pass
+                return False
             else:
-                logger.error(f"Failed to send audit results: {response.status_code}")
+                logger.error(f"Failed to send audit results: {response.status_code} - {response.text}")
                 return False
                 
         except Exception as e:
             logger.error(f"Error sending audit results: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def run(self):
@@ -253,7 +269,11 @@ class CryptoAgentService:
                     
                     if audit_results:
                         # Send results back to server
-                        self.send_audit_results(task_id, audit_results)
+                        success = self.send_audit_results(task_id, audit_results)
+                        if success:
+                            logger.info(f"Successfully completed task {task_id}")
+                        else:
+                            logger.error(f"Failed to send results for task {task_id}")
                     else:
                         logger.error("Audit failed, no results to send")
                 
@@ -266,17 +286,21 @@ class CryptoAgentService:
                 break
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 time.sleep(POLL_INTERVAL)
         
         logger.info("Crypto Agent Service stopped")
 
 def main():
     """Entry point for the service"""
+    import traceback
     try:
         service = CryptoAgentService()
         service.run()
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 if __name__ == "__main__":

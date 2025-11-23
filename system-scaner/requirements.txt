@@ -5,3 +5,5 @@ python-multipart
 SQLAlchemy
 psycopg2-binary
 alembic
+dataclasses
+typing-extensions

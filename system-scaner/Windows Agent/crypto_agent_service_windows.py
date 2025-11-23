@@ -214,7 +214,6 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
         try:
             url = f"{API_BASE_URL}/api/v1/audit/result"
             
-            
             payload = {
                 "agent_id": self.agent_id,
                 "task_id": task_id,
@@ -223,19 +222,30 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
                 "timestamp": datetime.now().isoformat()
             }
             
-            logger.info(f"Sending audit results with platform: {platform}")
+            logger.info(f"Sending audit results with os: {payload.get('os')}")
             
             response = requests.post(url, json=payload, timeout=30)
             
             if response.status_code == 200:
                 logger.info(f"Audit results sent successfully (Task: {task_id})")
                 return True
+            elif response.status_code == 422:
+                # Validation error - log details
+                logger.error(f"Validation error (422): {response.text}")
+                try:
+                    error_detail = response.json()
+                    logger.error(f"Validation details: {json.dumps(error_detail, indent=2)}")
+                except:
+                    pass
+                return False
             else:
-                logger.error(f"Failed to send audit results: {response.status_code}")
+                logger.error(f"Failed to send audit results: {response.status_code} - {response.text}")
                 return False
                 
         except Exception as e:
             logger.error(f"Error sending audit results: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def SvcStop(self):
@@ -257,7 +267,8 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
     def main(self):
         """Main service loop"""
         logger.info(f"Crypto Agent Service started (Agent ID: {self.agent_id})")
-        logger.info(f"Platform: {self.platform}")  # ✅ LOG PLATFORM
+        # The 'self.platform' attribute does not exist, removing this line.
+        # logger.info(f"Platform: {self.platform}")
         logger.info(f"Hostname: {self.hostname}, IP: {self.ip_address}")
         logger.info(f"Running with Administrator privileges: {self.is_admin()}")
         
@@ -300,8 +311,11 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
                     
                     if audit_results:
                         # Send results directly to API
-                        self.send_audit_results(task_id, audit_results)
-                        logger.info("Audit results sent to API - no local storage")
+                        success = self.send_audit_results(task_id, audit_results)
+                        if success:
+                            logger.info(f"Successfully completed task {task_id}")
+                        else:
+                            logger.error(f"Failed to send results for task {task_id}")
                     else:
                         logger.error("Audit failed, no results to send")
                 
@@ -310,6 +324,8 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
                 
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 if self.running:
                     time.sleep(POLL_INTERVAL)
         

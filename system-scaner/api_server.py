@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import uvicorn
@@ -15,6 +15,9 @@ from sqlalchemy import create_engine, Column, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import sessionmaker, relationship, Session, declarative_base
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+
+# Import the PQC scoring function
+from pqc_scorer import score_crypto_audit
 
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -105,6 +108,7 @@ class AuditData(BaseModel):
     agent_id: str
     task_id: str
     audit_results: Dict[str, Any]
+    os: str  # "Linux" or "Windows"
     timestamp: str
 
 # Dependency to get DB session
@@ -216,17 +220,37 @@ async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Fetch action failed: {str(e)}")
 
 @app.post("/api/v1/audit/result")
-async def receive_audit_result(audit_data: AuditData, db: Session = Depends(get_db)):
+async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
     """Receive cryptographic audit results from agent"""
     try:
+        body = await request.json()
+        logger.debug(f"Received audit result payload: {body}")
+        try:
+            audit_data = AuditData.model_validate(body)
+        except ValidationError as e:
+            logger.error(f"Validation error for audit result: {e.errors()}")
+            raise HTTPException(status_code=422, detail=e.errors())
+
         update_agent_last_seen(db, audit_data.agent_id)
         result_id = f"{audit_data.agent_id}_{audit_data.task_id}"
+
+        # ✨ NEW: Score the audit results before storing
+        logger.info(f"Scoring audit results for {audit_data.agent_id} (OS: {audit_data.os})")
+        scored_results = score_crypto_audit(
+            audit_results=audit_data.audit_results,
+            os=audit_data.os
+        )
+        if 'error' in scored_results.get('pqc_score', {}):
+            logger.warning(f"Scoring failed for agent {audit_data.agent_id}: {scored_results['pqc_score']['error']}")
+
+        overall_score = scored_results.get('pqc_score', {}).get('overall_score', 'N/A')
+        logger.info(f"Scoring completed. Overall score: {overall_score}")
         
         new_result = Result(
             result_id=result_id,
             agent_id=audit_data.agent_id,
             task_id=audit_data.task_id,
-            audit_results=json.dumps(audit_data.audit_results),
+            audit_results=json.dumps(scored_results),  # Store scored results
             received_at=datetime.now(),
             submitted_at=datetime.fromisoformat(audit_data.timestamp)
         )
