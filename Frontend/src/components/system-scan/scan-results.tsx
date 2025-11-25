@@ -271,6 +271,21 @@ export const PQCExpandedResultModal: React.FC<{
   onClose: () => void;
 }> = ({ result, onClose }) => {
   const [activeTab, setActiveTab] = useState('overview');
+  const auditData = result.audit_results || {};
+
+  // ✅ Add OS detection helper
+  const detectOS = (auditData: any): 'linux' | 'windows' | 'unknown' => {
+    const platform = auditData?._metadata?.platform?.toLowerCase();
+    if (platform === 'windows') return 'windows';
+    if (platform === 'linux') return 'linux';
+    
+    // Fallback detection for older data without metadata
+    if (auditData.without_sudo || auditData.with_sudo) return 'linux';
+    if (auditData.tls_ssl_configuration || auditData.cryptoapi_info) return 'windows';
+    return 'unknown';
+  };
+
+  const osType = detectOS(auditData);
 
   const pqcScore = result.audit_results?.pqc_score || {};
   const components = pqcScore.components || {};
@@ -279,14 +294,26 @@ export const PQCExpandedResultModal: React.FC<{
   const securityFeatures = pqcScore.security_features || {};
   const complianceStatus = pqcScore.compliance_status || {};
   const individualScores = pqcScore.individual_scores || [];
-  const auditData = result.audit_results || {};
-  const withoutSudo = auditData.without_sudo || {};
-  const systemContext = withoutSudo.system_context || {};
-  const opensslCrypto = withoutSudo.openssl_crypto || {};
-  const sshCrypto = withoutSudo.ssh_crypto || {};
-  const certificates = withoutSudo.certificates || {};
-  const hardwareCrypto = withoutSudo.hardware_crypto || {};
-  const systemSecurity = withoutSudo.system_security || {};
+
+  // ✅ Use conditional data extraction
+  let systemContext: any, opensslCrypto: any, sshCrypto: any, certificates: any, hardwareCrypto: any, systemSecurity: any, cryptoApiInfo: any, schannelInfo: any;
+
+  if (osType === 'linux') {
+    const dataRoot = auditData.with_sudo || auditData.without_sudo || {};
+    systemContext = dataRoot.system_context || {};
+    opensslCrypto = dataRoot.openssl_crypto || {};
+    sshCrypto = dataRoot.ssh_crypto || {};
+    certificates = dataRoot.certificates || {};
+    hardwareCrypto = dataRoot.hardware_crypto || {};
+    systemSecurity = dataRoot.system_security || {};
+  } else if (osType === 'windows') {
+    systemContext = auditData.system_context || {};
+    certificates = auditData.certificate_stores || {}; // Map to certificates for consistency
+    cryptoApiInfo = auditData.cryptoapi_info || {};
+    schannelInfo = auditData.tls_ssl_configuration || {};
+    // Set Linux-specific data to empty objects to prevent errors
+    opensslCrypto = {}; sshCrypto = {}; hardwareCrypto = {}; systemSecurity = {};
+  }
 
   const hasData = result && result.audit_results;
 
@@ -365,7 +392,11 @@ export const PQCExpandedResultModal: React.FC<{
         {/* Tabs */}
         <div className="flex-shrink-0 border-b border-slate-200 dark:border-slate-700 px-6">
           <div className="flex gap-4 overflow-x-auto">
-            {['overview', 'components', 'algorithms', 'compliance', 'protocols', 'certificates', 'system', 'openssl', 'ssh', 'hardware', 'security', 'raw'].map((tab) => {
+            {
+              (osType === 'windows' 
+                ? ['overview', 'components', 'algorithms', 'compliance', 'protocols', 'certificates', 'schannel', 'cryptoapi', 'system', 'raw']
+                : ['overview', 'components', 'algorithms', 'compliance', 'protocols', 'certificates', 'system', 'openssl', 'ssh', 'hardware', 'security', 'raw']
+              ).map((tab) => {
               const tabIcons: { [key: string]: React.ReactNode } = {
                 overview: <Activity size={14} />,
                 components: <Target size={14} />,
@@ -378,7 +409,9 @@ export const PQCExpandedResultModal: React.FC<{
                 ssh: <Lock size={14} />,
                 hardware: <Cpu size={14} />,
                 security: <Shield size={14} />,
-                raw: <Database size={14} />
+                raw: <Database size={14} />,
+                cryptoapi: <Cpu size={14} />,
+                schannel: <Shield size={14} />,
               };
 
               return (
@@ -837,91 +870,69 @@ export const PQCExpandedResultModal: React.FC<{
                 </div>
 
                 {/* Detailed Certificate List */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Detailed Certificate Analysis ({certificates.certificates?.length || 0} certificates)</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {certificates.certificates?.map((cert: any, i: number) => (
-                        <div key={i} className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
-                              <p className="font-mono text-sm font-semibold break-all">{cert.path}</p>
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                            <div>
-                              <p className="font-semibold">{cert.crypto_information?.key_algorithm}</p>
-                            </div>
-                            <div>
-                              <p className="font-semibold">{cert.crypto_information?.key_size} bits</p>
-                            </div>
-                            <div>
-                              <p className="font-semibold text-xs">{cert.crypto_information?.signature_algorithm}</p>
-                            </div>
-                            <div>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {cert.crypto_information?.characteristics?.map((char: string, j: number) => (
-                                  <span key={j} className={`px-2 py-0.5 rounded text-xs ${
-                                    char.includes('sha1')
-                                      ? 'bg-destructive/10 text-destructive'
-                                      : 'bg-primary/10 text-primary'
-                                  }`}>
-                                    {char.replace(/_/g, ' ')}
-                                  </span>
-                                ))}
+                {/* ✅ OS-SPECIFIC CERTIFICATE RENDERING */}
+                {osType === 'linux' && certificates.certificates?.map((cert: any, i: number) => (
+                  <div key={i} className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg">
+                    <p className="font-mono text-sm font-semibold break-all mb-3">{cert.path}</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                      <div><p className="font-semibold">{cert.crypto_information?.key_algorithm}</p></div>
+                      <div><p className="font-semibold">{cert.crypto_information?.key_size} bits</p></div>
+                      <div><p className="font-semibold text-xs">{cert.crypto_information?.signature_algorithm}</p></div>
+                      {/* ... characteristics ... */}
+                    </div>
+                  </div>
+                ))}
+
+                {osType === 'windows' && Object.entries(certificates).map(([storeName, store]: [string, any]) => (
+                  <Card key={storeName}>
+                    <CardHeader><CardTitle>{store.store_name || storeName}</CardTitle></CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        {store.certificate_count || 0} certificates
+                      </p>
+                      <div className="space-y-2">
+                        {store.certificates?.slice(0, 5).map((cert: any, i: number) => (
+                          <div key={i} className="p-3 bg-muted/50 rounded">
+                            <div className="font-mono text-xs mb-2 truncate">{cert.subject}</div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div>Algo: {cert.signature_algorithm}</div>
+                              <div>Size: {cert.public_key_size} bits</div>
                               </div>
                             </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader><CardTitle>Certificate Search Paths</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {certificates.search_paths_used?.map((path: string, i: number) => (
-                        <div key={i} className="p-2 bg-muted/50 rounded font-mono text-sm">
-                          {path}
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card>
-                    <CardHeader><CardTitle className="text-base">Signature Algorithms</CardTitle></CardHeader>
-                    <CardContent>
-                      <div className="space-y-1">
-                        {certificateAnalysis.signature_algorithms?.map((algo: string, i: number) => (
-                          <div key={i} className="px-2 py-1 bg-accent/50 text-accent-foreground rounded text-xs font-mono">
-                            {algo}
-                          </div>
                         ))}
                       </div>
                     </CardContent>
                   </Card>
+                ))}
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Signature Algorithms</CardTitle></CardHeader>
+                      <CardContent>
+                        <div className="space-y-1">
+                          {certificateAnalysis.signature_algorithms?.map((algo: string, i: number) => (
+                            <div key={i} className="px-2 py-1 bg-accent/50 text-accent-foreground rounded text-xs font-mono">
+                              {algo}
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
                   <Card>
                     <CardHeader><CardTitle className="text-base">Hash Algorithms</CardTitle></CardHeader>
                     <CardContent>
-                      <div className="space-y-1">
-                        {certificateAnalysis.hash_algorithms?.map((algo: string, i: number) => (
-                          <div key={i} className={`px-2 py-1 rounded text-xs font-mono ${
-                            algo === 'SHA1'
-                              ? 'bg-destructive/10 text-destructive'
-                              : 'bg-success/10 text-success'
-                          }`}>
-                            {algo}
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
+                        <div className="space-y-1">
+                          {certificateAnalysis.hash_algorithms?.map((algo: string, i: number) => (
+                            <div key={i} className={`px-2 py-1 rounded text-xs font-mono ${
+                              algo === 'SHA1'
+                                ? 'bg-destructive/10 text-destructive'
+                                : 'bg-success/10 text-success'
+                            }`}>
+                              {algo}
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
                   </Card>
                 </div>
               </div>
@@ -1316,6 +1327,150 @@ export const PQCExpandedResultModal: React.FC<{
                 </div>
               </div>
             )}
+            {/* WINDOWS - CRYPTOAPI TAB */}
+            {activeTab === 'cryptoapi' && osType === 'windows' && (
+              /* ✅ FIXED CRYPTOAPI TAB */
+              <div className="space-y-6">
+                {/* CryptoAPI Providers */}
+                <Card>
+                  <CardHeader><CardTitle>CryptoAPI Providers</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="mb-4">
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Total Providers: {cryptoApiInfo?.cryptographic_providers?.count || 0}
+                      </p>
+                    </div>
+                    
+                    {cryptoApiInfo?.cryptographic_providers?.providers?.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {cryptoApiInfo.cryptographic_providers.providers.map((provider: string, i: number) => (
+                          <div key={i} className="p-3 bg-primary/10 text-primary rounded-lg font-mono text-sm">
+                            {provider}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No providers found</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* FIPS Mode Status */}
+                <Card>
+                  <CardHeader><CardTitle>Security Configuration</CardTitle></CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex justify-between text-sm p-2 bg-muted/50 rounded">
+                      <span>FIPS Mode Enabled</span>
+                      <span className={cryptoApiInfo?.fips_mode_enabled ? 'text-success font-semibold' : 'text-muted-foreground'}>
+                        {cryptoApiInfo?.fips_mode_enabled ? '✓ Yes' : '✗ No'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm p-2 bg-muted/50 rounded">
+                      <span>ECC Curves Registered</span>
+                      <span className="font-semibold">{cryptoApiInfo?.ecc_curves_registered?.count || 0}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Registered OID Algorithms */}
+                {cryptoApiInfo?.registered_oid_algorithms?.algorithms && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Registered OID Algorithms ({cryptoApiInfo.registered_oid_algorithms.count})</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="max-h-64 overflow-y-auto">
+                        <div className="space-y-1">
+                          {cryptoApiInfo.registered_oid_algorithms.algorithms.map((algo: string, i: number) => (
+                            <div key={i} className="px-2 py-1 bg-muted/50 rounded text-xs font-mono">
+                              {algo}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {/* WINDOWS - SCHANNEL TAB */}
+            {activeTab === 'schannel' && osType === 'windows' && (
+              /* ✅ FIXED SCHANNEL TAB */
+              <div className="space-y-6">
+                {/* Protocol Configurations */}
+                <Card>
+                  <CardHeader><CardTitle>Schannel Protocol Configuration</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {schannelInfo?.protocol_configurations?.map((proto: any, i: number) => (
+                        <div key={i} className="p-3 bg-muted/50 rounded">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-semibold">{proto.protocol}</span>
+                            <span className="text-xs text-muted-foreground capitalize">{proto.type}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">Client: </span>
+                              <span className={proto.client_status.includes('1') ? 'text-success' : 'text-muted-foreground'}>
+                                {proto.client_status}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Server: </span>
+                              <span className={proto.server_status.includes('1') ? 'text-success' : 'text-muted-foreground'}>
+                                {proto.server_status}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Cipher Suites */}
+                {schannelInfo?.cipher_suites?.cipher_details && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Windows Cipher Suites ({schannelInfo.cipher_suites.cipher_details.length})</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {schannelInfo.cipher_suites.cipher_details.slice(0, 20).map((cipher: any, i: number) => (
+                          <div key={i} className="p-3 border border-slate-200 dark:border-slate-700 rounded">
+                            <div className="font-mono text-sm font-semibold mb-1">{cipher.name}</div>
+                            <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                              <div>KEX: {cipher.key_exchange}</div>
+                              <div>Cipher: {cipher.cipher_algorithm}</div>
+                              <div>Hash: {cipher.hash_algorithm}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Cipher Suite Order (if cipher_details failed) */}
+                {schannelInfo?.cipher_suite_order?.order && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Cipher Suite Order ({schannelInfo.cipher_suite_order.count})</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-wrap gap-2">
+                        {schannelInfo.cipher_suite_order.order.slice(0, 30).map((cipher: string, i: number) => (
+                          <span key={i} className="px-2 py-1 bg-accent/50 text-accent-foreground rounded text-xs font-mono">
+                            {cipher}
+                          </span>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
             {/* SECURITY TAB */}
             {activeTab === 'security' && (
               <div className="space-y-6">
@@ -1636,10 +1791,9 @@ export const AgentResultsPage: React.FC<{
                 onViewDetails={() => setSelectedResult(result)}
               />
             ))}
-          </div>
-        ) : (
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.3 }}
->
+          </div> // This closes the grid div
+        ) : ( // This is the "else" part of the ternary
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.3 }}>
             <Card className="
     backdrop-blur-xl 
     bg-gradient-to-br from-slate-50 to-white

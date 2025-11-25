@@ -1585,15 +1585,24 @@ def score_crypto_audit(audit_results: Dict[str, Any], os: str) -> Dict[str, Any]
     try:
         scorer = PQCScorer()
         
-        # ✅ Normalize OS parameter
+        # Normalize OS parameter
         os_normalized = os.strip().lower()
-        
-        if os_normalized in ["linux", "unix"]:
+
+        # --- FIX: More robust OS detection ---
+        # 1. Check metadata first for an explicit platform.
+        platform = audit_results.get("_metadata", {}).get("platform", "").lower()
+        if "windows" in platform:
+            return scorer.score_audit_results(audit_results, "Windows")
+        if "linux" in platform:
             return scorer.score_audit_results(audit_results, "Linux")
-        elif os_normalized in ["windows", "win"]:
+        
+        # 2. Fallback to parameter-based routing.
+        if os_normalized in ["linux", "unix", "posix"]:
+            return scorer.score_audit_results(audit_results, "Linux")
+        elif os_normalized in ["windows", "win32"]:
             return scorer.score_audit_results(audit_results, "Windows")
         else:
-            # Try to detect from audit data
+            # 3. Last resort: infer from data structure.
             if "openssl_crypto" in audit_results or "ssh_crypto" in audit_results:
                 return scorer.score_audit_results(audit_results, "Linux")
             elif "tls_ssl_configuration" in audit_results or "certificate_stores" in audit_results:

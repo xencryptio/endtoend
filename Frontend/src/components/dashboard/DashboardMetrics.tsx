@@ -30,23 +30,23 @@ export const DashboardMetrics: React.FC<DashboardMetricsProps> = ({
     <div className="space-y-6">
       {/* First Row: Progress Bars */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="bg-white dark:bg-gray-900 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-gray-700 dark:text-gray-200">PQC Readiness</CardTitle>
+            <CardTitle className="text-sm font-semibold text-muted-foreground">PQC Readiness</CardTitle>
             <TrendingUp className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent className="px-6 pb-6">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-3">{avgMigration.toFixed(1)}%</div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+            <div className="text-3xl font-bold mb-3">{avgMigration.toFixed(1)}%</div>
+            <div className="w-full bg-muted rounded-full h-3">
               <div
                 className={`h-3 rounded-full transition-all duration-300 ${
                   avgMigration < 30
-                    ? 'bg-red-800'
+                    ? 'bg-destructive'
                     : avgMigration < 50
-                    ? 'bg-red-600'
+                    ? 'bg-destructive'
                     : avgMigration < 80
-                    ? 'bg-orange-400'
-                    : 'bg-green-500'
+                    ? 'bg-warning'
+                    : 'bg-success'
 
                 }`}
                 style={{ width: `${avgMigration}%` }}
@@ -64,23 +64,23 @@ export const DashboardMetrics: React.FC<DashboardMetricsProps> = ({
           </CardContent>
         </Card>
 
-        <Card className="bg-white dark:bg-gray-900 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-gray-700 dark:text-gray-200">Migration Progress</CardTitle>
-            <Shield className="h-5 w-5 text-green-600" />
+            <CardTitle className="text-sm font-semibold text-muted-foreground">Migration Progress</CardTitle>
+            <Shield className="h-5 w-5 text-success" />
           </CardHeader>
           <CardContent className="px-6 pb-6">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-3">{Math.round(avgPQC)}%</div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+            <div className="text-3xl font-bold mb-3">{Math.round(avgPQC)}%</div>
+            <div className="w-full bg-muted rounded-full h-3">
               <div
                 className={`h-3 rounded-full transition-all duration-300 ${
                   avgPQC < 30
-                    ? 'bg-red-800'
+                    ? 'bg-destructive'
                     : avgPQC < 50
-                    ? 'bg-red-400'
+                    ? 'bg-destructive'
                     : avgPQC < 80
-                    ? 'bg-orange-400'
-                    : 'bg-green-500'
+                    ? 'bg-warning'
+                    : 'bg-success'
                 }`}
                 style={{ width: `${avgPQC}%` }}
               />
@@ -100,42 +100,42 @@ export const DashboardMetrics: React.FC<DashboardMetricsProps> = ({
 
       {/* Second Row: 5 Cards, equally spaced */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-        <Card className="bg-white dark:bg-gray-900 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-gray-700 dark:text-gray-200">Total Applications</CardTitle>
+            <CardTitle className="text-sm font-semibold text-muted-foreground">Total Applications</CardTitle>
             <Server className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent className="px-6 pb-6">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{totalApps}</div>
+            <div className="text-3xl font-bold mb-2">{totalApps}</div>
             <p className="text-sm font-medium text-muted-foreground">+2 this week</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-white dark:bg-gray-900 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-gray-700 dark:text-gray-200">Algorithms Migrated</CardTitle>
+            <CardTitle className="text-sm font-semibold text-muted-foreground">Algorithms Migrated</CardTitle>
             <TrendingUp className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent className="px-6 pb-6">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{totalAlgChanges}</div>
+            <div className="text-3xl font-bold mb-2">{totalAlgChanges}</div>
             <p className="text-sm font-medium text-muted-foreground">{avgAlgPerApp} per app</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-white dark:bg-gray-900 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-gray-700 dark:text-gray-200">Certificates Migrated</CardTitle>
+            <CardTitle className="text-sm font-semibold text-muted-foreground">Certificates Migrated</CardTitle>
             <CheckCircle className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent className="px-6 pb-6">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{totalCertChanges}</div>
+            <div className="text-3xl font-bold mb-2">{totalCertChanges}</div>
             <p className="text-sm font-medium text-muted-foreground">{avgCertPerApp} per app</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-white dark:bg-gray-900 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-gray-700 dark:text-gray-200">Vulnerabilities</CardTitle>
+            <CardTitle className="text-sm font-semibold text-muted-foreground">Vulnerabilities</CardTitle>
             <AlertTriangle className="h-5 w-5 text-destructive" />
           </CardHeader>
           <CardContent className="px-6 pb-6">
@@ -144,13 +144,13 @@ export const DashboardMetrics: React.FC<DashboardMetricsProps> = ({
           </CardContent>
         </Card>
 
-        <Card className="bg-white dark:bg-gray-900 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-base font-semibold text-gray-700 dark:text-gray-200">Secure Apps</CardTitle>
-            <CheckCircle className="h-5 w-5 text-green-600" />
+            <CardTitle className="text-base font-semibold text-muted-foreground">Secure Apps</CardTitle>
+            <CheckCircle className="h-5 w-5 text-success" />
           </CardHeader>
           <CardContent className="px-6 pb-6">
-            <div className="text-3xl font-bold text-green-600 mb-2">{secureApps}</div>
+            <div className="text-3xl font-bold text-success mb-2">{secureApps}</div>
             <p className="text-sm font-medium text-muted-foreground">{((secureApps / totalApps) * 100).toFixed(1)}% of total</p>
           </CardContent>
         </Card>
