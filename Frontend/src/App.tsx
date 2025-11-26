@@ -17,6 +17,7 @@ import Integration from "./pages/integration";
 import Scan from "./pages/SSL-TLS scans";
 import SystemScan from "./pages/PQC-Scans";
 import Readinessanalysis from "./pages/Readinessanalysis";
+import Onboarding from "./pages/onboarding";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -41,6 +42,7 @@ const AnimatedRoutes = () => {
         <Route path="/settings" element={<Settings />} />
         <Route path="/migrationAssist" element={<MigrationAssist />} />
         <Route path="/integration" element={<Integration />} />
+        <Route path="/onboarding" element={<Onboarding />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AnimatePresence>

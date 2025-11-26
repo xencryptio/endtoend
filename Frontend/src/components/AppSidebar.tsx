@@ -10,6 +10,7 @@ import {
   User,
   Computer,
   ClipboardCheck,
+  ClipboardPlus,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ const menuItems = [
   { title: "SSL/TLS scans", url: "/SSL-TLS scans", icon: ScanLine },
   { title: "PQC-Scans", url: "/PQC-Scans", icon: Computer },
   { title: "Readiness Assessment", url: "/Readinessanalysis", icon: ClipboardCheck },
+  { title: "Onboarding", url: "/onboarding", icon: ClipboardPlus },
   { title: "Migration Assist", url: "/migrationAssist", icon: ArrowRightLeft },
   { title: "Integration", url: "/integration", icon: Link2 },
   { title: "Settings", url: "/settings", icon: Settings },

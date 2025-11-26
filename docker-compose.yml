@@ -83,6 +83,12 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # ---------------------------------------------------------------------------
   # DATABASE SERVICE
@@ -136,6 +142,39 @@ services:
       db-service:
         condition: service_healthy
 
+  # ===========================================================================
+  # ONBOARDING / BATCH SCANNER SERVICE (FIXED)
+  # ===========================================================================
+  onboarding:
+    build:
+      context: ./onboarding
+      dockerfile: Dockerfile
+    container_name: onboarding
+    ports:
+      - "8008:8008"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TLS_SCANNER_URL=http://crypto-scanner:8000
+      - REPO_SCANNER_URL=http://repo-scanner:8001  # ✅ Correct internal port
+      - MAX_CONCURRENT_SCANS=5
+      - GITHUB_API_TIMEOUT=30.0
+    volumes:
+      - ./onboarding/app:/app/app
+    restart: unless-stopped
+    networks:
+      - xencrypt-network
+    depends_on:
+      crypto-scanner:
+        condition: service_healthy  # ✅ Wait for healthy
+      repo-scanner:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   # ======================
   # ADMINER (DB WEB UI)
   # ======================
@@ -173,7 +212,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # LINUX AGENT #1 - MODERN CONFIGURATION
+  # LINUX AGENT #1 - MODERN
   # ---------------------------------------------------------------------------
   linux-agent-modern:
     build:
@@ -201,7 +240,7 @@ services:
       - agent-modern-data:/var/lib/crypto_agent
 
   # ---------------------------------------------------------------------------
-  # LINUX AGENT #2 - LEGACY CONFIGURATION
+  # LINUX AGENT #2 - LEGACY
   # ---------------------------------------------------------------------------
   linux-agent-legacy:
     build:
@@ -229,7 +268,7 @@ services:
       - agent-legacy-data:/var/lib/crypto_agent
 
   # ---------------------------------------------------------------------------
-  # LINUX AGENT #3 - MIXED CONFIGURATION
+  # LINUX AGENT #3 - MIXED
   # ---------------------------------------------------------------------------
   linux-agent-mixed:
     build:
@@ -265,7 +304,7 @@ networks:
     name: xencrypt-network
 
 # =============================================================================
-# VOLUMES (Persistent storage)
+# VOLUMES
 # =============================================================================
 volumes:
   postgres-data:
@@ -278,30 +317,3 @@ volumes:
     driver: local
   agent-mixed-data:
     driver: local
-
-# =============================================================================
-# USAGE INSTRUCTIONS
-# =============================================================================
-# 
-# Clean start (removes all data):
-#   docker-compose down -v
-#   docker-compose up -d --build
-#
-# View logs:
-#   docker-compose logs -f
-#   docker-compose logs postgres
-#   docker-compose logs system-scan
-#   docker-compose logs crypto-scanner
-#
-# Stop everything:
-#   docker-compose down
-#
-# Access Points:
-#   Dashboard: http://localhost:9000
-#   Frontend: http://localhost:3000
-#   Crypto Scanner: http://localhost:8000
-#   DB Service: http://localhost:8001
-#   Repo Scanner: http://localhost:8003
-#   Adminer: http://localhost:8080
-#
-# =============================================================================
