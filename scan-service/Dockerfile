@@ -40,7 +40,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # STAGE 4: Copy application code (FIXED - Copy ALL Python files)
 # ============================================================================
 COPY crypto_audit.py .
-COPY tls.py .
 COPY db_handler.py .
 
 # ============================================================================

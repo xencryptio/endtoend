@@ -5,6 +5,7 @@ import sys
 import asyncio
 import base64
 import requests
+import subprocess
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -15,55 +16,106 @@ from fastapi import FastAPI, HTTPException, Query, Path
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, validator
 from fastapi.middleware.cors import CORSMiddleware
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+
+from pqc_analyzer import pqc_analyzer
+
+import requests
+import os
+
+# --- Remote Scoring Configuration ---
+SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
+
+def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:
+    """Transform SSL Labs data to standard scoring format"""
+    algorithms = []
+    
+    # TLS 1.2 ciphers
+    tls12_suites = scan_data.get("tls_configuration", {}).get("tls_1.2_cipher_suites", {}).get("suites", [])
+    for idx, suite in enumerate(tls12_suites):
+        if suite.get("key_exchange"):
+            algorithms.append({
+                "name": suite["key_exchange"],
+                "algorithm_type": "kex",
+                "curve": suite.get("curve"),
+                "curve_bits": suite.get("curve_bits"),
+                "position": idx,
+                "context": {"protocol": "TLS 1.2", "cipher_suite": suite["name"]}
+            })
+        
+        if suite.get("encryption"):
+            key_size = 256 if "256" in suite["encryption"] else 128
+            algorithms.append({
+                "name": suite["encryption"],
+                "algorithm_type": "symmetric",
+                "key_size": key_size,
+                "position": idx,
+                "context": {"protocol": "TLS 1.2"}
+            })
+
+    # TLS 1.3 ciphers
+    tls13_suites = scan_data.get("tls_configuration", {}).get("tls_1.3_cipher_suites", {}).get("suites", [])
+    for idx, suite in enumerate(tls13_suites):
+        if suite.get("key_exchange"):
+            algorithms.append({
+                "name": suite["key_exchange"],
+                "algorithm_type": "kex",
+                "curve": suite.get("key_exchange"),
+                "curve_bits": suite.get("curve_bits"),
+                "position": idx,
+                "context": {"protocol": "TLS 1.3", "cipher_suite": suite["name"]}
+            })
+        
+        if suite.get("encryption"):
+            key_size = 256 if "256" in suite["encryption"] else 128
+            algorithms.append({
+                "name": suite["encryption"],
+                "algorithm_type": "symmetric",
+                "key_size": key_size,
+                "position": idx,
+                "context": {"protocol": "TLS 1.3"}
+            })
+
+    # Certificate signatures
+    cert_sigs = scan_data.get("signature_algorithms", {}).get("certificate_signatures", [])
+    for cert in cert_sigs:
+        algorithms.append({
+            "name": cert.get("signature_algorithm", "RSA"),
+            "algorithm_type": "signature",
+            "key_size": cert.get("public_key_size"),
+            "position": cert.get("position", 0),
+            "context": {"source": "certificate"}
+        })
+
+    return algorithms
+
+async def score_tls_scan_remote(transformed_result: Dict) -> Dict:
+    """Call universal scoring service for TLS scan"""
+    algorithms = extract_algorithms_from_tls_scan(transformed_result)
+    
+    try:
+        response = requests.post(
+            f"{SCORING_SERVICE_URL}/api/v1/score/tls-scan",
+            json={
+                "scoring_type": "tls",
+                "algorithms": algorithms,
+                "metadata": {
+                    "source": "ssl_labs",
+                    "domain": transformed_result.get("domain"),
+                    "protocols": transformed_result.get("tls_configuration", {}).get("supported_protocols", [])
+                }
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Scoring failed: {e}")
+        return {"error": str(e)}
 
 # External/Mock Dependencies (replace with your actual imports if necessary)
 # NOTE: Assuming 'tls' and 'db_handler' are available or mocked for execution.
-try:
-    from tls import PQCAnalyzer
-except ImportError:
-    class MockPQCAnalyzer:
-        def score_individual_algorithm(self, *args, **kwargs):
-            class Score:
-                def __init__(self):
-                    self.final_score = 0
-                    self.grade = "F"
-                    self.is_pqc = False
-                    self.is_hybrid = False
-                    self.quantum_safe = False
-                
-                @property
-                def final_score(self):
-                    return self._final_score
-
-                @final_score.setter
-                def final_score(self, value):
-                    self._final_score = value
-
-            return Score()
-
-        def analyze_tls_configuration(self, data):
-            class Report:
-                def __init__(self):
-                    self.overall_score = 0
-                    self.overall_grade = "F"
-                    self.security_level = "Low"
-                    self.quantum_ready = False
-                    self.hybrid_ready = False
-                    self.components = {}
-            return Report()
-
-        def score_to_grade(self, score):
-            return "F"
-        
-        def parse_signature_algorithm(self, algo):
-            return "RSA"
-        
-        def parse_hash_algorithm(self, algo):
-            return "SHA256"
-
-    PQCAnalyzer = MockPQCAnalyzer
-    print("WARNING: Using MockPQCAnalyzer. Ensure 'tls' module is installed for full functionality.")
-
 try:
     from db_handler import DatabaseHandler
 except ImportError:
@@ -86,19 +138,6 @@ except ImportError:
 
     DatabaseHandler = MockDatabaseHandler
     print("WARNING: Using MockDatabaseHandler. Ensure 'db_handler' module is installed for database functionality.")
-
-
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-import subprocess
-
-if sys.version_info >= (3, 8):
-    from typing import overload, TypeVar
-else:
-    from typing_extensions import overload, TypeVar
-
-# Initialize PQC Analyzer (reusable instance)
-pqc_analyzer = PQCAnalyzer()
 # Initialize database handler (add after pqc_analyzer initialization)
 db_handler = DatabaseHandler()
 
@@ -289,33 +328,6 @@ def transform_tls12_cipher_suite(suite: Dict[str, Any], position: int = 0) -> Di
         result["curve"] = suite["namedGroupName"]
         result["curve_bits"] = suite.get("namedGroupBits", 0)
     
-    # Score this algorithm for PQC
-    kex_algo = result.get("key_exchange", "")
-    if kex_algo:
-        kex_score = pqc_analyzer.score_individual_algorithm(
-            kex_algo, "kex", 
-            curve_bits=result.get("curve_bits"),
-            curve=result.get("curve"),
-            position=position
-        )
-        result["kex_pqc_score"] = kex_score.final_score
-        result["kex_pqc_grade"] = kex_score.grade
-        result["kex_is_pqc"] = kex_score.is_pqc
-        result["kex_is_hybrid"] = kex_score.is_hybrid
-        result["kex_quantum_safe"] = kex_score.quantum_safe
-    
-    # Score encryption algorithm
-    encryption = result.get("encryption", "")
-    if encryption:
-        key_size = 256 if "256" in encryption else (192 if "192" in encryption else 128)
-        enc_score = pqc_analyzer.score_individual_algorithm(
-            encryption, "symmetric", 
-            key_size=key_size,
-            position=position
-        )
-        result["encryption_pqc_score"] = enc_score.final_score
-        result["encryption_pqc_grade"] = enc_score.grade
-    
     return result
 
 def transform_tls13_cipher_suite(suite: Dict[str, Any], position: int = 0) -> Dict[str, Any]:
@@ -326,59 +338,17 @@ def transform_tls13_cipher_suite(suite: Dict[str, Any], position: int = 0) -> Di
         "key_exchange": suite.get("namedGroupName", ""),
         "curve_bits": suite.get("namedGroupBits", 0)
     }
-    # Score KEX
-    kex = result.get("key_exchange", "")
-    if kex:
-        kex_score = pqc_analyzer.score_individual_algorithm(
-            kex, "kex",
-            curve_bits=result.get("curve_bits"),
-            curve=kex,
-            position=position
-        )
-        result["kex_pqc_score"] = kex_score.final_score
-        result["kex_pqc_grade"] = kex_score.grade
-        result["kex_is_pqc"] = kex_score.is_pqc
-        result["kex_is_hybrid"] = kex_score.is_hybrid
-        result["kex_quantum_safe"] = kex_score.quantum_safe
-    
-    # Score encryption
-    encryption = result.get("encryption", "")
-    if encryption:
-        key_size = 256 if "256" in encryption else (192 if "192" in encryption else 128)
-        enc_score = pqc_analyzer.score_individual_algorithm(
-            encryption, "symmetric",
-            key_size=key_size,
-            position=position
-        )
-        result["encryption_pqc_score"] = enc_score.final_score
-        result["encryption_pqc_grade"] = enc_score.grade
-    
     return result
 
 def transform_named_group(group: Dict[str, Any], position: int = 0) -> Dict[str, Any]:
-    """Transform named group/curve to desired format with PQC scoring."""
+    """Transform named group/curve to desired format."""
     curve_name = group.get("name", "")
     curve_bits = group.get("bits", 0)
-    
-    # ✅ ADD: Score the curve as a key exchange algorithm
-    curve_score = pqc_analyzer.score_individual_algorithm(
-        curve_name,
-        "kex",
-        curve=curve_name,
-        curve_bits=curve_bits,
-        position=position
-    )
     
     return {
         "name": curve_name,
         "type": group.get("namedGroupType", ""),
         "bits": curve_bits,
-        # ✅ ADD: PQC fields
-        "curve_pqc_score": curve_score.final_score,
-        "curve_pqc_grade": curve_score.grade,
-        "curve_is_pqc": curve_score.is_pqc,
-        "curve_is_hybrid": curve_score.is_hybrid,
-        "curve_quantum_safe": curve_score.quantum_safe,
     }
 
 def identify_certificate_role(cert: Dict[str, Any], index: int, total: int) -> str:
@@ -395,17 +365,6 @@ def identify_certificate_role(cert: Dict[str, Any], index: int, total: int) -> s
 
 def transform_certificate(cert: Dict[str, Any], role: str, position: int = 0) -> Dict[str, Any]:
     """Transform certificate to desired format based on role."""
-    key_alg = cert.get("keyAlg", "")
-    key_size = cert.get("keySize", 0)
-
-    # ✅ ADD: Score the public key algorithm
-    key_score = pqc_analyzer.score_individual_algorithm(
-        pqc_analyzer.parse_signature_algorithm(key_alg) if key_alg else "RSA",
-        "signature",
-        key_size=key_size,
-        position=position
-    )
-
     if role == "leaf":
         cn = cert.get("commonNames", [""])[0] if cert.get("commonNames") else ""
         sig_alg = cert.get("sigAlg", "")
@@ -416,24 +375,12 @@ def transform_certificate(cert: Dict[str, Any], role: str, position: int = 0) ->
             "certificate": f"{cn}_{sig_alg.replace('with', '_').replace('RSA', 'RSA')}_{key_size}",
             "subject_alternative_names": cert.get("altNames", []),
             "certificate_transparency": cert.get("sct", False),
-            # ✅ ADD: PQC fields
-            "cert_pqc_score": key_score.final_score,
-            "cert_pqc_grade": key_score.grade,
-            "cert_is_pqc": key_score.is_pqc,
-            "cert_is_hybrid": key_score.is_hybrid,
-            "cert_quantum_safe": key_score.quantum_safe,
         }
     else:
         # For intermediate and root certificates
         return {
             "public_key_algorithm": cert.get("keyAlg", ""),
             "public_key_size": cert.get("keySize", 0),
-            # ✅ ADD: PQC fields
-            "cert_pqc_score": key_score.final_score,
-            "cert_pqc_grade": key_score.grade,
-            "cert_is_pqc": key_score.is_pqc,
-            "cert_is_hybrid": key_score.is_hybrid,
-            "cert_quantum_safe": key_score.quantum_safe,
         }
 
 def safe_get_endpoint(result_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1126,7 +1073,7 @@ def detect_protocol(url_or_domain: str) -> str:
 
     return "unreachable"
 
-def process_single_domain(domain: str, use_cache: bool = True, attempt: int = 1, timeout: int = 300) -> Dict[str, Any]:
+async def process_single_domain(domain: str, use_cache: bool = True, attempt: int = 1, timeout: int = 300) -> Dict[str, Any]:
     """Process a single domain scan, with HTTP/HTTPS logic."""
     
     # 1. Protocol Detection
@@ -1177,27 +1124,15 @@ def process_single_domain(domain: str, use_cache: bool = True, attempt: int = 1,
         
         raw_result = run_ssllabs_cli(domain, use_cache=use_cache, timeout=timeout)
         transformed_result = transform_scan_result(raw_result)
-        data_for_analysis = {
-            "url": transformed_result.get("domain", ""),
-            "requested_at": datetime.now().isoformat(),
-            "raw_response": transformed_result
-        }
-        pqc_report = pqc_analyzer.analyze_tls_configuration(data_for_analysis)
+        
+        # Score via remote service
+        scoring_results = await score_tls_scan_remote(transformed_result)
+        
+        # Merge results (keep same JSON structure)
         transformed_result["pqc_analysis"] = {
-            "overall_score": pqc_report.overall_score,
-            "overall_grade": pqc_report.overall_grade,
-            "security_level": pqc_report.security_level,
-            "quantum_ready": pqc_report.quantum_ready,
-            "hybrid_ready": pqc_report.hybrid_ready,
-            "components": {
-                comp_name: {
-                    "weighted_average": comp.weighted_average,
-                    "grade": comp.grade,
-                    "pqc_percentage": comp.pqc_percentage,
-                    "quantum_safe_count": comp.quantum_safe_count
-                }
-                for comp_name, comp in pqc_report.components.items()
-            }
+            "overall_score": scoring_results.get("overall_score"),
+            "overall_grade": scoring_results.get("overall_grade"),
+            # ... map other fields
         }
         
         transformed_result = remove_duplicates_from_structure(transformed_result)

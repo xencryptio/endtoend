@@ -14,6 +14,7 @@ import hashlib
 import threading
 import shutil
 import time
+import asyncio
 from datetime import datetime
 import requests
 from pathlib import Path
@@ -129,9 +130,54 @@ def get_db():
         db.close()
 
 
-# --- PQC Scoring Integration ---
-from score import PQCAnalyzer, AlgorithmScore
-from dataclasses import asdict
+# --- Remote Scoring Configuration ---
+SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
+
+def map_category_to_type(category: str) -> str:
+    """Map scanner category to scoring algorithm_type"""
+    mapping = {
+        "Symmetric Encryption": "symmetric",
+        "Authenticated Encryption": "symmetric",
+        "Hash Function": "hash",
+        "Digital Signature": "signature",
+        "Key Exchange": "kex",
+        "Asymmetric Encryption": "kex",
+        "PQC Key Encapsulation": "kex",
+        "PQC Digital Signature": "signature",
+    }
+    return mapping.get(category, "symmetric")
+
+async def score_repository_remote(algorithms_dict: Dict) -> Dict:
+    """Call universal scoring service for repository scan"""
+    algorithms = []
+    for algo_name, algo_data in algorithms_dict.items():
+        algorithms.append({
+            "name": algo_name,
+            "algorithm_type": map_category_to_type(algo_data["category"]),
+            "key_size": algo_data.get("key_size"),
+            "position": 0,  # Repos don't have position priority
+            "context": {
+                "occurrences": algo_data["occurrences"],
+                "files_affected": len(algo_data["files"]),
+                "category": algo_data["category"]
+            }
+        })
+    
+    try:
+        response = requests.post(
+            f"{SCORING_SERVICE_URL}/api/v1/score/repository",
+            json={
+                "scoring_type": "repository",
+                "algorithms": algorithms,
+                "metadata": {"source": "repo_scanner"}
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Scoring failed: {e}")
+        return {"error": str(e)}
 
 # Complete cryptographic patterns from original script
 CRYPTO_PATTERNS = {
@@ -1063,7 +1109,7 @@ class CryptoScanner:
         }
 
 
-def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
+async def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
     """Process a single scan job"""
     temp_dir = None
     
@@ -1097,7 +1143,6 @@ def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
                     scanner.findings[algo].extend(occurrences)
                 
                 scanned_count += 1
-                # Update progress every 10 files to reduce DB writes
                 if scanned_count % 10 == 0 or scanned_count == total_files:
                     db_manager.update_scan_progress(
                         db,
@@ -1108,78 +1153,28 @@ def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
                     )
                 scanner.file_count = scanned_count
                 
-            # Save results
+            # Get results and score them remotely
             results = scanner.get_results()
-            pqc_analyzer = PQCAnalyzer()
+            
+            scoring_response = await score_repository_remote(results['algorithms'])
+            
+            if 'error' in scoring_response:
+                raise Exception(f"Scoring service failed: {scoring_response['error']}")
 
-            # ✅ NEW: Score each algorithm with correct quantum safety determination
+            # Merge scored data back
             scored_results = {}
-            for algo_name, algo_data in results['algorithms'].items():
-                # Get algorithm pattern info
-                pattern_info = CRYPTO_PATTERNS.get(algo_name, {})
-                
-                # Score the algorithm
-                score = pqc_analyzer.score_repository_algorithm(
-                    algorithm=algo_name,
-                    category=algo_data['category'],
-                    key_size=algo_data.get('key_size')
-                )
-                
-                # ✅ NEW: Use corrected quantum safety determination
-                is_quantum_safe, safety_reason = pqc_analyzer.determine_quantum_safety(
-                    algorithm=algo_name,
-                    algo_type=score.algorithm_type,
-                    key_size=algo_data.get('key_size'),
-                    final_score=score.final_score,
-                    pattern_info=pattern_info
-                )
-                
-                # Get classification from pattern
-                resistance_type = pattern_info.get('quantum_resistance_type', 'vulnerable')
-                is_true_pqc = pattern_info.get('is_pqc', False)
-                
-                scored_results[algo_name] = {
-                    **algo_data,
-                    **asdict(score),
-                    'quantum_safe': is_quantum_safe,  # ✅ Correctly calculated
-                    'quantum_safety_reason': safety_reason,  # NEW: Explanation
-                    'quantum_resistance_type': resistance_type,  # NEW: Classification
-                    'is_pqc': is_true_pqc,  # TRUE only for actual PQC algorithms
-                }
+            for algo_score in scoring_response.get("algorithm_scores", []):
+                algo_name = algo_score["algorithm"]
+                if algo_name in results['algorithms']:
+                    original_data = results['algorithms'][algo_name]
+                    scored_results[algo_name] = {**original_data, **algo_score}
 
             results['algorithms'] = scored_results
-            
-            # ✅ CORRECTED: Count by ACTUAL quantum safety (not type classification)
-            results['quantum_safe_count'] = sum(
-                1 for r in scored_results.values() 
-                if r.get('quantum_safe') == True
-            )
-            
-            results['quantum_vulnerable_count'] = sum(
-                1 for r in scored_results.values() 
-                if r.get('quantum_safe') == False
-            )
-            
-            results['true_pqc_count'] = sum(
-                1 for r in scored_results.values() 
-                if r.get('is_pqc') == True
-            )
-            
-            # ✅ VERIFICATION: Ensure counts add up correctly
-            total_counted = results['quantum_safe_count'] + results['quantum_vulnerable_count']
-            if total_counted != results['total_algorithms']:
-                logger.warning(
-                    f"⚠️ Count mismatch: {results['quantum_safe_count']} safe + "
-                    f"{results['quantum_vulnerable_count']} vulnerable = {total_counted}, "
-                    f"but total_algorithms = {results['total_algorithms']}"
-                )
-
-            scoring_results = calculate_repo_overall_score(scored_results)
-
-            results['overall_score'] = scoring_results['overall_score']
-            results['overall_grade'] = scoring_results['overall_grade']
-            results['category_scores'] = scoring_results['category_scores']
+            results['overall_score'] = scoring_response.get('overall_score')
+            results['overall_grade'] = scoring_response.get('overall_grade')
+            results['category_scores'] = scoring_response.get('components')
             results['total_files'] = scanned_count
+            
             db_manager.save_scan_results(db, repo_id, results)
             
             logger.info(f"✓ Scan completed for repo ID {repo_id}: {repo_url}")
@@ -1200,23 +1195,8 @@ def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
             logger.error(f"✗ Scan failed for ID {repo_id}: {e}", exc_info=True)
             db_manager.mark_scan_failed(db, repo_id, str(e))
         finally:
-            # Enhanced cleanup with retry logic
             if temp_dir:
-                MAX_RETRIES = 5
-                DELAY_SECONDS = 0.5
-                for attempt in range(MAX_RETRIES):
-                    try:
-                        shutil.rmtree(temp_dir)
-                        break
-                    except PermissionError:
-                        if attempt < MAX_RETRIES - 1:
-                            time.sleep(DELAY_SECONDS)
-                            DELAY_SECONDS *= 2
-                        else:
-                            logger.warning(f"⚠ Failed to clean up temp dir {temp_dir} after {MAX_RETRIES} attempts")
-                    except Exception as e:
-                        logger.warning(f"⚠ Failed to clean up temp dir {temp_dir}: {e}")
-                        break
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # ===========================================
@@ -1231,7 +1211,7 @@ lock = threading.Lock()
 def process_scan_wrapper(repo_id: int, repo_url: str, branch_name: str):
     """Wrapper to ensure cleanup of active_scans set even on error."""
     try:
-        process_scan_job(repo_id, repo_url, branch_name)
+        asyncio.run(process_scan_job(repo_id, repo_url, branch_name))
     finally:
         with lock:
             active_scans.discard(repo_id)

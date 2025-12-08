@@ -20,7 +20,11 @@ COPY wait-for-db.sh /usr/local/bin/wait-for-db.sh
 RUN chmod +x /usr/local/bin/wait-for-db.sh
 
 # --- Copy all application code and folders ---
-COPY . .
+COPY api_server.py .
+COPY alembic.ini .
+COPY wait-for-db.sh .
+COPY alembic ./alembic
+COPY agents ./agents
 
 # --- FIX: Update hardcoded API URLs (skip dashboard.html) ---
 # Removes old URL only from Linux Agent/crypto-agent.service

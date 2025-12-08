@@ -11,7 +11,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all source files
-COPY . .
+COPY app.py .
+COPY alembic.ini .
+COPY alembic ./alembic
 
 # ✅ CHANGE PORT FROM 5000 TO 8001
 EXPOSE 8001

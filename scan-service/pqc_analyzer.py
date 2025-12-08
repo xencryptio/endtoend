@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+# pqc_scorer.py
 """
-Post-Quantum Cryptography Security Analyzer
-Complete implementation with all algorithms and full CLI
+PQC Scoring and Analysis Module for System Crypto Audits.
+This file combines the core analyzer and the agent data adapter into a single module.
 """
 
 import json
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from datetime import datetime
@@ -286,8 +286,12 @@ class PQCAnalyzer:
         }
         
         self.WEIGHTS = {
-            "kex": 0.35, "signature": 0.30, "symmetric": 0.15,
-            "certificate": 0.10, "protocol": 0.10,
+            "kex": 0.30,
+            "signature": 0.25,
+            "symmetric": 0.20,
+            "certificate": 0.10,
+            "protocol": 0.10,
+            "hash": 0.05,
         }
         
         self.PQC_ALGORITHMS = {
@@ -299,20 +303,51 @@ class PQCAnalyzer:
         }
         
         self.DEPRECATED_ALGORITHMS = {
-            # Broken hashes
-            "MD5", "MD4", "MD2",
-            "SHA1", "SHA-1",
-            # Weak/broken symmetric
-            "DES", "3DES", "RC4", "RC2", "IDEA",
-            # Deprecated protocols
-            "SSL 2.0", "SSL 3.0", "TLS 1.0", "TLS 1.1",
-            # Deprecated signatures
-            "DSA", "DSS", "DSA-1024",
-            # Insecure key exchange
-            "ANON-DH",
-            # Broken PQC candidates
-            "RAINBOW", "SIKE",
+            "MD5", "MD4", "MD2", "SHA1", "SHA-1", "DES", "3DES", "RC4", "RC2",
+            "SSL 2.0", "SSL 3.0", "TLS 1.0", "TLS 1.1", "DSA", "DSS",
+            "ANON-DH", "IDEA", "RAINBOW", "SIKE", "DSA-1024",
         }
+
+    def _map_ssh_cipher_internal(self, ssh_cipher: str) -> str:
+        """Map SSH cipher names to standard names for scoring"""
+        mapping = {
+            "aes256-gcm@openssh.com": "AES-256-GCM",
+            "chacha20-poly1305@openssh.com": "ChaCha20-Poly1305",
+            "aes256-ctr": "AES-256",
+            "aes128-gcm@openssh.com": "AES-128-GCM",
+            "aes128-ctr": "AES-128",
+            "3des-cbc": "3DES",
+            "aes256-cbc": "AES-256",
+            "aes128-cbc": "AES-128",
+        }
+        return mapping.get(ssh_cipher, ssh_cipher.upper())
+
+    def _map_ssh_kex_internal(self, ssh_kex: str) -> str:
+        """Map SSH KEX names to standard names for scoring"""
+        mapping = {
+            "curve25519-sha256": "X25519",
+            "curve25519-sha256@libssh.org": "X25519",
+            "diffie-hellman-group16-sha512": "ffdhe4096",
+            "diffie-hellman-group14-sha256": "ffdhe2048",
+            "diffie-hellman-group14-sha1": "DHE",
+            "diffie-hellman-group1-sha1": "DH",
+            "ecdh-sha2-nistp256": "secp256r1",
+            "ecdh-sha2-nistp384": "secp384r1",
+            "ecdh-sha2-nistp521": "secp521r1",
+        }
+        return mapping.get(ssh_kex, ssh_kex.upper())
+
+    def _map_ssh_mac_internal(self, ssh_mac: str) -> str:
+        """Map SSH MAC names to hash algorithm names"""
+        mapping = {
+            "hmac-sha2-512-etm@openssh.com": "SHA512",
+            "hmac-sha2-256-etm@openssh.com": "SHA256",
+            "hmac-sha2-512": "SHA512",
+            "hmac-sha2-256": "SHA256",
+            "hmac-sha1": "SHA1",
+            "hmac-md5": "MD5",
+        }
+        return mapping.get(ssh_mac, "SHA256")
 
     def score_to_grade(self, score: float) -> str:
         if score >= 95: return "A+"
@@ -365,9 +400,9 @@ class PQCAnalyzer:
             elif key_size >= 521: return 15.0
         
         if "AES" in algo_upper:
-            if key_size == 128: return -20.0  # ❌ Insufficient for quantum
-            elif key_size == 192: return 5.0   # ⚠️ Marginal
-            elif key_size == 256: return 20.0  # ✅ Quantum-safe
+            if key_size == 128: return 0.0
+            elif key_size == 192: return 10.0
+            elif key_size == 256: return 20.0
         
         if "CHACHA" in algo_upper:
             if key_size == 256: return 15.0
@@ -566,116 +601,6 @@ class PQCAnalyzer:
         
         return "SHA256"
 
-    def map_scanner_category(self, category: str) -> str:
-        """Map repository scanner categories to scoring algorithm types."""
-        mapping = {
-            'Symmetric Encryption': 'symmetric',
-            'Authenticated Encryption': 'symmetric',
-            'Stream Cipher': 'symmetric',
-            'Cipher Mode': 'symmetric',
-            'Symmetric Encryption (Weak)': 'symmetric',
-            'Symmetric Encryption (Broken)': 'symmetric',
-            'Stream Cipher (Broken)': 'symmetric',
-            'Cipher Mode (AEAD)': 'symmetric',
-            'Cipher Mode (Insecure)': 'symmetric',
-            'Hash Function': 'hash',
-            'Hash Function (Broken)': 'hash',
-            'Hash Function (Weak)': 'hash',
-            'Message Authentication Code': 'hash',
-            'Key Derivation Function': 'hash',
-            'Password Hashing': 'hash',
-            'Digital Signature': 'signature',
-            'Key Exchange': 'kex',
-            'Asymmetric Encryption': 'kex',
-            'Elliptic Curve': 'kex',
-            'Elliptic Curve (Bitcoin)': 'kex',
-            'PQC Key Encapsulation': 'kex',
-            'PQC Digital Signature': 'signature',
-            'PQC Encryption': 'kex',
-            'PQC Digital Signature (Broken)': 'signature'
-        }
-        return mapping.get(category, 'symmetric')
-
-    def score_repository_algorithm(
-        self, algorithm: str, category: str, key_size: Optional[int] = None
-    ) -> AlgorithmScore:
-        """Scores an algorithm found during repository scanning."""
-        algo_type = self.map_scanner_category(category)
-        
-        return self.score_individual_algorithm(
-            algorithm=algorithm, algo_type=algo_type, key_size=key_size, position=0
-        )
-
-    def determine_quantum_safety(
-        self, 
-        algorithm: str, 
-        algo_type: str, 
-        key_size: Optional[int], 
-        final_score: float,
-        pattern_info: Dict
-    ) -> Tuple[bool, str]:
-        """
-        Determine if algorithm is quantum-safe based on:
-        1. Algorithm family (PQC vs classical)
-        2. Key/output size requirements
-        3. Security score
-        
-        Returns: (is_quantum_safe, reason)
-        """
-        algo_upper = algorithm.upper()
-        resistance_type = pattern_info.get('quantum_resistance_type', 'vulnerable')
-        min_safe_size = pattern_info.get('min_quantum_safe_keysize')
-        
-        # TRUE PQC algorithms (fully resistant)
-        if resistance_type == 'fully_resistant':
-            if final_score >= 85:
-                return True, "Post-quantum algorithm with strong security parameters"
-            return False, f"Post-quantum algorithm with weak parameters (score: {final_score})"
-        
-        # Deprecated/broken algorithms
-        if resistance_type == 'deprecated':
-            return False, "Cryptographically broken or deprecated algorithm"
-        
-        # Modes and constructions (not standalone algorithms)
-        if resistance_type in ['mode', 'construction']:
-            return False, "Not a standalone cryptographic algorithm (mode/construction only)"
-        
-        # Vulnerable to quantum attacks (all classical asymmetric)
-        if resistance_type == 'vulnerable':
-            return False, "Vulnerable to Shor's algorithm (quantum computers can break this)"
-        
-        # Grover-resistant algorithms (symmetric/hash)
-        if resistance_type == 'grover_resistant':
-            if not min_safe_size:
-                return False, "No minimum quantum-safe size defined"
-            
-            # For symmetric algorithms, check key size
-            if algo_type == 'symmetric':
-                if not key_size:
-                    return False, "Key size unknown - cannot verify quantum safety"
-                
-                if key_size >= min_safe_size:
-                    return True, f"Symmetric cipher with {key_size}-bit key (Grover-resistant, ≥{min_safe_size} required)"
-                return False, f"Symmetric cipher with {key_size}-bit key (insufficient, need ≥{min_safe_size} for quantum safety)"
-            
-            # For hash functions, extract output size from name
-            if algo_type == 'hash':
-                # Extract output size (e.g., SHA-256 → 256, SHA3-512 → 512)
-                match = re.search(r'[-_]?(\d{3,4})(?:\b|$)', algorithm)
-                if match:
-                    output_bits = int(match.group(1))
-                else:
-                    # Default mappings for algorithms without explicit size in name
-                    output_bits = 256  # Conservative default
-                
-                if output_bits >= min_safe_size:
-                    return True, f"Hash with {output_bits}-bit output (Grover-resistant, ≥{min_safe_size} required)"
-                return False, f"Hash with {output_bits}-bit output (insufficient, need ≥{min_safe_size} for quantum safety)"
-        
-        # Unknown/unclassified
-        return False, "Unknown quantum resistance classification"
-
-
     def score_individual_algorithm(self, algorithm: str, algo_type: str, 
                                    key_size: Optional[int] = None, curve: Optional[str] = None,
                                    curve_bits: Optional[int] = None, position: int = 0) -> AlgorithmScore:
@@ -825,7 +750,7 @@ class PQCAnalyzer:
         all_scores = []
         component_data = {
             "kex": [], "signature": [], "symmetric": [],
-            "certificate": [], "protocol": []
+            "certificate": [], "protocol": [], "hash": []
         }
         
         # TLS 1.2 Cipher Suites
@@ -880,6 +805,33 @@ class PQCAnalyzer:
                 )
                 all_scores.append(score)
                 component_data["symmetric"].append(score)
+        
+        # SSH Algorithms (if present)
+        ssh_config = tls_config.get("ssh_configuration", {})
+        if ssh_config:
+            # SSH KEX
+            ssh_kex_list = ssh_config.get("key_exchange", [])
+            for idx, kex in enumerate(ssh_kex_list[:15]):
+                kex_mapped = self._map_ssh_kex_internal(kex)
+                score = self.score_individual_algorithm(kex_mapped, "kex", position=idx)
+                all_scores.append(score)
+                component_data["kex"].append(score)
+            
+            # SSH Ciphers  
+            ssh_ciphers = ssh_config.get("encryption", [])
+            for idx, cipher in enumerate(ssh_ciphers[:15]):
+                cipher_mapped = self._map_ssh_cipher_internal(cipher)
+                score = self.score_individual_algorithm(cipher_mapped, "symmetric", position=idx)
+                all_scores.append(score)
+                component_data["symmetric"].append(score)
+            
+            # SSH MACs
+            ssh_macs = ssh_config.get("mac", [])
+            for idx, mac in enumerate(ssh_macs[:15]):
+                mac_mapped = self._map_ssh_mac_internal(mac)
+                score = self.score_individual_algorithm(mac_mapped, "hash", position=idx)
+                all_scores.append(score)
+                component_data["hash"].append(score)
         
         # Certificate Signatures
         cert_sigs = raw.get("signature_algorithms", {}).get("certificate_signatures", [])
@@ -1083,3 +1035,5 @@ class PQCAnalyzer:
         
         report_dict = convert_to_dict(report)
         return json.dumps(report_dict, indent=2)
+
+pqc_analyzer = PQCAnalyzer()

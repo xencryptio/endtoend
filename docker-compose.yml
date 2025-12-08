@@ -1,5 +1,3 @@
-version: '3.8'
-
 # =============================================================================
 # CRYPTO AUDIT SYSTEM - COMPLETE DOCKER COMPOSE
 # =============================================================================
@@ -27,6 +25,26 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
+  # UNIVERSAL SCORING SERVICE
+  # ---------------------------------------------------------------------------
+  universal-scoring-service:
+    build:
+      context: ./universal-scoring-service
+      dockerfile: Dockerfile
+    container_name: universal-scoring-service
+    ports:
+      - "9500:9500"
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9500/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
   # CENTRAL API SERVER
   # ---------------------------------------------------------------------------
   system-scan:
@@ -42,6 +60,7 @@ services:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/system_scanner_db
       - LOG_LEVEL=DEBUG
+      - SCORING_SERVICE_URL=http://universal-scoring-service:9500
     networks:
       - xencrypt-network
     restart: unless-stopped
@@ -49,6 +68,8 @@ services:
       postgres:
         condition: service_healthy
       db-service:
+        condition: service_healthy
+      universal-scoring-service:
         condition: service_healthy
     command: ["/usr/local/bin/wait-for-db.sh", "postgres", "python", "api_server.py"]
     healthcheck:
@@ -75,12 +96,15 @@ services:
       - DB_SERVICE_URL=http://db-service:8001
       - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/crypto_scanner_db
       - UVICORN_LOG_LEVEL=debug
+      - SCORING_SERVICE_URL=http://universal-scoring-service:9500
     networks:
       - xencrypt-network
     depends_on:
       db-service:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      universal-scoring-service:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -133,6 +157,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db
       - UVICORN_LOG_LEVEL=debug
+      - SCORING_SERVICE_URL=http://universal-scoring-service:9500
     networks:
       - xencrypt-network
     restart: always
@@ -140,6 +165,8 @@ services:
       postgres:
         condition: service_healthy
       db-service:
+        condition: service_healthy
+      universal-scoring-service:
         condition: service_healthy
 
   # ===========================================================================
@@ -168,12 +195,6 @@ services:
         condition: service_healthy  # ✅ Wait for healthy
       repo-scanner:
         condition: service_started
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   # ======================
   # ADMINER (DB WEB UI)
@@ -317,3 +338,209 @@ volumes:
     driver: local
   agent-mixed-data:
     driver: local
+
+
+# =============================================================================
+# 🚀 XENCRYPT - DOCKER SERVICE PORT & COMMAND CHEAT SHEET (NOTES INSIDE YML)
+# =============================================================================
+
+
+# ---------------------------------------------------------------------------
+# ✅ EXTERNALLY EXPOSED PORTS (SYSTEM ACCESS)
+# ---------------------------------------------------------------------------
+
+# SERVICE NAME            CONTAINER NAME           EXTERNAL PORT → INTERNAL PORT
+# -------------------------------------------------------------------------------
+# PostgreSQL              postgres                 ❌ Internal only (5432)
+# System Scan API         system-scan              9000 → 9000
+# Crypto Scanner          crypto-scanner           8000 → 8000
+# DB Service              db-service-1             8001 → 8001
+# Repo Scanner            repo-scanner             8003 → 8001
+# Onboarding Service      onboarding               8008 → 8008
+# Frontend (Web UI)       frontend                 3000 → 8080
+# Adminer (DB UI)         adminer                  8080 → 8080
+
+
+# =============================================================================
+# ✅ SINGLE COMMAND TO BUILD & START EVERYTHING (FULL SYSTEM)
+# =============================================================================
+# docker compose up -d --build
+
+
+# =============================================================================
+# ✅ STOP EVERYTHING (WITHOUT DELETING DATA)
+# =============================================================================
+# docker compose down
+
+
+# =============================================================================
+# ✅ STOP EVERYTHING + DELETE VOLUMES (FULL CLEAN RESET)
+# ⚠️ THIS WILL DELETE DATABASE & ALL PERSISTENT DATA
+# =============================================================================
+# docker compose down -v
+
+
+# =============================================================================
+# ✅ FULL SYSTEM BUILD (NO CACHE) + UP
+# =============================================================================
+# docker compose build --no-cache
+# docker compose up -d
+
+
+# =============================================================================
+# ✅ SERVICE-WISE BUILD & START (SEPARATE COMMANDS)
+# =============================================================================
+
+# 1️⃣ POSTGRES
+# docker compose up -d postgres
+
+# 2️⃣ DB SERVICE
+# docker compose build db-service
+# docker compose up -d db-service
+
+# 3️⃣ SYSTEM SCAN API
+# docker compose build system-scan
+# docker compose up -d system-scan
+
+# 4️⃣ CRYPTO SCANNER
+# docker compose build crypto-scanner
+# docker compose up -d crypto-scanner
+
+# 5️⃣ REPO SCANNER
+# docker compose build repo-scanner
+# docker compose up -d repo-scanner
+
+# 6️⃣ ONBOARDING
+# docker compose build onboarding
+# docker compose up -d onboarding
+
+# 7️⃣ FRONTEND
+# docker compose build frontend
+# docker compose up -d frontend
+
+# 8️⃣ ADMINER
+# docker compose up -d adminer
+
+# 9️⃣ LINUX AGENT - MODERN
+# docker compose build linux-agent-modern
+# docker compose up -d linux-agent-modern
+
+# 🔟 LINUX AGENT - LEGACY
+# docker compose build linux-agent-legacy
+# docker compose up -d linux-agent-legacy
+
+# 1️⃣1️⃣ LINUX AGENT - MIXED
+# docker compose build linux-agent-mixed
+# docker compose up -d linux-agent-mixed
+
+
+# =============================================================================
+# ✅ SINGLE-LINE SERVICE-WISE BUILD + RUN (NO SEPARATE BUILD)
+# =============================================================================
+
+# docker compose up -d --build postgres
+# docker compose up -d --build db-service
+# docker compose up -d --build system-scan
+# docker compose up -d --build crypto-scanner
+# docker compose up -d --build repo-scanner
+# docker compose up -d --build onboarding
+# docker compose up -d --build frontend
+# docker compose up -d --build adminer
+# docker compose up -d --build linux-agent-modern
+# docker compose up -d --build linux-agent-legacy
+# docker compose up -d --build linux-agent-mixed
+
+
+# =============================================================================
+# ✅ SEE LOGS (SERVICE-WISE)
+# =============================================================================
+
+# docker compose logs -f postgres
+# docker compose logs -f db-service
+# docker compose logs -f system-scan
+# docker compose logs -f crypto-scanner
+# docker compose logs -f repo-scanner
+# docker compose logs -f onboarding
+# docker compose logs -f frontend
+# docker compose logs -f adminer
+# docker compose logs -f linux-agent-modern
+# docker compose logs -f linux-agent-legacy
+# docker compose logs -f linux-agent-mixed
+
+
+# =============================================================================
+# ✅ SEE ONLY LAST 50 LOG LINES
+# =============================================================================
+# docker compose logs --tail=50 -f system-scan
+
+
+# =============================================================================
+# ✅ ENTER INTO A CONTAINER (SHELL)
+# =============================================================================
+
+# docker exec -it postgres sh
+# docker exec -it db-service-1 sh
+# docker exec -it system-scan sh
+# docker exec -it crypto-scanner sh
+# docker exec -it repo-scanner sh
+# docker exec -it onboarding sh
+# docker exec -it frontend sh
+
+
+# =============================================================================
+# ✅ RESTART ANY SINGLE SERVICE
+# =============================================================================
+
+# docker compose restart postgres
+# docker compose restart db-service
+# docker compose restart system-scan
+# docker compose restart crypto-scanner
+# docker compose restart repo-scanner
+# docker compose restart onboarding
+# docker compose restart frontend
+# docker compose restart adminer
+# docker compose restart linux-agent-modern
+# docker compose restart linux-agent-legacy
+# docker compose restart linux-agent-mixed
+
+
+# =============================================================================
+# ✅ STOP & REMOVE SINGLE SERVICE
+# =============================================================================
+# docker compose stop system-scan
+# docker compose rm -f system-scan
+
+
+# =============================================================================
+# ✅ CHECK HEALTH STATUS OF ALL SERVICES
+# =============================================================================
+# docker compose ps
+
+
+# =============================================================================
+# ✅ CLEAN ALL UNUSED IMAGES, NETWORKS & VOLUMES (DANGER)
+# =============================================================================
+# docker system prune -a --volumes -f
+
+
+# =============================================================================
+# ✅ DATABASE LOGIN (POSTGRES)
+# =============================================================================
+# docker exec -it postgres psql -U scanuser
+
+
+# =============================================================================
+# ✅ SYSTEM ACCESS URLS
+# =============================================================================
+# Frontend UI        → http://localhost:3000
+# System Scan API    → http://localhost:9000
+# Crypto Scanner API → http://localhost:8000
+# DB Service API     → http://localhost:8001
+# Repo Scanner API   → http://localhost:8003
+# Onboarding API     → http://localhost:8008
+# Adminer DB UI      → http://localhost:8080
+
+
+# =============================================================================
+# ✅ END OF DOCKER NOTES SECTION
+# =============================================================================

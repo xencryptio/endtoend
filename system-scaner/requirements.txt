@@ -1,9 +1,6 @@
 fastapi
 uvicorn
-pydantic
-python-multipart
-SQLAlchemy
+sqlalchemy
 psycopg2-binary
 alembic
-dataclasses
-typing-extensions
+requests

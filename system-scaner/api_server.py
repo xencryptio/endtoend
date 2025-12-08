@@ -16,9 +16,107 @@ from sqlalchemy.orm import sessionmaker, relationship, Session, declarative_base
 from sqlalchemy.exc import SQLAlchemyError
 import logging
 
-# Import the PQC scoring function
-from pqc_scorer import score_crypto_audit
+import requests
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+import os
 
+# --- Remote Scoring Configuration ---
+SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
+
+def transform_agent_data_to_scoring_format(audit_results: Dict, os_type: str) -> List[Dict]:
+    """Transform agent-specific data to universal scoring format"""
+    algorithms = []
+    
+    if os_type.lower() == "linux":
+        data_source = audit_results.get("with_sudo") or audit_results.get("without_sudo") or audit_results
+        openssl_data = data_source.get("openssl_crypto", {})
+        cipher_details = openssl_data.get("cipher_information", {}).get("cipher_details", [])
+        
+        for idx, cipher in enumerate(cipher_details):
+            algorithms.append({
+                "name": cipher.get("name", ""),
+                "algorithm_type": "symmetric",
+                "key_size": 256 if "256" in cipher.get("name", "") else 128,
+                "position": idx,
+                "context": {"source": "openssl", "cipher": cipher}
+            })
+        
+        ssh_data = data_source.get("ssh_crypto", {})
+        if ssh_data:
+            algo_info = ssh_data.get("algorithm_information", {})
+            for cat, key in [("kex", "kex"), ("symmetric", "cipher"), ("hash", "mac")]:
+                for idx, algo in enumerate(algo_info.get(key, {}).get("algorithms", [])):
+                    algorithms.append({
+                        "name": algo,
+                        "algorithm_type": cat,
+                        "position": idx,
+                        "context": {"source": "ssh"}
+                    })
+
+    elif os_type.lower() == "windows":
+        tls_ssl_config = audit_results.get("tls_ssl_configuration", {})
+        if tls_ssl_config:
+            cipher_suites_data = tls_ssl_config.get("cipher_suites", {})
+            if isinstance(cipher_suites_data, dict) and "error" not in cipher_suites_data:
+                cipher_details = cipher_suites_data.get("cipher_details", [])
+                for idx, cipher in enumerate(cipher_details):
+                    algorithms.append({
+                        "name": cipher.get("name", ""),
+                        "algorithm_type": "symmetric",
+                        "key_size": 256 if "256" in cipher.get("name", "") else 128,
+                        "position": idx,
+                        "context": {"source": "schannel"}
+                    })
+    
+    return algorithms
+
+def merge_scoring_into_agent_format(original: Dict, scoring: Dict) -> Dict:
+    """Merge scoring results while preserving original JSON structure"""
+    return {
+        **original,
+        "pqc_score": {
+            "overall_score": scoring["overall_score"],
+            "overall_grade": scoring["overall_grade"],
+            "security_level": scoring["security_level"],
+            "quantum_ready": scoring["quantum_ready"],
+            "hybrid_ready": scoring["hybrid_ready"],
+            "components": scoring["components"],
+            "individual_scores": scoring["algorithm_scores"]
+        }
+    }
+
+async def score_crypto_audit_remote(audit_results: Dict, os_type: str) -> Dict:
+    """Call universal scoring service instead of local scoring"""
+    algorithms_to_score = transform_agent_data_to_scoring_format(audit_results, os_type)
+    
+    if not algorithms_to_score:
+        logger.warning("No algorithms found to score.")
+        return {**audit_results, "pqc_score": {"error": "No algorithms found to score", "status": "scoring_failed"}}
+
+    try:
+        response = requests.post(
+            f"{SCORING_SERVICE_URL}/api/v1/score/agent-audit",
+            json={
+                "scoring_type": "agent",
+                "algorithms": algorithms_to_score,
+                "metadata": {
+                    "source": "agent_scanner",
+                    "os": os_type,
+                    "hostname": audit_results.get("_metadata", {}).get("hostname"),
+                    "timestamp": datetime.now().isoformat()
+                }
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        scoring_results = response.json()
+        return merge_scoring_into_agent_format(audit_results, scoring_results)
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Scoping service unavailable: {e}")
+        return {**audit_results, "pqc_score": {"error": "Scoring service unavailable", "status": "scoring_failed"}}
+		
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -234,11 +332,11 @@ async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
         update_agent_last_seen(db, audit_data.agent_id)
         result_id = f"{audit_data.agent_id}_{audit_data.task_id}"
 
-        # ✨ NEW: Score the audit results before storing
-        logger.info(f"Scoring audit results for {audit_data.agent_id} (OS: {audit_data.os})")
-        scored_results = score_crypto_audit(
+        # ✨ NEW: Score via remote service
+        logger.info(f"Scoring audit results for {audit_data.agent_id}")
+        scored_results = await score_crypto_audit_remote(
             audit_results=audit_data.audit_results,
-            os=audit_data.os
+            os_type=audit_data.os
         )
         if 'error' in scored_results.get('pqc_score', {}):
             logger.warning(f"Scoring failed for agent {audit_data.agent_id}: {scored_results['pqc_score']['error']}")
