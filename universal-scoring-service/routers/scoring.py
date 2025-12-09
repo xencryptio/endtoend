@@ -33,7 +33,8 @@ async def score_agent_audit(request: UniversalScoringRequest):
         # ⭐ Call the SAME universal scoring engine
         result = scorer.score_algorithms(
             algorithms=[algo.dict() for algo in request.algorithms],
-            scoring_type="agent"
+            scoring_type="agent",
+            metadata=request.metadata
         )
         
         # Add metadata passthrough
@@ -70,7 +71,9 @@ async def score_tls_scan(request: UniversalScoringRequest):
         # ⭐ Call the SAME universal scoring engine
         result = scorer.score_algorithms(
             algorithms=[algo.dict() for algo in request.algorithms],
-            scoring_type="tls"
+            scoring_type="tls",
+            metadata=request.metadata,
+            raw_response=request.raw_response
         )
         
         result["metadata"] = {
@@ -106,7 +109,8 @@ async def score_repository(request: UniversalScoringRequest):
         # ⭐ Call the SAME universal scoring engine
         result = scorer.score_algorithms(
             algorithms=[algo.dict() for algo in request.algorithms],
-            scoring_type="repository"
+            scoring_type="repository",
+            metadata=request.metadata
         )
         
         result["metadata"] = {
@@ -137,7 +141,9 @@ async def score_generic(request: UniversalScoringRequest):
         # ⭐ Call the SAME universal scoring engine (no type restriction)
         result = scorer.score_algorithms(
             algorithms=[algo.dict() for algo in request.algorithms],
-            scoring_type=request.scoring_type
+            scoring_type=request.scoring_type,
+            metadata=request.metadata,
+            raw_response=request.raw_response
         )
         
         result["metadata"] = {

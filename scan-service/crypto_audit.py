@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
-from pqc_analyzer import pqc_analyzer
+
 
 import requests
 import os
@@ -104,7 +104,8 @@ async def score_tls_scan_remote(transformed_result: Dict) -> Dict:
                     "source": "ssl_labs",
                     "domain": transformed_result.get("domain"),
                     "protocols": transformed_result.get("tls_configuration", {}).get("supported_protocols", [])
-                }
+                },
+                "raw_response": transformed_result
             },
             timeout=30
         )
@@ -460,25 +461,9 @@ def transform_scan_result(data: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "suites": [transform_tls13_cipher_suite(cs, position=i) for i, cs in enumerate(cipher_list)]
                 }
     
-    # Add component-level PQC scores for TLS 1.2
-    if transformed["tls_configuration"]["tls_1.2_cipher_suites"]["suites"]:
-        tls12_kex_scores = [s.get("kex_pqc_score", 0) for s in 
-                            transformed["tls_configuration"]["tls_1.2_cipher_suites"]["suites"] 
-                            if "kex_pqc_score" in s]
-        if tls12_kex_scores:
-            avg_score = sum(tls12_kex_scores) / len(tls12_kex_scores)
-            transformed["tls_configuration"]["tls_1.2_cipher_suites"]["component_kex_score"] = round(avg_score, 2)
-            transformed["tls_configuration"]["tls_1.2_cipher_suites"]["component_kex_grade"] = pqc_analyzer.score_to_grade(avg_score)
+
     
-    # Add component-level PQC scores for TLS 1.3
-    if transformed["tls_configuration"]["tls_1.3_cipher_suites"]["suites"]:
-        tls13_kex_scores = [s.get("kex_pqc_score", 0) for s in 
-                            transformed["tls_configuration"]["tls_1.3_cipher_suites"]["suites"] 
-                            if "kex_pqc_score" in s]
-        if tls13_kex_scores:
-            avg_score = sum(tls13_kex_scores) / len(tls13_kex_scores)
-            transformed["tls_configuration"]["tls_1.3_cipher_suites"]["component_kex_score"] = round(avg_score, 2)
-            transformed["tls_configuration"]["tls_1.3_cipher_suites"]["component_kex_grade"] = pqc_analyzer.score_to_grade(avg_score)
+
     
     named_groups = details.get("namedGroups", {})
     transformed["tls_configuration"]["supported_elliptic_curves"] = {"server_preference": "disabled", "curves": []}
@@ -525,7 +510,7 @@ def transform_scan_result(data: List[Dict[str, Any]]) -> Dict[str, Any]:
     return transformed
 
 def extract_signature_algorithms_from_certs(certs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Extract signature algorithms from SSL Labs certificate data with PQC scoring."""
+    """Extract signature algorithms from SSL Labs certificate data without PQC scoring."""
     results = []
     
     for i, cert in enumerate(certs):
@@ -550,21 +535,6 @@ def extract_signature_algorithms_from_certs(certs: List[Dict[str, Any]]) -> List
                     else:
                         sig_algorithm = f"UNKNOWNwith{pubkey_type}"
                     
-                    # ✅ ADD: Score the signature algorithm
-                    sig_score = pqc_analyzer.score_individual_algorithm(
-                        pqc_analyzer.parse_signature_algorithm(sig_algorithm),
-                        "signature",
-                        key_size=cert.get("keySize", 0),
-                        position=i
-                    )
-                    
-                    # ✅ ADD: Score the hash algorithm
-                    hash_score = pqc_analyzer.score_individual_algorithm(
-                        hash_name if sig_hash_alg else "SHA256",
-                        "hash",
-                        position=i
-                    )
-                    
                     results.append({
                         "position": i,
                         "certificate_subject": cert.get("subject", "Unknown"),
@@ -573,15 +543,6 @@ def extract_signature_algorithms_from_certs(certs: List[Dict[str, Any]]) -> List
                         "public_key_type": pubkey_type,
                         "public_key_size": cert.get("keySize", 0),
                         "signature_algorithm_oid": x509_cert.signature_algorithm_oid.dotted_string if x509_cert.signature_algorithm_oid else None,
-                        # ✅ ADD: PQC fields for signature
-                        "sig_pqc_score": sig_score.final_score,
-                        "sig_pqc_grade": sig_score.grade,
-                        "sig_is_pqc": sig_score.is_pqc,
-                        "sig_is_hybrid": sig_score.is_hybrid,
-                        "sig_quantum_safe": sig_score.quantum_safe,
-                        # ✅ ADD: PQC fields for hash
-                        "hash_pqc_score": hash_score.final_score,
-                        "hash_pqc_grade": hash_score.grade,
                     })
                     continue
                     
@@ -592,20 +553,6 @@ def extract_signature_algorithms_from_certs(certs: List[Dict[str, Any]]) -> List
             sig_alg = cert.get("sigAlg", "Unknown")
             hash_alg = sig_alg.split("with")[0] if "with" in sig_alg else "SHA256"
             
-            # ✅ ADD: Score with fallback data
-            sig_score = pqc_analyzer.score_individual_algorithm(
-                pqc_analyzer.parse_signature_algorithm(sig_alg),
-                "signature",
-                key_size=cert.get("keySize", 0),
-                position=i
-            )
-            
-            hash_score = pqc_analyzer.score_individual_algorithm(
-                pqc_analyzer.parse_hash_algorithm(hash_alg),
-                "hash",
-                position=i
-            )
-            
             results.append({
                 "position": i,
                 "certificate_subject": cert.get("subject", "Unknown"),
@@ -613,14 +560,6 @@ def extract_signature_algorithms_from_certs(certs: List[Dict[str, Any]]) -> List
                 "hash_algorithm": hash_alg,
                 "public_key_type": cert.get("keyAlg", "Unknown"),
                 "public_key_size": cert.get("keySize", 0),
-                # ✅ ADD: PQC fields
-                "sig_pqc_score": sig_score.final_score,
-                "sig_pqc_grade": sig_score.grade,
-                "sig_is_pqc": sig_score.is_pqc,
-                "sig_is_hybrid": sig_score.is_hybrid,
-                "sig_quantum_safe": sig_score.quantum_safe,
-                "hash_pqc_score": hash_score.final_score,
-                "hash_pqc_grade": hash_score.grade,
             })
             
         except Exception as e:
@@ -634,7 +573,7 @@ def extract_signature_algorithms_from_certs(certs: List[Dict[str, Any]]) -> List
 
 
 def extract_handshake_signature_algorithms(details: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Extract supported signature algorithms from SSL Labs scan details with PQC scoring."""
+    """Extract supported signature algorithms from SSL Labs scan details without PQC scoring."""
     supported = []
     seen = set()
     
@@ -650,41 +589,17 @@ def extract_handshake_signature_algorithms(details: Dict[str, Any]) -> List[Dict
                 if "ECDSA" in cipher_name:
                     if "SHA256" in cipher_name and "ecdsa_sha256_tls12" not in seen:
                         algo_name = "ecdsa_secp256r1_sha256"
-                        # ✅ ADD: Score this algorithm
-                        sig_score = pqc_analyzer.score_individual_algorithm(
-                            pqc_analyzer.parse_signature_algorithm(algo_name),
-                            "signature",
-                            position=len(supported)
-                        )
-                        
                         supported.append({
                             "algorithm": algo_name,
                             "protocol": "TLS 1.2",
-                            # ✅ ADD: PQC fields
-                            "sig_pqc_score": sig_score.final_score,
-                            "sig_pqc_grade": sig_score.grade,
-                            "sig_is_pqc": sig_score.is_pqc,
-                            "sig_is_hybrid": sig_score.is_hybrid,
-                            "sig_quantum_safe": sig_score.quantum_safe,
                         })
                         seen.add("ecdsa_sha256_tls12")
                     
                     if "SHA384" in cipher_name and "ecdsa_sha384_tls12" not in seen:
                         algo_name = "ecdsa_secp384r1_sha384"
-                        sig_score = pqc_analyzer.score_individual_algorithm(
-                            pqc_analyzer.parse_signature_algorithm(algo_name),
-                            "signature",
-                            position=len(supported)
-                        )
-                        
                         supported.append({
                             "algorithm": algo_name,
                             "protocol": "TLS 1.2",
-                            "sig_pqc_score": sig_score.final_score,
-                            "sig_pqc_grade": sig_score.grade,
-                            "sig_is_pqc": sig_score.is_pqc,
-                            "sig_is_hybrid": sig_score.is_hybrid,
-                            "sig_quantum_safe": sig_score.quantum_safe,
                         })
                         seen.add("ecdsa_sha384_tls12")
                 
@@ -692,39 +607,17 @@ def extract_handshake_signature_algorithms(details: Dict[str, Any]) -> List[Dict
                 if "RSA" in cipher_name and "ECDHE" in cipher_name:
                     if "SHA256" in cipher_name and "rsa_sha256_tls12" not in seen:
                         algo_name = "rsa_pkcs1_sha256"
-                        sig_score = pqc_analyzer.score_individual_algorithm(
-                            pqc_analyzer.parse_signature_algorithm(algo_name),
-                            "signature",
-                            position=len(supported)
-                        )
-                        
                         supported.append({
                             "algorithm": algo_name,
                             "protocol": "TLS 1.2",
-                            "sig_pqc_score": sig_score.final_score,
-                            "sig_pqc_grade": sig_score.grade,
-                            "sig_is_pqc": sig_score.is_pqc,
-                            "sig_is_hybrid": sig_score.is_hybrid,
-                            "sig_quantum_safe": sig_score.quantum_safe,
                         })
                         seen.add("rsa_sha256_tls12")
                     
                     if "SHA384" in cipher_name and "rsa_sha384_tls12" not in seen:
                         algo_name = "rsa_pkcs1_sha384"
-                        sig_score = pqc_analyzer.score_individual_algorithm(
-                            pqc_analyzer.parse_signature_algorithm(algo_name),
-                            "signature",
-                            position=len(supported)
-                        )
-                        
                         supported.append({
                             "algorithm": algo_name,
                             "protocol": "TLS 1.2",
-                            "sig_pqc_score": sig_score.final_score,
-                            "sig_pqc_grade": sig_score.grade,
-                            "sig_is_pqc": sig_score.is_pqc,
-                            "sig_is_hybrid": sig_score.is_hybrid,
-                            "sig_quantum_safe": sig_score.quantum_safe,
                         })
                         seen.add("rsa_sha384_tls12")
     
@@ -734,78 +627,34 @@ def extract_handshake_signature_algorithms(details: Dict[str, Any]) -> List[Dict
             # TLS 1.3 uses different signature schemes
             if "rsa_pss_sha256" not in seen:
                 algo_name = "rsa_pss_rsae_sha256"
-                sig_score = pqc_analyzer.score_individual_algorithm(
-                    pqc_analyzer.parse_signature_algorithm(algo_name),
-                    "signature",
-                    position=len(supported)
-                )
-                
                 supported.append({
                     "algorithm": algo_name,
                     "protocol": "TLS 1.3",
-                    "sig_pqc_score": sig_score.final_score,
-                    "sig_pqc_grade": sig_score.grade,
-                    "sig_is_pqc": sig_score.is_pqc,
-                    "sig_is_hybrid": sig_score.is_hybrid,
-                    "sig_quantum_safe": sig_score.quantum_safe,
                 })
                 seen.add("rsa_pss_sha256")
             
             if "ecdsa_sha256_tls13" not in seen:
                 algo_name = "ecdsa_secp256r1_sha256"
-                sig_score = pqc_analyzer.score_individual_algorithm(
-                    pqc_analyzer.parse_signature_algorithm(algo_name),
-                    "signature",
-                    position=len(supported)
-                )
-                
                 supported.append({
                     "algorithm": algo_name,
                     "protocol": "TLS 1.3",
-                    "sig_pqc_score": sig_score.final_score,
-                    "sig_pqc_grade": sig_score.grade,
-                    "sig_is_pqc": sig_score.is_pqc,
-                    "sig_is_hybrid": sig_score.is_hybrid,
-                    "sig_quantum_safe": sig_score.quantum_safe,
                 })
                 seen.add("ecdsa_sha256_tls13")
             
             if "ecdsa_sha384_tls13" not in seen:
                 algo_name = "ecdsa_secp384r1_sha384"
-                sig_score = pqc_analyzer.score_individual_algorithm(
-                    pqc_analyzer.parse_signature_algorithm(algo_name),
-                    "signature",
-                    position=len(supported)
-                )
-                
                 supported.append({
                     "algorithm": algo_name,
                     "protocol": "TLS 1.3",
-                    "sig_pqc_score": sig_score.final_score,
-                    "sig_pqc_grade": sig_score.grade,
-                    "sig_is_pqc": sig_score.is_pqc,
-                    "sig_is_hybrid": sig_score.is_hybrid,
-                    "sig_quantum_safe": sig_score.quantum_safe,
                 })
                 seen.add("ecdsa_sha384_tls13")
     
     # If nothing found, provide defaults based on what ciphers exist
     if not supported:
         algo_name = "rsa_pkcs1_sha256"
-        sig_score = pqc_analyzer.score_individual_algorithm(
-            pqc_analyzer.parse_signature_algorithm(algo_name),
-            "signature",
-            position=0
-        )
-        
         supported.append({
             "algorithm": algo_name,
             "protocol": "TLS 1.2",
-            "sig_pqc_score": sig_score.final_score,
-            "sig_pqc_grade": sig_score.grade,
-            "sig_is_pqc": sig_score.is_pqc,
-            "sig_is_hybrid": sig_score.is_hybrid,
-            "sig_quantum_safe": sig_score.quantum_safe,
         })
     
     return supported
@@ -975,7 +824,7 @@ def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout
     """
     for retry in range(max_backoff_retries):
         try:
-            return process_single_domain(domain, use_cache, attempt, timeout)
+            return asyncio.run(process_single_domain(domain, use_cache, attempt, timeout))
         except RateLimitException:
             if retry < max_backoff_retries - 1:
                 wait_time = (2 ** retry) * 5  # 5s, 10s, 20s
@@ -1128,12 +977,7 @@ async def process_single_domain(domain: str, use_cache: bool = True, attempt: in
         # Score via remote service
         scoring_results = await score_tls_scan_remote(transformed_result)
         
-        # Merge results (keep same JSON structure)
-        transformed_result["pqc_analysis"] = {
-            "overall_score": scoring_results.get("overall_score"),
-            "overall_grade": scoring_results.get("overall_grade"),
-            # ... map other fields
-        }
+        transformed_result["pqc_analysis"] = scoring_results
         
         transformed_result = remove_duplicates_from_structure(transformed_result)
         transformed_result["scan_metadata"] = {
@@ -1151,7 +995,7 @@ async def process_single_domain(domain: str, use_cache: bool = True, attempt: in
         raise HTTPException(status_code=500, detail=f"Error processing {domain}: {str(e)}")
 
 @app.post("/scan")
-def scan_domain(request: ScanRequest):
+async def scan_domain(request: ScanRequest):
     """
     Enhanced scan with automatic retry logic.
     - Filters out HTTP domains.
@@ -1205,7 +1049,7 @@ def scan_domain(request: ScanRequest):
 
     if len(domains_to_scan) == 1 and not skipped_domains:
         # For a single domain that is HTTPS, use a longer default timeout.
-        result = process_single_domain(domains_to_scan[0], timeout=600)
+        result = await process_single_domain(domains_to_scan[0], timeout=600)
         return result
     
     # Multi-domain with retry logic (HTTPS only)
