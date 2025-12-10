@@ -58,3 +58,28 @@ export interface Algorithm {
   }
   
   export type StatusType = 'error' | 'success' | 'info';
+
+// --- Types for Algorithm Findings Modal ---
+
+export interface FindingDetail {
+  line_number: number;
+  code_snippet: string;
+  match_text: string;
+}
+
+export interface FileFinding {
+  file_path: string;
+  occurrence_count: number;
+  directory: string;
+  findings: FindingDetail[];
+  has_more: boolean;
+  showing: number;
+}
+
+export interface AlgorithmFindingsResponse {
+  algorithm: string;
+  total_occurrences: number;
+  total_files: number;
+  files: FileFinding[];
+  directory_summary: Record<string, number>;
+}

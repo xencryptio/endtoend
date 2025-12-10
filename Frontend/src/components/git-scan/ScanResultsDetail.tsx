@@ -3,69 +3,52 @@ import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle,
 import { Button } from "@/components/ui/button";
 import { ScanDetail, Algorithm } from './types';
 
+import AlgorithmFindingsModal from './AlgorithmFindingsModal';
+
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
 
-// Helper function to get color for letter grades
-const getGradeColor = (grade: string): string => {
-  if (!grade) return 'text-zinc-500';
-  const letter = grade.charAt(0);
-  switch (letter) {
-    case 'A': return 'text-emerald-600 dark:text-emerald-400';
-    case 'B': return 'text-blue-600 dark:text-blue-400';
-    case 'C': return 'text-yellow-600 dark:text-yellow-400';
-    case 'D': return 'text-orange-600 dark:text-orange-400';
-    case 'F': return 'text-rose-600 dark:text-rose-400';
-    default: return 'text-zinc-600 dark:text-zinc-400';
+const getGradeColor = (grade: string | undefined) => {
+  switch (grade) {
+    case 'A': return 'text-emerald-500 dark:text-emerald-400';
+    case 'B': return 'text-yellow-500 dark:text-yellow-400';
+    case 'C': return 'text-orange-500 dark:text-orange-400';
+    case 'D': return 'text-rose-500 dark:text-rose-400';
+    case 'F': return 'text-red-600 dark:text-red-500';
+    default: return 'text-slate-500 dark:text-slate-400';
   }
 };
 
-// Helper function to get color for score progress bars
-const getScoreBarColor = (score: number): string => {
-  if (score >= 90) return 'bg-emerald-500';
-  if (score >= 80) return 'bg-blue-500';
-  if (score >= 70) return 'bg-yellow-500';
-  if (score >= 60) return 'bg-orange-500';
+const getScoreBarColor = (score: number) => {
+  if (score >= 80) return 'bg-emerald-500';
+  if (score >= 60) return 'bg-yellow-500';
+  if (score >= 40) return 'bg-orange-500';
   return 'bg-rose-500';
 };
 
-// Helper function to get risk level information
-const getRiskLevelInfo = (score: number): { label: string; color: string; description: string } => {
-  if (score >= 90) return {
-    label: 'Low Risk',
-    color: 'text-emerald-600 dark:text-emerald-400',
-    description: 'Excellent cryptographic security posture'
-  };
-  if (score >= 80) return {
-    label: 'Medium-Low Risk',
-    color: 'text-blue-600 dark:text-blue-400',
-    description: 'Good security with minor improvements needed'
-  };
-  if (score >= 70) return {
-    label: 'Medium Risk',
-    color: 'text-yellow-600 dark:text-yellow-400',
-    description: 'Adequate security but needs attention'
-  };
-  if (score >= 60) return {
-    label: 'Medium-High Risk',
-    color: 'text-orange-600 dark:text-orange-400',
-    description: 'Significant security concerns present'
-  };
+const getRiskLevelInfo = (score: number) => {
+  if (score >= 80) {
+    return {
+      label: 'Low Risk',
+      description: 'Repository demonstrates strong cryptographic hygiene.',
+      color: 'text-emerald-600 dark:text-emerald-400',
+    };
+  }
+  if (score >= 60) {
+    return {
+      label: 'Medium Risk',
+      description: 'Some outdated or weak algorithms detected. Review recommended.',
+      color: 'text-yellow-600 dark:text-yellow-400',
+    };
+  }
   return {
     label: 'High Risk',
+    description: 'Significant use of vulnerable algorithms. Immediate action required.',
     color: 'text-rose-600 dark:text-rose-400',
-    description: 'Critical security vulnerabilities detected'
   };
 };
 
-// Helper function to display category names nicely
-const getCategoryDisplayName = (category: string): string => {
-  const names: Record<string, string> = {
-    'kex': 'Key Exchange',
-    'signature': 'Digital Signatures',
-    'symmetric': 'Symmetric Encryption',
-    'hash': 'Hash Functions'
-  };
-  return names[category] || category;
+const getCategoryDisplayName = (category: string) => {
+  return category.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 };
 
 const AlgorithmSection: React.FC<{
@@ -73,7 +56,8 @@ const AlgorithmSection: React.FC<{
   description: string;
   algorithms: (Algorithm & { name: string })[];
   type: 'safe' | 'unsafe' | 'pqc';
-}> = ({ title, description, algorithms, type }) => {
+  onViewFindings: (algorithmName: string) => void;
+}> = ({ title, description, algorithms, type, onViewFindings }) => {
   const getBorderColor = () => {
     switch (type) {
       case 'pqc': return 'border-blue-500';
@@ -124,18 +108,18 @@ const AlgorithmSection: React.FC<{
           {algorithms.length} Found
         </span>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
         {algorithms.map((algo, idx) => (
-          <div key={`${algo.name}-${idx}`} className="bg-card text-card-foreground border rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] hover:shadow-[0_12px_32px_rgba(0,0,0,0.12)] hover:border-blue-500/40 transition-all duration-300 transform hover:-translate-y-2 backdrop-blur-sm group relative overflow-hidden">
+          <div key={`${algo.name}-${idx}`} className="bg-card text-card-foreground border rounded-xl p-4 shadow-sm hover:shadow-md hover:border-blue-500/40 transition-all duration-300 backdrop-blur-sm group relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-500/5 to-transparent rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500 pointer-events-none"></div>
             
             {/* Algorithm Name and Grade */}
             <div className="flex items-start justify-between mb-4 relative z-10">
-              <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+              <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight">
                 {algo.name}
               </div>
               {algo.grade && (
-                <div className={`text-2xl font-bold ${getGradeColor(algo.grade)} group-hover:scale-110 transition-transform`}>
+                <div className={`text-3xl font-bold ${getGradeColor(algo.grade)}`}>
                   {algo.grade}
                 </div>
               )}
@@ -168,27 +152,6 @@ const AlgorithmSection: React.FC<{
               </div>
             )}
             
-            {/* Score Display */}
-            {algo.final_score !== undefined && (
-              <div className="mb-5 relative z-10">
-                <div className="flex items-center justify-between text-sm mb-3">
-                  <span className="text-slate-500 dark:text-slate-400 font-semibold text-xs uppercase tracking-wide">Security Score</span>
-                  <span className="font-bold text-slate-900 dark:text-slate-100 text-lg">
-                    {algo.final_score.toFixed(1)}
-                  </span>
-                </div>
-                <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner relative">
-                  <div 
-                    className={`h-full ${getScoreBarColor(algo.final_score)} transition-all duration-700 ease-out`}
-                    style={{ 
-                      width: `${algo.final_score}%`,
-                      boxShadow: '0 0 8px currentColor'
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-            
             {/* Usage Statistics */}
             <div className="flex gap-6 pt-5 border-t text-xs relative z-10">
               <div title="Total occurrences in code" className="flex flex-col gap-1">
@@ -200,6 +163,13 @@ const AlgorithmSection: React.FC<{
                 <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.files_affected || 0}</span>
               </div>
             </div>
+
+            <button 
+              onClick={() => onViewFindings(algo.name)}
+              className="mt-4 w-full text-center text-sm font-bold text-blue-600 hover:underline"
+            >
+              View Findings
+            </button>
             
             {/* Quantum Safety Section */}
             {algo.quantum_safe !== undefined && (
@@ -259,6 +229,18 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
   const [scanDetail, setScanDetail] = useState<ScanDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isFindingsModalOpen, setIsFindingsModalOpen] = useState(false);
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<string | null>(null);
+
+  const handleViewFindings = (algorithmName: string) => {
+    setSelectedAlgorithm(algorithmName);
+    setIsFindingsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsFindingsModalOpen(false);
+    setSelectedAlgorithm(null);
+  };
 
   useEffect(() => {
     const loadScanDetail = async (id: number) => {
@@ -466,20 +448,9 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
                     </div>
                   </div>
                   
-                  <div className="text-4xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mb-3">
-                    {score.score.toFixed(1)}
+                  <div className={`text-5xl font-bold tracking-tight mb-4 ${getGradeColor(score.grade)}`}>
+                    {score.grade}
                   </div>
-                  
-                  <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner relative mb-3">
-                    <div 
-                      className={`h-full ${getScoreBarColor(score.score)} transition-all duration-700 ease-out`}
-                      style={{ 
-                        width: `${score.score}%`,
-                        boxShadow: '0 0 8px currentColor'
-                      }}
-                    />
-                  </div>
-                  
                   <div className="text-xs text-slate-600 dark:text-slate-400 space-y-2 font-medium">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500 dark:text-slate-500">Algorithms</span>
@@ -554,7 +525,8 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             title="⚠️ Quantum-Vulnerable Algorithms" 
             description="Will be broken by quantum computers: RSA, ECDSA, DH, or weak parameters (AES-128, SHA-256)" 
             algorithms={quantumVulnerable} 
-            type="unsafe" 
+            type="unsafe"
+            onViewFindings={handleViewFindings} 
           />
         )}
         {truePQC.length > 0 && (
@@ -562,7 +534,8 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             title="🔮 Post-Quantum Cryptography (PQC)" 
             description="Mathematically resistant to quantum attacks: Kyber, Dilithium, SPHINCS+, Falcon, NTRU" 
             algorithms={truePQC} 
-            type="pqc" 
+            type="pqc"
+            onViewFindings={handleViewFindings}
           />
         )}
         {quantumSafe.length > 0 && (
@@ -570,7 +543,8 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             title="✅ Quantum-Safe (Classical)" 
             description="Classical algorithms with quantum-resistant parameters: AES-256, SHA-512, ChaCha20-256" 
             algorithms={quantumSafe} 
-            type="safe" 
+            type="safe"
+            onViewFindings={handleViewFindings}
           />
         )}
       </div>
@@ -603,6 +577,17 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
       <main className="max-w-7xl mx-auto px-6 py-10">
         {renderContent()}
       </main>
+      
+      {scanDetail && (
+        <AlgorithmFindingsModal 
+          open={isFindingsModalOpen}
+          onClose={handleCloseModal}
+          scanId={scanId}
+          algorithmName={selectedAlgorithm}
+          repoUrl={scanDetail.repo_url}
+          branch={scanDetail.branch_name}
+        />
+      )}
     </div>
   );
 };

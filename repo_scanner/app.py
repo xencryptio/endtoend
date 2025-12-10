@@ -1304,6 +1304,26 @@ class CategoryScoreItem(BaseModel):
     best_algorithm: Optional[str] = None
     worst_algorithm: Optional[str] = None
 
+class FindingDetail(BaseModel):
+    line_number: int
+    code_snippet: Optional[str] = None
+    match_text: Optional[str] = None
+
+class FileFinding(BaseModel):
+    file_path: str
+    occurrence_count: int
+    directory: str
+    findings: List[FindingDetail]
+    has_more: bool
+    showing: int
+
+class AlgorithmFindingsResponse(BaseModel):
+    algorithm: str
+    total_occurrences: int
+    total_files: int
+    files: List[FileFinding]
+    directory_summary: Dict[str, int]
+
 class ScanDetailsResponse(BaseModel):
     repo_id: int
     repo_url: str
@@ -1735,12 +1755,17 @@ async def get_scan_details_endpoint(scan_id: int):
             raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
 
 
-@app.get('/api/scans/{scan_id}/algorithm/{algorithm}/findings')
-async def get_algorithm_findings(scan_id: int, algorithm: str):
-    """Get detailed findings for a specific algorithm in a scan"""
+@app.get('/api/scans/{scan_id}/algorithm/{algorithm}/findings', response_model=AlgorithmFindingsResponse)
+async def get_algorithm_findings(
+    scan_id: int, 
+    algorithm: str,
+    limit_files: int = 20,
+    limit_per_file: int = 10,
+    offset_files: int = 0
+):
+    """Get detailed, grouped, and paginated findings for a specific algorithm in a scan."""
     with get_db() as db:
         try:
-            # Get scan result for this algorithm
             scan_result = db.query(ScanResult).filter(
                 ScanResult.repo_id == scan_id,
                 ScanResult.algorithm == algorithm
@@ -1749,20 +1774,54 @@ async def get_algorithm_findings(scan_id: int, algorithm: str):
             if not scan_result:
                 raise HTTPException(status_code=404, detail='Algorithm not found in this scan')
 
-            # Get all findings for this scan result
-            findings = db.query(Finding).filter(
+            findings_query = db.query(Finding).filter(
                 Finding.scan_result_id == scan_result.id
-            ).order_by(Finding.file_path, Finding.line_number).all()
+            ).order_by(Finding.file_path, Finding.line_number)
+            
+            all_findings = findings_query.all()
+            
+            grouped = defaultdict(list)
+            for finding in all_findings:
+                grouped[finding.file_path].append(finding)
+            
+            directory_summary = defaultdict(int)
+            for file_path, findings_list in grouped.items():
+                directory = os.path.dirname(file_path) or "root"
+                directory_summary[directory] += len(findings_list)
 
-            return [
-                {
-                    'file_path': finding.file_path,
-                    'line_number': finding.line_number,
-                    'context': finding.context,
-                    'match_text': finding.match_text
-                } for finding in findings
-            ]
+            files = []
+            sorted_files = sorted(grouped.keys())
+            
+            paginated_files = sorted_files[offset_files : offset_files + limit_files]
+
+            for file_path in paginated_files:
+                findings_list = grouped[file_path]
+                paginated_findings = findings_list[:limit_per_file]
+                
+                files.append({
+                    "file_path": file_path,
+                    "occurrence_count": len(findings_list),
+                    "directory": os.path.dirname(file_path) or "root",
+                    "findings": [
+                        {
+                            "line_number": f.line_number,
+                            "code_snippet": f.context,
+                            "match_text": f.match_text
+                        } for f in paginated_findings
+                    ],
+                    "has_more": len(findings_list) > limit_per_file,
+                    "showing": len(paginated_findings)
+                })
+            
+            return {
+                "algorithm": algorithm,
+                "total_occurrences": scan_result.occurrences,
+                "total_files": len(grouped),
+                "files": files,
+                "directory_summary": dict(directory_summary)
+            }
         except Exception as e:
+            logger.error(f"Failed to get algorithm findings: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
 
 
