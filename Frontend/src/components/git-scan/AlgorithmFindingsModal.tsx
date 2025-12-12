@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Modal } from '@/components/ui/modal';
+import { UnifiedModal, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/unified-modal';
+import { UnifiedExpandable } from '@/components/ui/unified-expandable';
 import { Button } from "@/components/ui/button";
 import { AlgorithmFindingsResponse, FileFinding, ScanDetail } from './types';
-import { Loader2, File, Folder, ChevronDown, ChevronRight, Code, XCircle, Search, ExternalLink } from 'lucide-react';
+import { Loader2, File, Folder, Code, XCircle, Search, ExternalLink } from 'lucide-react';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism-tomorrow.css';
 
@@ -44,7 +45,7 @@ const AlgorithmFindingsModal: React.FC<AlgorithmFindingsModalProps> = ({ scanId,
         setIsLoading(true);
         setError(null);
         try {
-          const response = await fetch(`${API_URL}/api/scans/${scanId}/algorithm/${algorithmName}/findings`);
+          const response = await fetch(`${API_URL}/api/scans/${scanId}/algorithm/${encodeURIComponent(algorithmName)}/findings`);
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({ detail: `Failed to fetch findings. Status: ${response.status}` }));
             throw new Error(errorData.detail);
@@ -156,46 +157,47 @@ const AlgorithmFindingsModal: React.FC<AlgorithmFindingsModalProps> = ({ scanId,
   };
 
   return (
-    <Modal 
+    <UnifiedModal 
       isOpen={isOpen} 
-      onClose={onClose} 
-      title={`Code Occurrences: ${algorithmName}`} 
-      size="4xl"
-      description={`Detailed findings for the ${algorithmName} algorithm.`}
+      onOpenChange={onClose} 
+      size="xl"
     >
+      <DialogHeader>
+        <DialogTitle>Code Occurrences: {algorithmName}</DialogTitle>
+        <DialogDescription>
+          Detailed findings for the {algorithmName} algorithm.
+        </DialogDescription>
+      </DialogHeader>
       {renderContent()}
-    </Modal>
+    </UnifiedModal>
   );
 };
 
 const DirectoryView: React.FC<{ directory: string; files: FileFinding[], scanDetail: ScanDetail | null }> = ({ directory, files, scanDetail }) => {
-  const [isOpen, setIsOpen] = useState(true);
-
   return (
-    <div>
-      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center w-full text-left text-sm font-medium p-2 hover:bg-muted/50 rounded">
-        {isOpen ? <ChevronDown className="h-4 w-4 mr-2" /> : <ChevronRight className="h-4 w-4 mr-2" />}
-        <Folder className="h-4 w-4 mr-2 text-yellow-500" />
-        <span className="font-bold">{directory}</span>
-        <span className="ml-2 text-xs text-muted-foreground">({files.length} {files.length === 1 ? 'file' : 'files'})</span>
-      </button>
-      {isOpen && (
-        <div className="pl-6 border-l ml-4">
+    <UnifiedExpandable
+      defaultOpen
+      trigger={
+        <div className="flex items-center w-full text-left text-sm font-medium">
+          <Folder className="h-4 w-4 mr-2 text-warning" />
+          <span className="font-bold">{directory}</span>
+          <span className="ml-2 text-xs text-muted-foreground">({files.length} {files.length === 1 ? 'file' : 'files'})</span>
+        </div>
+      }
+    >
+        <div className="pl-6 border-l-2 border-muted ml-2">
           {files
             .sort((a,b) => a.file_path.localeCompare(b.file_path))
             .map(file => (
               <FileView key={file.file_path} file={file} scanDetail={scanDetail} />
           ))}
         </div>
-      )}
-    </div>
+    </UnifiedExpandable>
   );
 };
 
 
 const FileView: React.FC<{ file: FileFinding, scanDetail: ScanDetail | null }> = ({ file, scanDetail }) => {
-    const [isOpen, setIsOpen] = useState(false);
-
     const getLanguage = (filepath: string) => {
         const ext = filepath.split('.').pop()?.toLowerCase();
         const langMap: Record<string, string> = {
@@ -207,76 +209,82 @@ const FileView: React.FC<{ file: FileFinding, scanDetail: ScanDetail | null }> =
     };
 
     return (
-        <div className="my-2">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center w-full text-left text-sm hover:bg-muted/50 p-2 rounded transition-colors"
-            >
-                {isOpen ? <ChevronDown className="h-4 w-4 mr-2" /> : <ChevronRight className="h-4 w-4 mr-2" />}
-                <File className="h-4 w-4 mr-2 text-blue-500" />
-                <span className="font-medium">{file.file_path}</span>
-                <span className="ml-auto text-xs text-muted-foreground pr-2">
-                    {file.occurrence_count} {file.occurrence_count === 1 ? 'occurrence' : 'occurrences'}
-                </span>
-            </button>
-            {isOpen && (
-                <div className="pl-6 border-l-2 border-blue-200 dark:border-blue-800 ml-4 mt-1 space-y-2 py-2">
-                    {file.findings.map((finding, index) => (
-                        <div key={index} className="my-2 p-3 bg-slate-50 dark:bg-slate-900/70 rounded-lg border">
-                            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
-                                <div className="flex items-center gap-2">
-                                    <Code className="h-3 w-3" />
-                                    <span className="font-mono">Line {finding.line_number}</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 text-xs"
-                                        onClick={() => {
-                                            if (scanDetail) {
-                                                const githubUrl = `${scanDetail.repo_url.replace('.git', '')}/blob/${scanDetail.branch_name}/${file.file_path}#L${finding.line_number}`;
-                                                window.open(githubUrl, '_blank');
-                                            }
-                                        }}
-                                    >
-                                        <ExternalLink className="h-3 w-3 mr-1" />
-                                        View on GitHub
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 text-xs"
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(finding.code_snippet || '');
-                                        }}
-                                    >
-                                        Copy
-                                    </Button>
-                                </div>
-                            </div>
-                            <pre className="text-xs !bg-slate-900 dark:!bg-black/80 p-3 rounded overflow-x-auto">
-                                <code
-                                    className={`language-${getLanguage(file.file_path)}`}
-                                    dangerouslySetInnerHTML={{
-                                        __html: Prism.highlight(
-                                            finding.code_snippet || '',
-                                            Prism.languages[getLanguage(file.file_path)] || Prism.languages.clike,
-                                            getLanguage(file.file_path)
-                                        )
-                                    }}
-                                />
-                            </pre>
-                        </div>
-                    ))}
-                    {file.has_more && (
-                        <Button variant="link" size="sm" className="mt-2 text-blue-600 dark:text-blue-400">
-                            Show all {file.occurrence_count} occurrences →
-                        </Button>
-                    )}
+        <UnifiedExpandable
+            trigger={
+                <div className="flex items-center w-full text-left text-sm">
+                    <File className="h-4 w-4 mr-2 text-primary" />
+                    <span className="font-medium">{file.file_path}</span>
+                    <span className="ml-auto text-xs text-muted-foreground pr-2">
+                        {file.occurrence_count} {file.occurrence_count === 1 ? 'occurrence' : 'occurrences'}
+                    </span>
                 </div>
-            )}
-        </div>
+            }
+        >
+            <div className="pl-6 border-l-2 border-primary/20 ml-2 mt-1 space-y-2 py-2">
+                {file.findings.map((finding, index) => (
+                <div key={index} className="my-2">
+                  <div className="p-3 bg-muted/50 rounded-lg border">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-2 flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                                <Code className="h-3 w-3" />
+                                <span className="font-mono">Line {finding.line_number}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs"
+                                    onClick={() => {
+                                        if (scanDetail) {
+                                            const githubUrl = `${scanDetail.repo_url.replace('.git', '')}/blob/${scanDetail.branch_name}/${file.file_path}#L${finding.line_number}`;
+                                            window.open(githubUrl, '_blank');
+                                        }
+                                    }}
+                                >
+                                    <ExternalLink className="h-3 w-3 mr-1" />
+                                    View on GitHub
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs"
+                                    onClick={() => navigator.clipboard.writeText(finding.code_snippet || '')}
+                                >
+                                    Copy
+                                </Button>
+                            </div>
+                        </div>
+                        {/* FIXED: Added proper overflow containment and word breaking */}
+                        <div className="overflow-x-auto w-full">
+                          <pre className="text-xs !bg-background p-3 rounded !m-0 max-w-full overflow-x-auto">
+                              <code
+                                  className={`language-${getLanguage(file.file_path)} !whitespace-pre-wrap break-words`}
+                                  style={{ 
+                                    wordBreak: 'break-word',
+                                    overflowWrap: 'anywhere',
+                                    display: 'block',
+                                    maxWidth: '100%'
+                                  }}
+                                  dangerouslySetInnerHTML={{
+                                      __html: Prism.highlight(
+                                          finding.code_snippet || '',
+                                          Prism.languages[getLanguage(file.file_path)] || Prism.languages.clike,
+                                          getLanguage(file.file_path)
+                                      )
+                                  }} 
+                               />
+                          </pre>
+                        </div>
+                    </div>
+                </div>
+                ))}
+                {file.has_more && (
+                    <Button variant="link" size="sm" className="mt-2 text-primary">
+                        Show all {file.occurrence_count} occurrences →
+                    </Button>
+                )} 
+            </div>
+        </UnifiedExpandable>
     );
 };
 

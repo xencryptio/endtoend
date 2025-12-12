@@ -140,6 +140,11 @@ const commonColumns: ColumnDef[] = [
   { key: "notes", header: "Notes" },
 ];
 
+import { UnifiedCard } from "@/components/ui/unified-card";
+import { typography } from "@/lib/design-tokens";
+
+// ... (keep existing interfaces, types, api config, and api functions)
+
 // ============================================================================
 // MAIN SCAN COMPONENT (DASHBOARD CONTROLLER)
 // ============================================================================
@@ -306,66 +311,64 @@ const Scan = () => {
         >
           <div className="w-full max-w-2xl mx-auto">
             <div className="text-center mb-12">
-              <h1 className="text-4xl font-bold tracking-tight">Scan Center</h1>
+              <h1 className={typography.display}>Scan Center</h1>
               <p className="text-lg text-muted-foreground mt-2">Select a scan type to begin.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <motion.div whileHover={{ y: -5, scale: 1.02 }} transition={{ type: 'spring', stiffness: 300 }}>
-                <Card
-                  onClick={() => setView('webscan')}
-                  className="h-full flex flex-col justify-between cursor-pointer group border-2 hover:border-primary/50 transition-all"
-                >
-                  <CardHeader>
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                        <Globe className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-2xl">Web Scan</CardTitle>
-                        <CardDescription className="text-base">Scan your web assets for vulnerabilities.</CardDescription>
-                      </div>
+              <UnifiedCard
+                variant="premium"
+                onClick={() => setView('webscan')}
+                className="h-full flex flex-col justify-between cursor-pointer group"
+              >
+                <CardHeader>
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="p-3 bg-primary/10 rounded-lg">
+                      <Globe className="h-8 w-8 text-primary" />
                     </div>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground">
-                      Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues.
-                    </p>
-                  </CardContent>
-                  <div className="p-6 pt-0">
-                    <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                      Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                    </Button>
-                  </div>
-                </Card>
-              </motion.div>
-              <motion.div whileHover={{ y: -5, scale: 1.02 }} transition={{ type: 'spring', stiffness: 300 }}>
-                <Card
-                  onClick={() => setView('gitscan')}
-                  className="h-full flex flex-col justify-between cursor-pointer group border-2 hover:border-primary/50 transition-all"
-                >
-                  <CardHeader>
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                        <Github className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-2xl">Git Scan</CardTitle>
-                        <CardDescription className="text-base">Scan your Git repositories for vulnerabilities.</CardDescription>
-                      </div>
+                    <div>
+                      <CardTitle className="text-2xl">Web Scan</CardTitle>
+                      <CardDescription className="text-base">Scan your web assets for vulnerabilities.</CardDescription>
                     </div>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground">
-                      Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness.
-                    </p>
-                  </CardContent>
-                  <div className="p-6 pt-0">
-                    <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                      Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                    </Button>
                   </div>
-                </Card>
-              </motion.div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground">
+                    Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues.
+                  </p>
+                </CardContent>
+                <div className="p-6 pt-0">
+                  <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                  </Button>
+                </div>
+              </UnifiedCard>
+              <UnifiedCard
+                variant="premium"
+                onClick={() => setView('gitscan')}
+                className="h-full flex flex-col justify-between cursor-pointer group"
+              >
+                <CardHeader>
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="p-3 bg-primary/10 rounded-lg">
+                      <Github className="h-8 w-8 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-2xl">Git Scan</CardTitle>
+                      <CardDescription className="text-base">Scan your Git repositories for vulnerabilities.</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground">
+                    Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness.
+                  </p>
+                </CardContent>
+                <div className="p-6 pt-0">
+                  <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                  </Button>
+                </div>
+              </UnifiedCard>
             </div>
           </div>
         </motion.div>

@@ -68,6 +68,31 @@ const getCategoryDisplayName = (category: string): string => {
   return names[category] || category;
 };
 
+// Add this helper function at the top of your component
+const isDataReady = (scanDetail: ScanDetail | null): boolean => {
+  if (!scanDetail) return false;
+  
+  // Check if critical data is loaded
+  const hasBasicData = !!(
+    scanDetail.overall_security_score !== undefined &&
+    scanDetail.overall_grade &&
+    scanDetail.quantum_readiness_percentage !== undefined
+  );
+  
+  return hasBasicData;
+};
+
+const SkeletonCard = () => (
+  <div className="bg-card/60 rounded-2xl p-6 border backdrop-blur-sm animate-pulse h-48">
+    <div className="h-4 bg-muted/50 rounded w-1/3 mb-6"></div>
+    <div className="flex items-end gap-3 mb-6">
+        <div className="h-12 bg-muted/50 rounded w-16"></div>
+        <div className="h-8 bg-muted/50 rounded w-8"></div>
+    </div>
+    <div className="h-3 bg-muted/50 rounded-full w-full"></div>
+  </div>
+);
+
 interface AlgorithmSectionProps {
   title: string;
   description: string;
@@ -315,6 +340,24 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
       );
     }
 
+    // ADD THIS CHECK - Wait for data to be fully ready
+    if (!isDataReady(scanDetail)) {
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center space-y-6">
+            <div className="relative mx-auto w-16 h-16">
+              <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-base font-bold text-foreground">Processing scan data</p>
+              <p className="text-sm text-muted-foreground font-medium animate-pulse">Almost ready...</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (!scanDetail) {
       return <div className="text-center p-10">No scan details found.</div>;
     }
@@ -396,17 +439,17 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
               </div>
               <div className="flex items-end gap-3 mb-4">
                 <div className="text-6xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  {data.overall_security_score?.toFixed(1) || 'N/A'}
+                  {data.overall_security_score?.toFixed(1) ?? 'N/A'}
                 </div>
-                <div className={`text-3xl font-bold mb-2 ${getGradeColor(data.overall_grade)}`}>
-                  {data.overall_grade || 'N/A'}
+                <div className={`text-3xl font-bold mb-2 ${getGradeColor(data.overall_grade ?? '')}`}>
+                  {data.overall_grade ?? 'N/A'}
                 </div>
               </div>
               <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner">
                 <div 
-                  className={`h-full transition-all duration-700 ease-out shadow-sm ${getScoreBarColor(data.overall_security_score || 0)}`}
+                  className={`h-full transition-all duration-700 ease-out shadow-sm ${getScoreBarColor(data.overall_security_score ?? 0)}`}
                   style={{ 
-                    width: `${data.overall_security_score || 0}%`,
+                    width: `${data.overall_security_score ?? 0}%`,
                     boxShadow: '0 0 10px currentColor'
                   }}
                 />
@@ -419,7 +462,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
               </div>
               <div className="flex items-end gap-2 mb-4">
                 <div className="text-6xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  {data.quantum_readiness_percentage?.toFixed(1) || '0.0'}
+                  {data.quantum_readiness_percentage?.toFixed(1) ?? '0.0'}
                 </div>
                 <div className="text-3xl font-bold text-slate-500 dark:text-slate-400 mb-2">%</div>
               </div>
@@ -436,17 +479,17 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
               <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
                 Risk Level
               </div>
-              <div className={`text-3xl font-bold tracking-tight mb-4 ${getRiskLevelInfo(data.overall_security_score || 0).color}`}>
-                {getRiskLevelInfo(data.overall_security_score || 0).label}
+              <div className={`text-3xl font-bold tracking-tight mb-4 ${getRiskLevelInfo(data.overall_security_score ?? 0).color}`}>
+                {getRiskLevelInfo(data.overall_security_score ?? 0).label}
               </div>
               <div className={`inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border ${
-                data.overall_security_score >= 80 
+                (data.overall_security_score ?? 0) >= 80 
                   ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
-                  : data.overall_security_score >= 60
+                  : (data.overall_security_score ?? 0) >= 60
                   ? 'bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-900 text-yellow-700 dark:text-yellow-300'
                   : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
               }`}>
-                {getRiskLevelInfo(data.overall_security_score || 0).description}
+                {getRiskLevelInfo(data.overall_security_score ?? 0).description}
               </div>
             </div>
           </div>

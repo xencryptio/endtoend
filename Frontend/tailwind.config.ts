@@ -1,5 +1,6 @@
 import type { Config } from "tailwindcss";
 import animate from "tailwindcss-animate";
+import { colorTokens } from "./src/lib/design-tokens";
 
 const config = {
   darkMode: ["class"],
@@ -21,12 +22,14 @@ const config = {
     },
     extend: {
       colors: {
+        ...colorTokens,
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         primary: {
+          ...colorTokens.primary,
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
           glow: "hsl(var(--primary-glow))",
@@ -36,14 +39,17 @@ const config = {
           foreground: "hsl(var(--secondary-foreground))",
         },
         destructive: {
+          ...colorTokens.destructive,
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
         success: {
+          ...colorTokens.success,
           DEFAULT: "hsl(var(--success))",
           foreground: "hsl(var(--success-foreground))",
         },
         warning: {
+          ...colorTokens.warning,
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--warning-foreground))",
         },

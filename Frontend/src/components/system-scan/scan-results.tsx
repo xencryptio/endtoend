@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   ChevronDown, ChevronUp, ExternalLink, X, FileText, Shield,
   Award, Target, Lock, CheckCircle, AlertTriangle,
@@ -17,12 +17,13 @@ const premiumColors = {
   successGradient: 'from-emerald-500 via-green-500 to-teal-400',
   warningGradient: 'from-amber-500 via-orange-500 to-red-400',
   criticalGradient: 'from-red-600 via-rose-600 to-pink-600',
-  
+
   // Glows
   primaryGlow: 'shadow-[0_0_40px_rgba(26,79,255,0.3)]',
   successGlow: 'shadow-[0_0_30px_rgba(16,185,129,0.25)]',
   criticalGlow: 'shadow-[0_0_30px_rgba(239,68,68,0.3)]',
 };
+
 // ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
@@ -51,40 +52,45 @@ interface AuditResult {
 // UTILITY FUNCTIONS
 // ============================================================================
 
+import { Button } from '@/components/ui/button';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+
+// ... (other imports)
+
 const getGradeColor = (grade: string) => {
-  if (!grade) return 'text-slate-500';
+  if (!grade) return 'text-muted-foreground';
   const g = grade.toUpperCase();
-  if (g.startsWith('A')) return 'text-green-600 dark:text-green-400';
-  if (g.startsWith('B')) return 'text-blue-600 dark:text-blue-400';
-  if (g.startsWith('C')) return 'text-yellow-600 dark:text-yellow-400';
-  if (g.startsWith('D')) return 'text-orange-600 dark:text-orange-400';
-  return 'text-red-600 dark:text-red-400';
+  if (g.startsWith('A')) return 'text-success';
+  if (g.startsWith('B')) return 'text-primary';
+  if (g.startsWith('C')) return 'text-warning';
+  if (g.startsWith('D')) return 'text-orange-500';
+  return 'text-destructive';
 };
 
 const getScoreColor = (score: number) => {
-  if (score >= 90) return 'text-green-600 dark:text-green-400';
-  if (score >= 75) return 'text-blue-600 dark:text-blue-400';
-  if (score >= 60) return 'text-yellow-600 dark:text-yellow-400';
-  if (score >= 50) return 'text-orange-600 dark:text-orange-400';
-  return 'text-red-600 dark:text-red-400';
+  if (score >= 90) return 'text-success';
+  if (score >= 75) return 'text-primary';
+  if (score >= 60) return 'text-warning';
+  if (score >= 50) return 'text-orange-500';
+  return 'text-destructive';
 };
 
 const getScoreBgColor = (score: number) => {
-  if (score >= 90) return 'bg-green-500';
-  if (score >= 75) return 'bg-blue-500';
-  if (score >= 60) return 'bg-yellow-500';
+  if (score >= 90) return 'bg-success';
+  if (score >= 75) return 'bg-primary';
+  if (score >= 60) return 'bg-warning';
   if (score >= 50) return 'bg-orange-500';
-  return 'bg-red-500';
+  return 'bg-destructive';
 };
 
 const getGradeBgColor = (grade: string) => {
-  if (!grade) return 'from-red-600 to-rose-700';
+  if (!grade) return 'from-destructive to-rose-700';
   const g = grade.toUpperCase();
-  if (g.startsWith('A')) return 'from-green-500 to-emerald-600';
-  if (g.startsWith('B')) return 'from-blue-500 to-cyan-600';
-  if (g.startsWith('C')) return 'from-yellow-500 to-orange-500';
+  if (g.startsWith('A')) return 'from-success to-emerald-600';
+  if (g.startsWith('B')) return 'from-primary to-cyan-600';
+  if (g.startsWith('C')) return 'from-warning to-orange-500';
   if (g.startsWith('D')) return 'from-orange-500 to-red-500';
-  return 'from-red-600 to-rose-700';
+  return 'from-destructive to-rose-700';
 };
 const formatDate = (dateStr: string) => {
   try {
@@ -101,9 +107,8 @@ const formatDate = (dateStr: string) => {
 export const PQCResultCard: React.FC<{
   result: AuditResult;
   index: number;
-  isExpanded?: boolean;
   onViewDetails: (result: AuditResult) => void;
-}> = ({ result, index, onViewDetails }) => {
+}> = ({ result, onViewDetails }) => {
   const pqcScore = result.audit_results?.pqc_score || {};
   const overallScore = pqcScore.overall_score || 0;
   const overallGrade = pqcScore.overall_grade || 'N/A';
@@ -113,152 +118,106 @@ export const PQCResultCard: React.FC<{
   const componentEntries = Object.entries(components);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }}
-    >
-      <Card className="
-  relative overflow-hidden 
-  backdrop-blur-xl 
-  bg-white dark:bg-slate-900
-  border-2 border-slate-200 dark:border-slate-700
-  rounded-2xl
-  shadow-lg shadow-slate-200/50 dark:shadow-black/20
-  hover:shadow-2xl hover:shadow-primary/20
-  hover:-translate-y-2
-  hover:border-primary/50
-  transition-all duration-300
-  group
-">
-        <CardContent className="p-8">
-          {/* Header */}
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <FileText size={18} className="text-primary" />
-                <h3 className="font-mono text-sm font-bold text-foreground truncate">
-                  {result.task_id}
-                </h3>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {formatDate(result.submitted_at)}
-              </p>
+    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+        <div>
+          <CardTitle className="text-sm font-semibold text-muted-foreground">
+            Scan Result
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1 font-mono">
+            {result.task_id}
+          </p>
+        </div>
+        <FileText className="h-5 w-5 text-primary" />
+      </CardHeader>
+
+      <CardContent className="px-6 pb-6">
+        {/* Security Level Badge */}
+        {hasScoring && pqcScore.security_level && (
+          <div className="mb-4">
+            <div className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold ${pqcScore.security_level === 'high'
+              ? 'bg-success/10 text-success'
+              : pqcScore.security_level === 'medium'
+                ? 'bg-primary/10 text-primary'
+                : 'bg-destructive/10 text-destructive'
+              }`}>
+              {pqcScore.security_level.toUpperCase()} SECURITY
             </div>
           </div>
+        )}
 
-          {/* Security Level Badge - PHASE 5 */}
-          {hasScoring && pqcScore.security_level && (
-            <div className="mb-6">
-              <div className={`
-    inline-flex items-center gap-3 
-    px-4 py-2 
-    rounded-full 
-    text-sm font-bold uppercase tracking-wide
-    border-2
-    ${
-      pqcScore.security_level === 'high' 
-        ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white border-green-400/30 shadow-lg shadow-green-500/30' :
-      pqcScore.security_level === 'medium' 
-        ? 'bg-gradient-to-r from-blue-500 to-cyan-600 text-white border-blue-400/30 shadow-lg shadow-blue-500/30' :
-      pqcScore.security_level === 'low' 
-        ? 'bg-gradient-to-r from-orange-500 to-amber-600 text-white border-orange-400/30 shadow-lg shadow-orange-500/30' :
-        'bg-gradient-to-r from-red-600 to-rose-700 text-white border-red-400/30 shadow-lg shadow-red-500/30'
-    }
-              }`}>
-                <Shield size={16} />
-                {pqcScore.security_level.toUpperCase()} SECURITY
-              </div>
-            </div>
-          )}
-          {/* Brief Summary Stats - PHASE 6 */}
-          {hasScoring && (
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              {[
-                { label: 'Total Algorithms', value: componentEntries.reduce((sum, [, comp]: [string, any]) => sum + (comp.algorithms?.length || 0), 0) },
-                { label: 'Components', value: componentEntries.length},
-                { label: 'Overall Score', value: overallScore.toFixed(1) },
-                { label: 'Grade', value: overallGrade }
-              ].map(stat => (
-                <div key={stat.label} className="
-                  p-4 
-                  rounded-xl 
-                  bg-gradient-to-br from-slate-50 to-slate-100
-                  dark:from-slate-800 dark:to-slate-900
-                  border border-slate-200 dark:border-slate-700
-                  hover:border-primary/50
-                  transition-all duration-200
-                  group
-                ">
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide font-semibold">
-                    {stat.label}
+        {/* Stats Grid */}
+        {hasScoring && (
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            {(() => {
+              const totalScans = componentEntries.reduce((sum, [, comp]: [string, any]) =>
+                sum + (comp.algorithms?.length || 0), 0);
+              const successfulScans = componentEntries.reduce((sum, [, comp]: [string, any]) =>
+                sum + (comp.quantum_safe_count || 0), 0);
+              const successRate = totalScans > 0 ? ((successfulScans / totalScans) * 100).toFixed(0) : 0;
+              const failedScans = totalScans - successfulScans;
+
+              return (
+                <>
+                  <div className="bg-muted rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Total Scans</div>
+                    <div className="text-2xl font-bold">{totalScans}</div>
                   </div>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white group-hover:text-primary transition-colors">
-                    {stat.value}
+                  <div className="bg-success/10 rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
+                    <div className="text-2xl font-bold text-success">{successRate}%</div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Quantum Ready Status */}
-          {hasScoring && (
-            <div className="flex gap-2 mb-4">
-              <div className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold text-center ${
-                pqcScore.quantum_ready
-                  ? 'bg-success/10 text-success'
-                  : 'bg-muted text-muted-foreground'
-              }`}>
-                {pqcScore.quantum_ready ? '✓ Quantum Ready' : '✗ Not Quantum Ready'}
-              </div>
-              {pqcScore.hybrid_ready && (
-                <div className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold text-center bg-primary/10 text-primary">
-                  ✓ Hybrid Ready
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* No Scoring Available */}
-          {!hasScoring && (
-            <div className="
-  p-6 
-  bg-gradient-to-br from-red-50 to-rose-50
-  dark:from-red-900/20 dark:to-rose-900/20
-  border-2 border-red-200 dark:border-red-800
-  rounded-2xl
-  shadow-lg shadow-red-500/10
-">
-              <p className="text-base font-bold text-red-700 dark:text-red-400 flex items-center gap-2">
-                <AlertTriangle size={20} />
-                ⚠️ PQC scoring not available for this scan
-              </p>
-            </div>
-          )}
-
-          {/* Action Buttons - PHASE 8 */}
-          <div className="flex gap-2">
-            <motion.button
-              whileHover={{ scale: 1.02, y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => onViewDetails(result)}
-              className="
-    w-full px-6 py-4 rounded-xl bg-gradient-to-r from-primary to-blue-600
-    hover:from-primary hover:to-blue-700
-    text-white font-bold text-sm uppercase tracking-wide
-    shadow-lg shadow-primary/30
-    hover:shadow-xl hover:shadow-primary/40
-    transition-all duration-300
-    flex items-center justify-center gap-3
-    border-2 border-primary/20"
-            >
-              <ExternalLink size={18} className="inline" />
-              View Full Report
-            </motion.button>
+                  <div className="bg-success/10 rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Successful</div>
+                    <div className="text-2xl font-bold text-success">{successfulScans}</div>
+                  </div>
+                  <div className="bg-destructive/10 rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Failed</div>
+                    <div className="text-2xl font-bold text-destructive">{failedScans}</div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
-        </CardContent>
-      </Card>
-    </motion.div>
+        )}
+
+        {/* Quantum Ready Status */}
+        {hasScoring && (
+          <div className="flex gap-2 mb-4">
+            <div className={`flex-1 px-3 py-1.5 rounded-md text-center text-xs font-semibold ${pqcScore.quantum_ready
+              ? 'bg-success/10 text-success'
+              : 'bg-muted text-muted-foreground'
+              }`}>
+              {pqcScore.quantum_ready ? '✓ Quantum Ready' : '✗ Not Quantum Ready'}
+            </div>
+            {pqcScore.hybrid_ready && (
+              <div className="flex-1 px-3 py-1.5 rounded-md text-center text-xs font-semibold bg-primary/10 text-primary">
+                ✓ Hybrid Ready
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* No Scoring Available */}
+        {!hasScoring && (
+          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg mb-4">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <p className="text-sm font-semibold">PQC scoring not available</p>
+            </div>
+          </div>
+        )}
+
+        {/* Action Button */}
+        <Button
+          onClick={() => onViewDetails(result)}
+          className="w-full"
+        >
+          <ExternalLink size={16} className="mr-2" />
+          View Full Report
+        </Button>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -278,7 +237,7 @@ export const PQCExpandedResultModal: React.FC<{
     const platform = auditData?._metadata?.platform?.toLowerCase();
     if (platform === 'windows') return 'windows';
     if (platform === 'linux') return 'linux';
-    
+
     // Fallback detection for older data without metadata
     if (auditData.without_sudo || auditData.with_sudo) return 'linux';
     if (auditData.tls_ssl_configuration || auditData.cryptoapi_info) return 'windows';
@@ -318,14 +277,11 @@ export const PQCExpandedResultModal: React.FC<{
   const hasData = result && result.audit_results;
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+    <div
       className="
     fixed inset-0 
-    bg-black/70 
-    backdrop-blur-md 
+    bg-black/70
+    backdrop-blur-sm
     z-50 
     flex items-center justify-center 
     p-6 
@@ -333,59 +289,46 @@ export const PQCExpandedResultModal: React.FC<{
   "
       onClick={onClose}
     >
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.95, opacity: 0, y: 20 }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+      <div
         onClick={(e) => e.stopPropagation()}
         className="
     bg-white dark:bg-slate-900 
-    rounded-3xl 
+    rounded-xl 
     shadow-2xl
     border-2 border-slate-200 dark:border-slate-700
     max-w-7xl w-full max-h-[90vh] 
     overflow-hidden flex flex-col
   "
       >
-        {/* Header - PHASE 2.1 */}
-        <div className={`flex-shrink-0
-  bg-gradient-to-br ${premiumColors.primaryGradient}
-  p-8 md:p-12 
-  text-white
-  relative overflow-hidden
-  ${premiumColors.primaryGlow}
-`}>
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.1),transparent)] pointer-events-none" />
-          <div className="relative z-10">
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-4xl font-extrabold tracking-tight mb-2">Detailed PQC Audit Report</h2>
-                <p className="text-white/80 text-sm font-mono">{result.task_id}</p>
-                <p className="text-white/70 text-xs mt-1">{formatDate(result.submitted_at)}</p>
-              </div>
-              <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition-colors">
-                <X size={24} />
-              </button>
+        {/* Header - Clean Style */}
+        <CardHeader className="border-b px-6 py-4 bg-white dark:bg-slate-900">
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle className="text-2xl font-bold">Detailed Scan Results</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                {formatDate(result.submitted_at)} - {result.task_id}
+              </p>
             </div>
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+        </CardHeader>
 
-            {/* Overall Score Card - PHASE 2.2 */}
-            <div className="mt-8 bg-white/15 backdrop-blur-2xl rounded-3xl p-8 border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
-              <div className="grid grid-cols-4 gap-6">
-                {[
-                  { label: 'Overall Score', value: pqcScore.overall_score?.toFixed(1) || 'N/A', size: 'text-5xl' },
-                  { label: 'Grade', value: pqcScore.overall_grade || 'N/A', size: 'text-5xl' },
-                  { label: 'Quantum Ready', value: pqcScore.quantum_ready ? '✓' : '✗', size: 'text-5xl' },
-                  { label: 'Security Level', value: pqcScore.security_level || 'N/A', size: 'text-2xl', isBadge: true }
-                ].map(stat => (
-                  <div key={stat.label} className="text-center">
-                    <div className={`${stat.size} font-bold mb-2 tracking-tight ${stat.isBadge ? 'bg-white/20 py-2 rounded-lg' : ''}`}>{stat.value}</div>
-                    <div className="text-sm opacity-70 uppercase tracking-wider font-medium">{stat.label}</div>
-                  </div>
-                ))}
+        {/* Overall Score Section - Simplified */}
+        <div className="px-6 py-6 border-b bg-slate-50/50 dark:bg-slate-900/50">
+          <div className="grid grid-cols-4 gap-6">
+            {[
+              { label: 'Overall Score', value: pqcScore.overall_score?.toFixed(1) || 'N/A', size: 'text-4xl' },
+              { label: 'Grade', value: pqcScore.overall_grade || 'N/A', size: 'text-4xl' },
+              { label: 'Quantum Ready', value: pqcScore.quantum_ready ? '✓' : '✗', size: 'text-4xl' },
+              { label: 'Security Level', value: pqcScore.security_level || 'N/A', size: 'text-xl', isBadge: true }
+            ].map(stat => (
+              <div key={stat.label} className="text-center">
+                <div className={`${stat.size} font-bold mb-1 tracking-tight ${stat.isBadge ? 'bg-primary/10 text-primary py-1 px-3 rounded-full inline-block' : ''}`}>{stat.value}</div>
+                <div className="text-xs uppercase tracking-wider font-medium text-muted-foreground">{stat.label}</div>
               </div>
-            </div>
-
+            ))}
           </div>
         </div>
 
@@ -393,54 +336,49 @@ export const PQCExpandedResultModal: React.FC<{
         <div className="flex-shrink-0 border-b border-slate-200 dark:border-slate-700 px-6">
           <div className="flex gap-4 overflow-x-auto">
             {
-              (osType === 'windows' 
+              (osType === 'windows'
                 ? ['overview', 'components', 'algorithms', 'compliance', 'protocols', 'certificates', 'schannel', 'cryptoapi', 'system', 'raw']
                 : ['overview', 'components', 'algorithms', 'compliance', 'protocols', 'certificates', 'system', 'openssl', 'ssh', 'hardware', 'security', 'raw']
               ).map((tab) => {
-              const tabIcons: { [key: string]: React.ReactNode } = {
-                overview: <Activity size={14} />,
-                components: <Target size={14} />,
-                algorithms: <Lock size={14} />,
-                compliance: <CheckCircle size={14} />,
-                protocols: <Shield size={14} />,
-                certificates: <Award size={14} />,
-                system: <Server size={14} />,
-                openssl: <FileText size={14} />,
-                ssh: <Lock size={14} />,
-                hardware: <Cpu size={14} />,
-                security: <Shield size={14} />,
-                raw: <Database size={14} />,
-                cryptoapi: <Cpu size={14} />,
-                schannel: <Shield size={14} />,
-              };
+                const tabIcons: { [key: string]: React.ReactNode } = {
+                  overview: <Activity size={14} />,
+                  components: <Target size={14} />,
+                  algorithms: <Lock size={14} />,
+                  compliance: <CheckCircle size={14} />,
+                  protocols: <Shield size={14} />,
+                  certificates: <Award size={14} />,
+                  system: <Server size={14} />,
+                  openssl: <FileText size={14} />,
+                  ssh: <Lock size={14} />,
+                  hardware: <Cpu size={14} />,
+                  security: <Shield size={14} />,
+                  raw: <Database size={14} />,
+                  cryptoapi: <Cpu size={14} />,
+                  schannel: <Shield size={14} />,
+                };
 
-              return (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`
     px-6 py-4 
     font-bold text-sm capitalize 
     transition-all duration-300
-    border-b-3
+                    border-b-2
     whitespace-nowrap 
     flex items-center gap-3
-    relative
-    ${
-      activeTab === tab
-        ? 'border-primary text-primary bg-primary/5'
-        : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-    }
+    ${activeTab === tab
+                        ? 'border-primary text-primary bg-primary/5'
+                        : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }
                   }`}
-                >
-                  {activeTab === tab && (
-                    <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-primary to-blue-600 rounded-full" transition={{ type: "spring", stiffness: 380, damping: 30 }} />
-                  )}
-                  {tabIcons[tab]}
-                  {tab}
-                </button>
-              );
-            })}
+                  >
+                    {tabIcons[tab]}
+                    {tab}
+                  </button>
+                );
+              })}
           </div>
         </div>
 
@@ -457,37 +395,60 @@ export const PQCExpandedResultModal: React.FC<{
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8 mb-6">
-                  <Card>
-                    <CardContent className="p-4 text-center">
-                      <p className="text-2xl font-bold text-primary">
-                        {Object.keys(components).length}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">Components</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                  {/* Total Scans */}
+                  <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground">Total Scans</CardTitle>
+                      <FileText className="h-5 w-5 text-primary" />
+                    </CardHeader>
+                    <CardContent className="px-6 pb-6">
+                      <div className="text-3xl font-bold mb-2">{individualScores.length}</div>
+                      <p className="text-sm font-medium text-muted-foreground">Algorithms analyzed</p>
                     </CardContent>
                   </Card>
-                  <Card>
-                    <CardContent className="p-4 text-center">
-                      <p className="text-2xl font-bold text-foreground">
-                        {individualScores.length}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">Algorithms</p>
+
+                  {/* Success Rate */}
+                  <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground">Success Rate</CardTitle>
+                      <Activity className="h-5 w-5 text-success" />
+                    </CardHeader>
+                    <CardContent className="px-6 pb-6">
+                      <div className="text-3xl font-bold text-success mb-2">
+                        {individualScores.length > 0
+                          ? ((individualScores.filter((a: any) => a.quantum_safe).length / individualScores.length) * 100).toFixed(0)
+                          : 0}%
+                      </div>
+                      <p className="text-sm font-medium text-muted-foreground">Quantum safe rate</p>
                     </CardContent>
                   </Card>
-                  <Card>
-                    <CardContent className="p-4 text-center">
-                      <p className="text-2xl font-bold text-success">
-                        {individualScores.filter(a => a.quantum_safe).length}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">Quantum Safe</p>
+
+                  {/* Successful */}
+                  <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground">Successful</CardTitle>
+                      <CheckCircle className="h-5 w-5 text-success" />
+                    </CardHeader>
+                    <CardContent className="px-6 pb-6">
+                      <div className="text-3xl font-bold text-success mb-2">
+                        {individualScores.filter((a: any) => a.quantum_safe).length}
+                      </div>
+                      <p className="text-sm font-medium text-muted-foreground">Quantum ready</p>
                     </CardContent>
                   </Card>
-                  <Card>
-                    <CardContent className="p-4 text-center">
-                      <p className="text-2xl font-bold text-destructive">
-                        {individualScores.filter(a => a.deprecated).length}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">Deprecated</p>
+
+                  {/* Failed */}
+                  <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground">Failed</CardTitle>
+                      <AlertTriangle className="h-5 w-5 text-destructive" />
+                    </CardHeader>
+                    <CardContent className="px-6 pb-6">
+                      <div className="text-3xl font-bold text-destructive mb-2">
+                        {individualScores.length - individualScores.filter((a: any) => a.quantum_safe).length}
+                      </div>
+                      <p className="text-sm font-medium text-muted-foreground">Non-compliant</p>
                     </CardContent>
                   </Card>
                 </div>
@@ -504,7 +465,7 @@ export const PQCExpandedResultModal: React.FC<{
                             </span>
                           </div>
                           <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden shadow-inner">
-                            <motion.div 
+                            <div
                               className={`
                                 h-full 
                                 ${getScoreBgColor(comp.weighted_average || 0)}
@@ -513,12 +474,10 @@ export const PQCExpandedResultModal: React.FC<{
                                 relative
                                 overflow-hidden
                               `}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${comp.weighted_average || 0}%` }}
-                              transition={{ duration: 1, ease: "easeOut" }}
+                              style={{ width: `${comp.weighted_average || 0}%` }}
                             >
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                            </motion.div>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -613,71 +572,64 @@ export const PQCExpandedResultModal: React.FC<{
             {activeTab === 'algorithms' && (
               <div className="space-y-4">
                 <div className="text-sm text-muted-foreground mb-4">Showing {individualScores.length} individual algorithm scores</div>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ staggerChildren: 0.05 }}
-                >
-                {individualScores.slice(0, 50).map((algo: any, idx: number) => (
-                  <motion.div
-                    key={idx}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                  >
-                  <Card key={idx}>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex-1">
-                          <div className="font-mono text-sm font-bold text-foreground">{algo.algorithm}</div>
-                          <div className="text-xs text-muted-foreground capitalize">{algo.algorithm_type} • Position: {algo.position}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className={`text-2xl font-bold ${getScoreColor(algo.final_score)}`}>{algo.final_score?.toFixed(1)}</div>
-                          <div className={`text-sm font-bold ${getGradeColor(algo.grade)}`}>{algo.grade}</div>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3">
-                        <div><span className="text-muted-foreground">Base:</span><span className="ml-1 font-semibold">{algo.base_score}</span></div>
-                        <div><span className="text-muted-foreground">Key Size:</span><span className="ml-1 font-semibold">{algo.key_size} bits</span></div>
-                        <div><span className="text-muted-foreground">Curve:</span><span className="ml-1 font-semibold">{algo.curve_strength?.toFixed(1) || 'N/A'}</span></div>
-                        <div><span className="text-muted-foreground">Weighted:</span><span className="ml-1 font-semibold">{algo.weighted_score?.toFixed(1)}</span></div>
-                        <div>
-                          <span className="text-muted-foreground">Key Size Score:</span>
-                          <span className="ml-1 font-semibold">{algo.key_size_score}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Security Level:</span>
-                          <span className={`ml-1 font-semibold capitalize ${
-                            algo.security_level === 'high' ? 'text-success' :
-                            algo.security_level === 'medium' ? 'text-primary' :
-                            algo.security_level === 'low' ? 'text-warning' :
-                            'text-destructive'
-                          }`}>
-                            {algo.security_level}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        {algo.is_pqc && (
-                          <span className="px-3 py-1.5 bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-purple-500/30 border-2 border-purple-400/20">
-                            PQC
-                          </span>
-                        )}
-                        {algo.is_hybrid && <span className="px-3 py-1.5 bg-primary/10 text-primary text-xs rounded-full font-semibold">Hybrid</span>}
-                        {algo.quantum_safe && (
-                          <span className="px-3 py-1.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-green-500/30 border-2 border-green-400/20">
-                            Quantum Safe
-                          </span>
-                        )}
-                        {algo.deprecated && (
-                          <span className="px-3 py-1.5 bg-gradient-to-r from-red-600 to-rose-700 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-red-500/30 border-2 border-red-400/20 animate-pulse">
-                            Deprecated
-                          </span>
-                        )}
-                      </div>
-                      {algo.vulnerabilities && algo.vulnerabilities.length > 0 && (
-                        <div className="
+                <motion.div>
+                  {individualScores.slice(0, 50).map((algo: any, idx: number) => (
+                    <motion.div
+                      key={idx}
+                      className="mb-4"
+                    >
+                      <Card key={idx}>
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex-1">
+                              <div className="font-mono text-sm font-bold text-foreground">{algo.algorithm}</div>
+                              <div className="text-xs text-muted-foreground capitalize">{algo.algorithm_type} • Position: {algo.position}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className={`text-2xl font-bold ${getScoreColor(algo.final_score)}`}>{algo.final_score?.toFixed(1)}</div>
+                              <div className={`text-sm font-bold ${getGradeColor(algo.grade)}`}>{algo.grade}</div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3">
+                            <div><span className="text-muted-foreground">Base:</span><span className="ml-1 font-semibold">{algo.base_score}</span></div>
+                            <div><span className="text-muted-foreground">Key Size:</span><span className="ml-1 font-semibold">{algo.key_size} bits</span></div>
+                            <div><span className="text-muted-foreground">Curve:</span><span className="ml-1 font-semibold">{algo.curve_strength?.toFixed(1) || 'N/A'}</span></div>
+                            <div><span className="text-muted-foreground">Weighted:</span><span className="ml-1 font-semibold">{algo.weighted_score?.toFixed(1)}</span></div>
+                            <div>
+                              <span className="text-muted-foreground">Key Size Score:</span>
+                              <span className="ml-1 font-semibold">{algo.key_size_score}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Security Level:</span>
+                              <span className={`ml-1 font-semibold capitalize ${algo.security_level === 'high' ? 'text-success' :
+                                algo.security_level === 'medium' ? 'text-primary' :
+                                  algo.security_level === 'low' ? 'text-warning' :
+                                    'text-destructive'
+                                }`}>
+                                {algo.security_level}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            {algo.is_pqc && (
+                              <span className="px-3 py-1.5 bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-purple-500/30 border-2 border-purple-400/20">
+                                PQC
+                              </span>
+                            )}
+                            {algo.is_hybrid && <span className="px-3 py-1.5 bg-primary/10 text-primary text-xs rounded-full font-semibold">Hybrid</span>}
+                            {algo.quantum_safe && (
+                              <span className="px-3 py-1.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-green-500/30 border-2 border-green-400/20">
+                                Quantum Safe
+                              </span>
+                            )}
+                            {algo.deprecated && (
+                              <span className="px-3 py-1.5 bg-gradient-to-r from-red-600 to-rose-700 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-red-500/30 border-2 border-red-400/20 animate-pulse">
+                                Deprecated
+                              </span>
+                            )}
+                          </div>
+                          {algo.vulnerabilities && algo.vulnerabilities.length > 0 && (
+                            <div className="
   mt-3 p-6 
   bg-gradient-to-br from-red-50 to-rose-50
   dark:from-red-900/20 dark:to-rose-900/20
@@ -685,28 +637,28 @@ export const PQCExpandedResultModal: React.FC<{
   rounded-2xl
   shadow-lg shadow-red-500/10
 ">
-                          <p className="
+                              <p className="
     text-base font-bold text-red-700 dark:text-red-400 
     mb-3 
     flex items-center gap-2
   ">
-                            <AlertTriangle size={20} />
-                            ⚠️ Vulnerabilities:
-                          </p>
-                          <div className="space-y-2">
-                            {algo.vulnerabilities.map((vuln: string, i: number) => (
-                              <p key={i} className="text-sm text-slate-700 dark:text-slate-300 flex items-start gap-2">
-                                <span className="text-red-500 mt-0.5">•</span>
-                                {vuln}
+                                <AlertTriangle size={20} />
+                                ⚠️ Vulnerabilities:
                               </p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                  </motion.div>
-                ))}
+                              <div className="space-y-2">
+                                {algo.vulnerabilities.map((vuln: string, i: number) => (
+                                  <p key={i} className="text-sm text-slate-700 dark:text-slate-300 flex items-start gap-2">
+                                    <span className="text-red-500 mt-0.5">•</span>
+                                    {vuln}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  ))}
                 </motion.div>
               </div>
             )}
@@ -742,7 +694,7 @@ export const PQCExpandedResultModal: React.FC<{
                           <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                             <div
                               className={`h-full ${getScoreBgColor(score)}`}
-                              style={{width: `${score}%`}}
+                              style={{ width: `${score}%` }}
                             />
                           </div>
                         </div>
@@ -757,11 +709,10 @@ export const PQCExpandedResultModal: React.FC<{
                   <CardContent>
                     <div className="flex flex-wrap gap-2">
                       {protocolAnalysis.supported_versions?.map((v: string) => (
-                        <div key={v} className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                          protocolAnalysis.deprecated_versions?.includes(v)
-                            ? 'bg-destructive/10 text-destructive'
-                            : 'bg-primary/10 text-primary'
-                        }`}>
+                        <div key={v} className={`px-3 py-1 rounded-full text-sm font-semibold ${protocolAnalysis.deprecated_versions?.includes(v)
+                          ? 'bg-destructive/10 text-destructive'
+                          : 'bg-primary/10 text-primary'
+                          }`}>
                           {v}
                         </div>
                       ))}
@@ -897,8 +848,8 @@ export const PQCExpandedResultModal: React.FC<{
                             <div className="grid grid-cols-2 gap-2 text-xs">
                               <div>Algo: {cert.signature_algorithm}</div>
                               <div>Size: {cert.public_key_size} bits</div>
-                              </div>
                             </div>
+                          </div>
                         ))}
                       </div>
                     </CardContent>
@@ -908,31 +859,30 @@ export const PQCExpandedResultModal: React.FC<{
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Card>
                     <CardHeader><CardTitle className="text-base">Signature Algorithms</CardTitle></CardHeader>
-                      <CardContent>
-                        <div className="space-y-1">
-                          {certificateAnalysis.signature_algorithms?.map((algo: string, i: number) => (
-                            <div key={i} className="px-2 py-1 bg-accent/50 text-accent-foreground rounded text-xs font-mono">
-                              {algo}
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <CardContent>
+                      <div className="space-y-1">
+                        {certificateAnalysis.signature_algorithms?.map((algo: string, i: number) => (
+                          <div key={i} className="px-2 py-1 bg-accent/50 text-accent-foreground rounded text-xs font-mono">
+                            {algo}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
                   <Card>
                     <CardHeader><CardTitle className="text-base">Hash Algorithms</CardTitle></CardHeader>
                     <CardContent>
-                        <div className="space-y-1">
-                          {certificateAnalysis.hash_algorithms?.map((algo: string, i: number) => (
-                            <div key={i} className={`px-2 py-1 rounded text-xs font-mono ${
-                              algo === 'SHA1'
-                                ? 'bg-destructive/10 text-destructive'
-                                : 'bg-success/10 text-success'
+                      <div className="space-y-1">
+                        {certificateAnalysis.hash_algorithms?.map((algo: string, i: number) => (
+                          <div key={i} className={`px-2 py-1 rounded text-xs font-mono ${algo === 'SHA1'
+                            ? 'bg-destructive/10 text-destructive'
+                            : 'bg-success/10 text-success'
                             }`}>
-                              {algo}
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
+                            {algo}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
                   </Card>
                 </div>
               </div>
@@ -961,7 +911,7 @@ export const PQCExpandedResultModal: React.FC<{
                         <p className="mt-1 font-mono text-sm">{systemContext.kernel_version || 'N/A'}</p>
                       </div>
                     </div>
-                    
+
                     {/* Crypto Modules */}
                     <div>
                       <span className="text-sm text-muted-foreground">Loaded Crypto Modules</span>
@@ -1033,11 +983,10 @@ export const PQCExpandedResultModal: React.FC<{
                   <CardContent>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                       {Object.entries(opensslCrypto.available_algorithms || {}).map(([name, data]: [string, any]) => (
-                        <div key={name} className={`p-3 rounded-lg border-2 ${
-                          data.available
-                            ? 'border-success/50 bg-success/10'
-                            : 'border-destructive/50 bg-destructive/10'
-                        }`}>
+                        <div key={name} className={`p-3 rounded-lg border-2 ${data.available
+                          ? 'border-success/50 bg-success/10'
+                          : 'border-destructive/50 bg-destructive/10'
+                          }`}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="font-semibold uppercase text-sm">{name}</span>
                             <span className={data.available ? 'text-success' : 'text-destructive'}>
@@ -1071,13 +1020,13 @@ export const PQCExpandedResultModal: React.FC<{
                           <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-primary"
-                              style={{width: `${(count / opensslCrypto.cipher_information?.total_ciphers) * 100}%`}}
+                              style={{ width: `${(count / opensslCrypto.cipher_information?.total_ciphers) * 100}%` }}
                             />
                           </div>
                         </div>
                       ))}
                     </div>
-                    
+
                     {/* Cipher Details (first 10) */}
                     <div className="mt-4">
                       <p className="text-xs text-muted-foreground mb-2">Sample Ciphers:</p>
@@ -1250,11 +1199,10 @@ export const PQCExpandedResultModal: React.FC<{
                   <CardContent>
                     <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       {Object.entries(hardwareCrypto.cpu_crypto_features || {}).map(([feature, supported]: [string, any]) => (
-                        <div key={feature} className={`p-3 rounded-lg border-2 ${
-                          supported
-                            ? 'border-success/50 bg-success/10'
-                            : 'border-border bg-muted/50'
-                        }`}>
+                        <div key={feature} className={`p-3 rounded-lg border-2 ${supported
+                          ? 'border-success/50 bg-success/10'
+                          : 'border-border bg-muted/50'
+                          }`}>
                           <div className="flex items-center gap-2">
                             <span className={supported ? 'text-success text-lg' : 'text-muted-foreground text-lg'}>
                               {supported ? '✓' : '○'}
@@ -1340,7 +1288,7 @@ export const PQCExpandedResultModal: React.FC<{
                         Total Providers: {cryptoApiInfo?.cryptographic_providers?.count || 0}
                       </p>
                     </div>
-                    
+
                     {cryptoApiInfo?.cryptographic_providers?.providers?.length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {cryptoApiInfo.cryptographic_providers.providers.map((provider: string, i: number) => (
@@ -1640,8 +1588,8 @@ export const PQCExpandedResultModal: React.FC<{
             )}
           </>)}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };
 
@@ -1680,14 +1628,13 @@ export const AgentResultsPage: React.FC<{
       {/* Header */}
       <div className="bg-card border-b border-border shadow-[var(--shadow-card)]">
         <div className="max-w-7xl mx-auto px-8 py-12">
-          <motion.button
-            whileHover={{ x: -4 }}
+          <button
             onClick={onBack}
             className="flex items-center gap-2 text-muted-foreground hover:text-foreground mb-4 transition-colors font-medium"
           >
             <ArrowLeft size={20} />
             Back to Dashboard
-          </motion.button>
+          </button>
 
           <div className="flex items-start justify-between">
             <div>
@@ -1713,72 +1660,54 @@ export const AgentResultsPage: React.FC<{
         {/* Stats Cards - PHASE 3 */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 md:gap-8 mb-8">
           {(Object.values(stats).length > 0) && [
-            { icon: Activity, label: 'Total Scans', value: stats.total, gradient: 'from-blue-500 to-blue-600', shadow: 'shadow-blue-500/30' },
-            { icon: CheckCircle, label: 'Success Rate', value: `${stats.successRate}%`, gradient: 'from-green-500 to-emerald-600', shadow: 'shadow-green-500/30' },
-            { icon: CheckCircle, label: 'Successful', value: stats.successful, gradient: 'from-emerald-500 to-green-600', shadow: 'shadow-emerald-500/30' },
-            { icon: AlertCircle, label: 'Failed', value: stats.failed, gradient: 'from-red-500 to-rose-600', shadow: 'shadow-red-500/30' },
+            { icon: Activity, label: 'Total Scans', value: stats.total, color: 'text-blue-600', bg: 'bg-blue-100 dark:bg-blue-900/20' },
+            { icon: CheckCircle, label: 'Success Rate', value: `${stats.successRate}%`, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-900/20' },
+            { icon: CheckCircle, label: 'Successful', value: stats.successful, color: 'text-green-600', bg: 'bg-green-100 dark:bg-green-900/20' },
+            { icon: AlertCircle, label: 'Failed', value: stats.failed, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/20' },
           ].map((stat, idx) => (
-            <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * (idx + 1) }} whileHover={{ y: -4 }} >
-              <Card className="
-  relative overflow-hidden 
-  backdrop-blur-xl 
-  bg-gradient-to-br from-slate-50 to-white
-  dark:from-slate-900 dark:to-slate-800
-  border-2 border-slate-200 dark:border-slate-700
-  rounded-2xl
-  shadow-lg shadow-slate-200/50 dark:shadow-black/20
-  hover:shadow-xl hover:shadow-slate-300/50 dark:hover:shadow-black/40
-  hover:-translate-y-1
-  transition-all duration-300
-  group
-">
-                <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${stat.gradient}`} />
-                <CardContent className="p-8 text-center relative z-10">
-                  <div className={`
-      w-14 h-14 mx-auto mb-4 
-      rounded-2xl 
-      bg-gradient-to-br ${stat.gradient} 
-      flex items-center justify-center 
-      shadow-lg ${stat.shadow}
-      group-hover:scale-110 
-      transition-transform duration-300
-    `}>
-                    <stat.icon className="w-7 h-7 text-white" />
-                  </div>
-                  <div className="text-4xl font-bold text-slate-900 dark:text-white mb-2">{stat.value}</div>
-                  <div className="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400 font-semibold">{stat.label}</div>
-                </CardContent>
-              </Card>
-            </motion.div>
+            <Card key={stat.label} className="shadow-sm hover:shadow-md transition-all duration-200">
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
+                  <h3 className="text-2xl font-bold mt-2">{stat.value}</h3>
+                </div>
+                <div className={`p-3 rounded-full ${stat.bg}`}>
+                  <stat.icon className={`w-6 h-6 ${stat.color}`} />
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
 
         {/* Search Bar - PHASE 14 */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="mb-8 relative group">
-          <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-primary transition-colors duration-200" />
-          <input
-            type="text"
-            placeholder="Search by task ID or date..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="
-      w-full pl-14 pr-14 h-16 rounded-2xl border-2 border-slate-200 dark:border-slate-700
-      bg-white dark:bg-slate-900
-      text-slate-900 dark:text-white
-      placeholder-slate-400
-      focus:outline-none focus:ring-4 focus:ring-primary/20 focus:border-primary
-      transition-all duration-300
-      shadow-lg shadow-slate-200/50 dark:shadow-black/20
-      hover:shadow-xl
-      text-base"
-          />
-          {searchQuery && (
-            <motion.button initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} onClick={() => setSearchQuery('')} className="absolute right-5 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors duration-200 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
-                <X size={20} />
-            </motion.button>
-          )}
-          <p className="text-xs text-muted-foreground mt-2 ml-1">Showing {filteredResults.length} of {results.length} results</p>
-        </motion.div>
+        <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6 border shadow-sm mb-6">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"
+                size={20}
+              />
+              <input
+                type="text"
+                placeholder="Search by task ID or date..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-10 h-14 rounded-lg border bg-muted text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            Showing {filteredResults.length} of {results.length} results
+          </p>
+        </div>
 
         {/* Results Grid */}
         {filteredResults.length > 0 ? (
@@ -1793,17 +1722,13 @@ export const AgentResultsPage: React.FC<{
             ))}
           </div> // This closes the grid div
         ) : ( // This is the "else" part of the ternary
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.3 }}>
+          <div>
             <Card className="
-    backdrop-blur-xl 
-    bg-gradient-to-br from-slate-50 to-white
-    dark:from-slate-900 dark:to-slate-800
-    border-2 border-slate-200 dark:border-slate-700
-    rounded-3xl
-    shadow-xl
+    shadow-md
+    border border-slate-200 dark:border-slate-700
   ">
               <CardContent className="flex flex-col items-center justify-center py-24">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center mb-6 shadow-xl"><Search className="w-12 h-12 text-slate-400" /></div>
+                <div className="w-24 h-24 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-6"><Search className="w-12 h-12 text-slate-400" /></div>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white mb-3">
                   {searchQuery ? 'No results found' : 'No scan results available'}
                 </p>
@@ -1812,14 +1737,12 @@ export const AgentResultsPage: React.FC<{
                 </p>
               </CardContent>
             </Card>
-          </motion.div>
+          </div>
         )}
       </div>
 
       {/* Detailed Results Modal */}
-      <AnimatePresence>
-        {selectedResult && <PQCExpandedResultModal result={selectedResult} onClose={() => setSelectedResult(null)} />}
-      </AnimatePresence>
+      {selectedResult && <PQCExpandedResultModal result={selectedResult} onClose={() => setSelectedResult(null)} />}
     </div>
   );
 };

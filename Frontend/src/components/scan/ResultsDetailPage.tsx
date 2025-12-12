@@ -2,10 +2,10 @@ import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Search, X, Globe, Lock, Key, Hash, Shield, Zap, Check, CheckCircle, AlertTriangle, ShieldAlert, Info } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
- 
+
 interface ScanResult {
   request_id: string;
   url: string;
@@ -36,7 +36,7 @@ interface ScanResult {
   quantum_score?: number;
   quantum_grade?: string;
   detailedResults?: ScanResult[];
-  finalDomainProgress?: {[key: string]: {status: string, duration?: number}};
+  finalDomainProgress?: { [key: string]: { status: string, duration?: number } };
   pqc_analysis?: {
     overall_score: number;
     overall_grade: string;
@@ -113,10 +113,10 @@ const PQCStatusBadges: React.FC<{
 
 const DetailSection: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
   const [isOpen, setIsOpen] = useState(false);
-  
+
   return (
     <div className="border border-white/20 rounded-xl mb-4 backdrop-blur-xl bg-white/80 dark:bg-slate-900/80">
-      <div 
+      <div
         className="flex items-center justify-between p-3 bg-muted hover:bg-muted/80 cursor-pointer transition-colors"
         onClick={(e) => {
           e.stopPropagation();
@@ -217,7 +217,7 @@ const PQCAnalysisSection: React.FC<{ analysis: any }> = ({ analysis }) => {
           <div>
             <span className="text-xs uppercase tracking-wider font-semibold text-slate-500">Quantum Ready</span>
             <div className="text-lg flex items-center gap-2">
-              {analysis.quantum_ready 
+              {analysis.quantum_ready
                 ? <><div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center"><Check className="w-3 h-3 text-emerald-600" /></div><span>Yes</span></>
                 : <><div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center"><X className="w-3 h-3 text-rose-600" /></div><span>No</span></>}
             </div>
@@ -241,7 +241,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
   const certChain = rawData.certificate_chain || {};
   const leafCert = certChain.leaf_certificate || {};
   const signatureAlgorithms = rawData.signature_algorithms || {};
-  
+
   const getHashFromCipherName = (name: string): string => {
     const hashMatch = name.match(/SHA\d+/);
     if (hashMatch) return hashMatch[0];
@@ -264,7 +264,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
             </div>
             {curve.curve_pqc_score !== undefined && (
               <div className="mt-2 flex items-center justify-between">
-                <PQCStatusBadges 
+                <PQCStatusBadges
                   is_pqc={curve.curve_is_pqc}
                   is_hybrid={curve.curve_is_hybrid}
                   quantum_safe={curve.curve_quantum_safe}
@@ -285,7 +285,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
           {leafCert.cert_pqc_score !== undefined && (
             <div className="mt-3 pt-3 border-t">
               <DetailRow label="PQC Grade" value={<span className={`font-bold ${getGradeColor(leafCert.cert_pqc_grade)}`}>{leafCert.cert_pqc_grade} ({leafCert.cert_pqc_score})</span>} />
-              <DetailRow label="Status" value={<PQCStatusBadges 
+              <DetailRow label="Status" value={<PQCStatusBadges
                 is_pqc={leafCert.cert_is_pqc}
                 is_hybrid={leafCert.cert_is_hybrid}
                 quantum_safe={leafCert.cert_quantum_safe}
@@ -302,7 +302,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
             {cert.cert_pqc_score !== undefined && (
               <div className="mt-2 pt-2 border-t">
                 <DetailRow label="PQC Grade" value={<span className={`font-bold ${getGradeColor(cert.cert_pqc_grade)}`}>{cert.cert_pqc_grade} ({cert.cert_pqc_score})</span>} />
-                <DetailRow label="Status" value={<PQCStatusBadges 
+                <DetailRow label="Status" value={<PQCStatusBadges
                   is_pqc={cert.cert_is_pqc}
                   is_hybrid={cert.cert_is_hybrid}
                   quantum_safe={cert.cert_quantum_safe}
@@ -326,7 +326,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
                   <div className="mt-2 pt-2 border-t">
                     <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Signature Analysis</div>
                     <DetailRow label="PQC Grade" value={<span className={`font-bold ${getGradeColor(sig.sig_pqc_grade)}`}>{sig.sig_pqc_grade} ({sig.sig_pqc_score})</span>} />
-                    <DetailRow label="Status" value={<PQCStatusBadges 
+                    <DetailRow label="Status" value={<PQCStatusBadges
                       is_pqc={sig.sig_is_pqc}
                       is_hybrid={sig.sig_is_hybrid}
                       quantum_safe={sig.sig_quantum_safe}
@@ -356,7 +356,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
                 </div>
                 {sig.sig_pqc_score !== undefined && (
                   <div className="mt-2 flex items-center justify-between">
-                    <PQCStatusBadges 
+                    <PQCStatusBadges
                       is_pqc={sig.sig_is_pqc}
                       is_hybrid={sig.sig_is_hybrid}
                       quantum_safe={sig.sig_quantum_safe}
@@ -399,7 +399,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
                     {cipher.key_exchange} {cipher.curve_bits ? `(${cipher.curve_bits} bits)` : ''}
                   </div>
                 </div>
-                
+
                 {cipher.kex_pqc_score !== undefined && (
                   <div className="flex gap-4 text-xs mt-2">
                     <div className="flex items-center gap-2">
@@ -440,7 +440,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
                     {cipher.key_exchange} {cipher.curve_bits ? `(${cipher.curve_bits} bits)` : ''}
                   </div>
                 </div>
-                
+
                 {cipher.kex_pqc_score !== undefined && (
                   <div className="flex gap-4 text-xs mt-2">
                     <div className="flex items-center gap-2">
@@ -448,7 +448,7 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
                       <span className={`font-semibold ${getGradeColor(cipher.kex_pqc_grade)}`}>
                         {cipher.kex_pqc_grade} ({cipher.kex_pqc_score})
                       </span>
-                      <PQCStatusBadges 
+                      <PQCStatusBadges
                         is_pqc={cipher.kex_is_pqc}
                         is_hybrid={cipher.kex_is_hybrid}
                         quantum_safe={cipher.kex_quantum_safe}
@@ -533,7 +533,7 @@ const ExpandedDetailModal: React.FC<{
             <div className="flex-1">
               <h3 className="text-xl font-bold truncate">{result.url}</h3>
               <div className="text-sm text-muted-foreground mt-1">
-                {isSuccess 
+                {isSuccess
                   ? <div className="flex items-center gap-2"><div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center"><Check className="w-3 h-3 text-emerald-600" /></div><span>Scan Successful</span></div>
                   : <div className="flex items-center gap-2"><div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center"><X className="w-3 h-3 text-rose-600" /></div><span>Scan Failed</span></div>}
               </div>
@@ -593,7 +593,7 @@ const ExpandedDetailModal: React.FC<{
                     <div className="bg-amber-100 dark:bg-amber-900/40 rounded-lg p-4 text-sm">
                       <p className="font-semibold text-amber-900 dark:text-amber-100 mb-2">Why can't we scan this domain?</p>
                       <ul className="list-disc list-inside space-y-1 text-amber-800 dark:text-amber-200">
-                        
+
                         <li>HTTP domains don't use encryption</li>
                         <li>No cryptographic data is available to analyze</li>
                       </ul>
@@ -640,12 +640,11 @@ const DomainCard: React.FC<{
   const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? 'N/A';
 
   return (
-    <Card 
-      className={`cursor-pointer transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-2xl hover:-translate-y-1 border-l-4 ${
-        isSuccess ? 'border-l-emerald-500' : 
-        isHttpSkipped ? 'border-l-amber-500' : 
-        'border-l-rose-500'
-      }`}
+    <Card
+      className={`cursor-pointer transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-2xl hover:-translate-y-1 border-l-4 ${isSuccess ? 'border-l-emerald-500' :
+          isHttpSkipped ? 'border-l-amber-500' :
+            'border-l-rose-500'
+        }`}
       onClick={onExpand}
     >
       <CardContent className="p-4">
@@ -678,11 +677,10 @@ const DomainCard: React.FC<{
                 )}
               </div>
             </div>
-            <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${
-              isSuccess ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50 animate-pulse' : 
-              isHttpSkipped ? 'bg-amber-500 shadow-lg shadow-amber-500/50' :
-              'bg-rose-500 shadow-lg shadow-rose-500/50'
-            }`}></div>
+            <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${isSuccess ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50 animate-pulse' :
+                isHttpSkipped ? 'bg-amber-500 shadow-lg shadow-amber-500/50' :
+                  'bg-rose-500 shadow-lg shadow-rose-500/50'
+              }`}></div>
           </div>
 
           {isSuccess && (
@@ -705,7 +703,7 @@ const DomainCard: React.FC<{
               </div>
             </div>
           )}
-          
+
           {isHttpSkipped && (
             <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg text-xs text-amber-800 dark:text-amber-200">
               <p className="font-medium">⚠️ Cannot analyze HTTP domains. We requires HTTPS.</p>
@@ -760,15 +758,15 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) =
       {/* Header */}
       <div className="mb-8">
         <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-          <Button 
-            variant="outline" 
-            onClick={onBack} 
+          <Button
+            variant="outline"
+            onClick={onBack}
             className="mb-4"
           >
             <ArrowLeft className="h-4 w-4 mr-2" /> Back to Scan History
           </Button>
         </motion.div>
-        
+
         <div>
           <h2 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
             Scan Results
@@ -779,43 +777,40 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) =
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-3 gap-4 mt-6">
-          <Card className="relative overflow-hidden backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 border border-white/20 rounded-xl shadow-md hover:shadow-xl transition-all duration-300">
-            <div className="absolute -right-4 -top-4 w-24 h-24 bg-gradient-to-br from-emerald-500/10 to-green-500/10 rounded-full blur-2xl"></div>
-            <CardContent className="p-5 text-center relative z-10">
-              <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
-                <CheckCircle className="w-6 h-6 text-white" />
-              </div>
-              <div className="text-3xl font-bold bg-gradient-to-r from-emerald-600 to-green-600 bg-clip-text text-transparent">
-                {stats.successful}
-              </div>
-              <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">
-                Successful
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-6">
+          {/* Successful */}
+          <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+              <CardTitle className="text-sm font-semibold text-muted-foreground">Successful</CardTitle>
+              <CheckCircle className="h-5 w-5 text-emerald-500" />
+            </CardHeader>
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold text-emerald-500 mb-2">{stats.successful}</div>
+              <p className="text-sm font-medium text-muted-foreground">Completed scans</p>
             </CardContent>
           </Card>
-          <Card className="relative overflow-hidden backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 border border-white/20 rounded-xl shadow-md hover:shadow-xl transition-all duration-300">
-            <div className="absolute -right-4 -top-4 w-24 h-24 bg-gradient-to-br from-rose-500/10 to-red-500/10 rounded-full blur-2xl"></div>
-            <CardContent className="p-5 text-center relative z-10">
-              <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center">
-                <ShieldAlert className="w-6 h-6 text-white" />
-              </div>
-              <div className="text-3xl font-bold bg-gradient-to-r from-rose-600 to-red-600 bg-clip-text text-transparent">
-                {stats.failed}
-              </div>
-              <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">
-                Failed
-              </div>
+
+          {/* Failed */}
+          <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+              <CardTitle className="text-sm font-semibold text-muted-foreground">Failed</CardTitle>
+              <ShieldAlert className="h-5 w-5 text-destructive" />
+            </CardHeader>
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold text-destructive mb-2">{stats.failed}</div>
+              <p className="text-sm font-medium text-muted-foreground">Issues detected</p>
             </CardContent>
           </Card>
-          <Card className="relative overflow-hidden backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 border border-white/20 rounded-xl shadow-md hover:shadow-xl transition-all duration-300">
-             <div className="absolute -right-4 -top-4 w-24 h-24 bg-gradient-to-br from-slate-500/10 to-slate-500/10 rounded-full blur-2xl"></div>
-            <CardContent className="p-5 text-center relative z-10">
-               <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gradient-to-br from-slate-500 to-slate-600 flex items-center justify-center">
-                <Globe className="w-6 h-6 text-white" />
-              </div>
-              <div className="text-3xl font-bold text-foreground">{scan.detailedResults?.length ?? 0}</div>
-              <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-1">Total</div>
+
+          {/* Total */}
+          <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+              <CardTitle className="text-sm font-semibold text-muted-foreground">Total</CardTitle>
+              <Globe className="h-5 w-5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold mb-2">{scan.detailedResults?.length ?? 0}</div>
+              <p className="text-sm font-medium text-muted-foreground">Total URLs scanned</p>
             </CardContent>
           </Card>
         </div>
