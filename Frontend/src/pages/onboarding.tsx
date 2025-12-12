@@ -48,6 +48,10 @@ const cardVariants = {
     exit: { opacity: 0, y: -20 },
 };
 
+// API base URLs
+const BATCH_API_BASE = 'http://localhost:8008';  // Excel Batch Scanner API
+const AGENT_API_BASE = 'http://localhost:9000';  // Crypto Audit API Server
+
 const ScanProgress = ({ progress, logs }) => (
     <div className="mt-6 p-4 bg-muted/50 rounded-lg">
         <div className="mb-4">
@@ -139,7 +143,7 @@ const SystemDownloadCard: React.FC<{
 }> = ({ title, folderType, icon, description, files, loading, formatBytes, apiUrl }) => {
     const handleDownload = async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/v1/files/download-zip/${folderType}`);
+            const response = await fetch(`${AGENT_API_BASE}/api/v1/files/download-zip/${folderType}`);
             if (!response.ok) {
                 throw new Error(`Download failed: ${response.statusText}`);
             }
@@ -368,7 +372,7 @@ const OnboardingPage = () => {
     const [systemLoading, setSystemLoading] = useState(false);
 
 
-    const API_BASE = 'http://localhost:9000';
+    // `API_BASE` moved to top-level as `BATCH_API_BASE` and `AGENT_API_BASE`
 
     // Fetch jobs on mount and periodically
     useEffect(() => {
@@ -386,8 +390,8 @@ const OnboardingPage = () => {
         setSystemLoading(true);
         try {
             const [linuxResponse, windowsResponse] = await Promise.all([
-                fetch(`${API_BASE}/api/v1/files/list/linux`),
-                fetch(`${API_BASE}/api/v1/files/list/windows`)
+                fetch(`${AGENT_API_BASE}/api/v1/files/list/linux`),
+                fetch(`${AGENT_API_BASE}/api/v1/files/list/windows`)
             ]);
             const linuxData = await linuxResponse.json();
             const windowsData = await windowsResponse.json();
@@ -406,7 +410,7 @@ const OnboardingPage = () => {
 
     const loadJobs = async () => {
         try {
-            const response = await fetch(`${API_BASE}/api/batch-jobs`);
+            const response = await fetch(`${BATCH_API_BASE}/api/batch-jobs`);
             if (!response.ok) throw new Error('API Error');
             const data = await response.json();
             setJobs(data.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()));
@@ -421,7 +425,7 @@ const OnboardingPage = () => {
         setGithubError('');
         setDiscoveredRepos([]);
         try {
-            const response = await fetch(`${API_BASE}/api/github/discover`, {
+            const response = await fetch(`${BATCH_API_BASE}/api/github/discover`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ github_url: githubUrl })
@@ -447,7 +451,7 @@ const OnboardingPage = () => {
     };
 
     const connectSSE = (jobId: string) => {
-        const eventSource = new EventSource(`${API_BASE}/api/batch-jobs/${jobId}/stream`);
+        const eventSource = new EventSource(`${BATCH_API_BASE}/api/batch-jobs/${jobId}/stream`);
         
         eventSource.onmessage = (event) => {
             const data = JSON.parse(event.data);
@@ -502,23 +506,23 @@ const OnboardingPage = () => {
         if (!tlsFile) return;
         const formData = new FormData();
         formData.append('file', tlsFile);
-        startScan(`${API_BASE}/api/tls-scan/batch`, formData, 'tls');
+        startScan(`${BATCH_API_BASE}/api/tls-scan/batch`, formData, 'tls');
     };
         
     const startRepoScan = () => {
         if (!repoFile) return;
         const formData = new FormData();
         formData.append('file', repoFile);
-        startScan(`${API_BASE}/api/repo-scan/batch`, formData, 'repo');
+        startScan(`${BATCH_API_BASE}/api/repo-scan/batch`, formData, 'repo');
     };
         
     const exportJob = (jobId: string) => {
-        window.open(`${API_BASE}/api/batch-jobs/${jobId}/export`, '_blank');
+        window.open(`${BATCH_API_BASE}/api/batch-jobs/${jobId}/export`, '_blank');
     };
     
     const deleteJob = async (jobId: string) => {
         if (!confirm('Are you sure you want to delete this job?')) return;
-        await fetch(`${API_BASE}/api/batch-jobs/${jobId}`, { method: 'DELETE' });
+        await fetch(`${BATCH_API_BASE}/api/batch-jobs/${jobId}`, { method: 'DELETE' });
         loadJobs();
     };
 
@@ -560,7 +564,7 @@ const OnboardingPage = () => {
         if (!confirm(`You are about to scan ${reposToScan.length} repositories. Proceed?`)) return;
     
         try {
-            const response = await fetch(`${API_BASE}/api/repo-scan/batch-from-github`, {
+            const response = await fetch(`${BATCH_API_BASE}/api/repo-scan/batch-from-github`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repos: reposToScan })
@@ -941,7 +945,7 @@ const OnboardingPage = () => {
                                             files={linuxFiles}
                                             loading={systemLoading}
                                             formatBytes={formatBytes}
-                                            apiUrl={API_BASE}
+                                            apiUrl={AGENT_API_BASE}
                                         />
                                         <LinuxInstructionsCard />
                                     </section>
@@ -956,7 +960,7 @@ const OnboardingPage = () => {
                                             files={windowsFiles}
                                             loading={systemLoading}
                                             formatBytes={formatBytes}
-                                            apiUrl={API_BASE}
+                                            apiUrl={AGENT_API_BASE}
                                         />
                                         <WindowsInstructionsCard />
                                     </section>

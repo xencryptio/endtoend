@@ -73,89 +73,105 @@ const OrganizationalRiskChart: React.FC<Props> = ({ data }) => {
   ];
 
   const chartOptions = {
-  series: {
-    type: "sunburst",
-    center: ["50%", "50%"],  // Always center the chart
-    radius: [0, "90%"],      // Limit to 90% to avoid overflow
-    sort: null,
-    highlightPolicy: "ancestor",
-    nodeClick: "rootToNode", // Ensures drill-down and reset work well
-    animation: "auto",
-    animationDurationUpdate: 500,
-    emphasis: {
-      focus: "ancestor",
-      itemStyle: {
-        borderColor: "#000",
-        borderWidth: 2
-      }
+    legend: {
+      data: ['Low', 'Medium', 'High', 'Very High'],
+      bottom: 10,
+      itemGap: 20,
+      textStyle: {
+        color: '#333'
+      },
+      inactiveColor: '#ccc'
     },
-    data: chartData,
-    levels: [
+    series: [
       {
-        itemStyle: {
-          borderWidth: 0,
-          gapWidth: 0
-        }
-      },
-      {
-        r0: "0%",
-        r: "25%",
+        type: "sunburst",
+        center: ["50%", "50%"],  // Always center the chart
+        radius: [0, "90%"],      // Limit to 90% to avoid overflow
+        sort: undefined,
+        highlightPolicy: "ancestor",
+        nodeClick: "rootToNode", // Ensures drill-down and reset work well
+        animation: "auto",
+        animationDurationUpdate: 500,
+        emphasis: {
+          focus: "ancestor",
+          itemStyle: {
+            borderColor: "#000",
+            borderWidth: 2
+          }
+        },
+        data: chartData,
+        levels: [
+          {
+            itemStyle: {
+              borderWidth: 0,
+              gapWidth: 0
+            }
+          },
+          {
+            r0: "0%",
+            r: "25%",
+            label: {
+              rotate: 0,
+              color: "#000",
+              fontWeight: "bold",
+              fontSize: 14,
+              overflow: "truncate"
+            },
+            itemStyle: {
+              borderWidth: 2,
+              borderColor: "#fff"
+            }
+          },
+          {
+            r0: "25%",
+            r: "60%",
+            label: {
+              rotate: "radial",
+              color: "#000",
+              fontSize: 12,
+              overflow: "truncate"
+            },
+            itemStyle: {
+              borderWidth: 2,
+              borderColor: "#fff"
+            }
+          },
+          {
+            r0: "60%",
+            r: "90%",
+            label: {
+              rotate: "tangential",
+              fontSize: 11,
+              color: "#000",
+              overflow: "truncate"
+            },
+            itemStyle: {
+              borderWidth: 1,
+              borderColor: "#fff",
+              shadowBlur: 6,
+              shadowColor: "rgba(0, 0, 0, 0.2)"
+            }
+          }
+        ],
         label: {
-          rotate: 0,
-          color: "#000",
-          fontWeight: "bold",
-          fontSize: 14,
+          show: true,
+          formatter: "{b}",
           overflow: "truncate"
         },
-        itemStyle: {
-          borderWidth: 2,
-          borderColor: "#fff"
+        tooltip: {
+          formatter: function (info: any) {
+            const path = info.treePathInfo.map((x: any) => x.name).join(" → ");
+            return `<strong>${path}</strong><br/>Value: ${info.value || 0}`;
+          }
         }
       },
-      {
-        r0: "25%",
-        r: "60%",
-        label: {
-          rotate: "radial",
-          color: "#000",
-          fontSize: 12,
-          overflow: "truncate"
-        },
-        itemStyle: {
-          borderWidth: 2,
-          borderColor: "#fff"
-        }
-      },
-      {
-        r0: "60%",
-        r: "90%",
-        label: {
-          rotate: "tangential",
-          fontSize: 11,
-          color: "#000",
-          overflow: "truncate"
-        },
-        itemStyle: {
-          borderWidth: 1,
-          borderColor: "#fff",
-          shadowBlur: 6,
-          shadowColor: "rgba(0, 0, 0, 0.2)"
-        }
-      }
-    ],
-    label: {
-      show: true,
-      formatter: "{b}",
-      overflow: "truncate"
-    },
-    tooltip: {
-      formatter: function (info: any) {
-        const path = info.treePathInfo.map((x: any) => x.name).join(" → ");
-        return `<strong>${path}</strong><br/>Value: ${info.value || 0}`;
-      }
-    }
-  }
-};
+      // Dummy series for the legend
+      { name: 'Low', type: 'bar', data: [], itemStyle: { color: riskColors['Low'] } },
+      { name: 'Medium', type: 'bar', data: [], itemStyle: { color: riskColors['Medium'] } },
+      { name: 'High', type: 'bar', data: [], itemStyle: { color: riskColors['High'] } },
+      { name: 'Very High', type: 'bar', data: [], itemStyle: { color: riskColors['Very High'] } }
+    ]
+  };
 
 
   return (

@@ -1,26 +1,31 @@
-import requests
-from urllib.parse import urlparse
+import pandas as pd
 
-def detect_protocol(url):
-    parsed = urlparse(url.strip())
+def create_tls_template():
+    tls_data = {
+        "domain": [
+            "example.com",
+            "google.com",
+            "github.com"
+        ]
+    }
+    df = pd.DataFrame(tls_data)
+    df.to_excel("tls_scan_template.xlsx", index=False)
 
-    # If the user provided a scheme like http:// or https://
-    if parsed.scheme:
-        return parsed.scheme.lower()
+def create_repo_template():
+    repo_data = {
+        "repo_url": [
+            "https://github.com/user/repo1",
+            "https://github.com/user/repo2"
+        ],
+        "branch_name": [
+            "main",
+            "develop"
+        ]
+    }
+    df = pd.DataFrame(repo_data)
+    df.to_excel("repository_scan_template.xlsx", index=False)
 
-    # Otherwise, try to detect it live
-    for scheme in ["https", "http"]:
-        try:
-            response = requests.head(f"{scheme}://{url}", timeout=3)
-            if response.status_code < 400:
-                return scheme
-        except requests.exceptions.RequestException:
-            continue
-
-    return "unreachable"
-
-# Example usage
 if __name__ == "__main__":
-    url = input("Enter URL: ").strip()
-    protocol = detect_protocol(url)
-    print(f"Protocol detected: {protocol}")
+    create_tls_template()
+    create_repo_template()
+    print("Both Excel templates created successfully!")

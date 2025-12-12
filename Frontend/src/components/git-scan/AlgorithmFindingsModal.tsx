@@ -1,308 +1,283 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Modal, Box, Typography, IconButton, CircularProgress, Alert, Tooltip, TextField } from '@mui/material';
-import { X as XIcon, FileText, ChevronDown, ChevronRight, Folder, Copy, Search } from 'lucide-react';
-import { AlgorithmFindingsResponse, FileFinding, FindingDetail } from './types';
-import SyntaxHighlighter from 'react-syntax-highlighter';
-import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+import React, { useState, useEffect } from 'react';
+import { Modal } from '@/components/ui/modal';
+import { Button } from "@/components/ui/button";
+import { AlgorithmFindingsResponse, FileFinding, ScanDetail } from './types';
+import { Loader2, File, Folder, ChevronDown, ChevronRight, Code, XCircle, Search, ExternalLink } from 'lucide-react';
+import Prism from 'prismjs';
+import 'prismjs/themes/prism-tomorrow.css';
+
+// Load languages for prismjs
+import 'prismjs/components/prism-clike';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-tsx';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-java';
+import 'prismjs/components/prism-go';
+import 'prismjs/components/prism-rust';
+import 'prismjs/components/prism-ruby';
+
 
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
 
-// Helper to detect language from file extension
-const detectLanguage = (filePath: string): string => {
-  const extension = filePath.split('.').pop()?.toLowerCase();
-  switch (extension) {
-    case 'py': return 'python';
-    case 'js': return 'javascript';
-    case 'ts': return 'typescript';
-    case 'jsx': return 'javascript';
-    case 'tsx': return 'typescript';
-    case 'java': return 'java';
-    case 'c': return 'c';
-    case 'cpp': return 'cpp';
-    case 'cs': return 'csharp';
-    case 'go': return 'go';
-    case 'rs': return 'rust';
-    case 'rb': return 'ruby';
-    case 'php': return 'php';
-    case 'swift': return 'swift';
-    case 'kt': return 'kotlin';
-    case 'sh': return 'bash';
-    case 'html': return 'html';
-    case 'css': return 'css';
-    case 'scss': return 'scss';
-    case 'yaml': return 'yaml';
-    case 'yml': return 'yaml';
-    case 'json': return 'json';
-    case 'xml': return 'xml';
-    case 'sql': return 'sql';
-    case 'md': return 'markdown';
-    // Add more languages as needed
-    default: return 'plaintext';
-  }
-};
-
 interface AlgorithmFindingsModalProps {
-  open: boolean;
+  scanId: number;
+  algorithmName: string;
+  isOpen: boolean;
   onClose: () => void;
-  scanId: number | null;
-  algorithmName: string | null;
-  repoUrl: string;
-  branch: string;
+  scanDetail: ScanDetail | null;
 }
 
-const style = {
-  position: 'absolute' as 'absolute',
-  top: '50%',
-  left: '50%',
-  transform: 'translate(-50%, -50%)',
-  width: '80%',
-  maxWidth: '1200px',
-  bgcolor: 'background.paper',
-  border: '2px solid #000',
-  boxShadow: 24,
-  p: 4,
-  maxHeight: '90vh',
-  display: 'flex',
-  flexDirection: 'column',
-};
-
-const CodeSnippet: React.FC<{ finding: FindingDetail, repoUrl: string, branch: string, filePath: string }> = ({ finding, repoUrl, branch, filePath }) => {
-  const githubUrl = `${repoUrl}/blob/${branch}/${filePath}#L${finding.line_number}`;
-  const language = detectLanguage(filePath);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(finding.code_snippet)
-      .then(() => alert('Code snippet copied to clipboard!'))
-      .catch(err => console.error('Failed to copy text: ', err));
-  };
-
-  return (
-    <Box sx={{ 
-      p: 1.5, 
-      my: 1, 
-      backgroundColor: 'grey.100',
-      borderRadius: '4px', 
-      fontFamily: 'monospace', 
-      fontSize: '0.8rem',
-      border: '1px solid',
-      borderColor: 'grey.300'
-    }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          Line {finding.line_number}
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Tooltip title="Copy code snippet">
-            <IconButton size="small" onClick={handleCopy}>
-              <Copy style={{ fontSize: '0.9rem' }} />
-            </IconButton>
-          </Tooltip>
-          <a href={githubUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', fontSize: '0.75rem' }}>
-            View on GitHub
-          </a>
-        </Box>
-      </Box>
-      <SyntaxHighlighter
-        language={language}
-        style={atomOneDark}
-        showLineNumbers={true}
-        startingLineNumber={finding.line_number}
-        wrapLines={true}
-        lineProps={(lineNumber: number) => {
-          return {
-            style: {
-              backgroundColor: lineNumber === finding.line_number 
-                ? 'rgba(255, 255, 0, 0.2)' // Highlight matched line
-                : 'transparent'
-            }
-          };
-        }}
-        customStyle={{ padding: '0', margin: '0', background: 'none' }}
-      >
-        {finding.code_snippet}
-      </SyntaxHighlighter>
-    </Box>
-  );
-};
-
-
-const FileItem: React.FC<{ file: FileFinding, repoUrl: string, branch: string }> = ({ file, repoUrl, branch }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  return (
-    <Box sx={{ my: 1 }}>
-      <Box 
-        onClick={() => setIsExpanded(!isExpanded)}
-        sx={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          cursor: 'pointer', 
-          p: 1,
-          borderRadius: '4px',
-          '&:hover': { backgroundColor: 'action.hover' }
-        }}
-      >
-        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        <FileText size={16} style={{ marginLeft: '8px', marginRight: '8px' }} />
-        <Typography variant="body2" sx={{ flexGrow: 1 }}>
-          {file.file_path} ({file.occurrence_count})
-        </Typography>
-      </Box>
-      {isExpanded && (
-        <Box sx={{ pl: 4, borderLeft: '1px solid', borderColor: 'grey.400', ml: 2 }}>
-          {file.findings.map((finding, index) => (
-            <CodeSnippet key={index} finding={finding} repoUrl={repoUrl} branch={branch} filePath={file.file_path} />
-          ))}
-          {file.has_more && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-              ... and {file.occurrence_count - file.showing} more occurrences.
-            </Typography>
-          )}
-        </Box>
-      )}
-    </Box>
-  );
-};
-
-const DirectoryGroup: React.FC<{ directory: string, files: FileFinding[], repoUrl: string, branch: string }> = ({ directory, files, repoUrl, branch }) => {
-    const [isExpanded, setIsExpanded] = useState(true);
-
-    const totalOccurrences = useMemo(() => {
-        return files.reduce((acc, file) => acc + file.occurrence_count, 0);
-    }, [files]);
-
-    return (
-        <Box sx={{ my: 1.5 }}>
-            <Box 
-                onClick={() => setIsExpanded(!isExpanded)}
-                sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    cursor: 'pointer', 
-                    p: 1, 
-                    borderRadius: '4px',
-                    backgroundColor: 'grey.200',
-                    '&:hover': { backgroundColor: 'grey.300' }
-                }}
-            >
-                {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
-                <Folder size={20} style={{ marginLeft: '8px', marginRight: '8px' }} />
-                <Typography variant="subtitle1" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
-                    {directory} ({totalOccurrences} occurrences)
-                </Typography>
-            </Box>
-            {isExpanded && (
-                <Box sx={{ pl: 2, ml: 2 }}>
-                    {files.map((file) => (
-                        <FileItem key={file.file_path} file={file} repoUrl={repoUrl} branch={branch} />
-                    ))}
-                </Box>
-            )}
-        </Box>
-    );
-};
-
-const AlgorithmFindingsModal: React.FC<AlgorithmFindingsModalProps> = ({ open, onClose, scanId, algorithmName, repoUrl, branch }) => {
-  const [data, setData] = useState<AlgorithmFindingsResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+const AlgorithmFindingsModal: React.FC<AlgorithmFindingsModalProps> = ({ scanId, algorithmName, isOpen, onClose, scanDetail }) => {
+  const [findings, setFindings] = useState<AlgorithmFindingsResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredFiles, setFilteredFiles] = useState<FileFinding[]>([]);
 
   useEffect(() => {
-    if (open && scanId && algorithmName) {
+    if (isOpen) {
       const fetchFindings = async () => {
         setIsLoading(true);
         setError(null);
         try {
           const response = await fetch(`${API_URL}/api/scans/${scanId}/algorithm/${algorithmName}/findings`);
           if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || `Error: ${response.status}`);
+            const errorData = await response.json().catch(() => ({ detail: `Failed to fetch findings. Status: ${response.status}` }));
+            throw new Error(errorData.detail);
           }
-          const result: AlgorithmFindingsResponse = await response.json();
-          setData(result);
-          setFilteredFiles(result.files); // Initialize filtered files with all files
+          const data: AlgorithmFindingsResponse = await response.json();
+          setFindings(data);
         } catch (err: any) {
-          setError(err.message);
+          setError(err.message || 'Failed to load findings.');
         } finally {
           setIsLoading(false);
         }
       };
       fetchFindings();
     }
-  }, [open, scanId, algorithmName]);
+  }, [isOpen, scanId, algorithmName]);
 
   useEffect(() => {
-    if (data) {
-      const lowerCaseSearchTerm = searchTerm.toLowerCase();
-      const newFilteredFiles = data.files.filter(file => 
-        file.file_path.toLowerCase().includes(lowerCaseSearchTerm) ||
-        file.findings.some(finding => finding.code_snippet.toLowerCase().includes(lowerCaseSearchTerm))
+    if (findings) {
+      const filtered = findings.files.filter(file =>
+        file.file_path.toLowerCase().includes(searchTerm.toLowerCase())
       );
-      setFilteredFiles(newFilteredFiles);
+      setFilteredFiles(filtered);
     }
-  }, [searchTerm, data]);
+  }, [findings, searchTerm]);
 
-  const groupedByDirectory = useMemo(() => {
-    if (!filteredFiles.length) return {};
-    const grouped = new Map<string, FileFinding[]>();
-    filteredFiles.forEach(file => {
-        const dir = file.directory || 'root';
-        if (!grouped.has(dir)) {
-            grouped.set(dir, []);
-        }
-        grouped.get(dir)!.push(file);
-    });
-    return Object.fromEntries(grouped.entries());
-  }, [filteredFiles]);
+  const renderContent = () => {
+    if (isLoading) {
+      return (
+        <div className="flex flex-col justify-center items-center h-64 space-y-4">
+          <Loader2 className="animate-spin h-12 w-12 text-blue-500" />
+          <p className="text-sm text-muted-foreground">Loading occurrences...</p>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="text-center py-8 space-y-4">
+          <div className="w-16 h-16 mx-auto bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+            <XCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
+          </div>
+          <p className="text-red-600 dark:text-red-400 font-medium">{error}</p>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      );
+    }
+
+    if (!findings || findings.files.length === 0) {
+      return (
+        <div className="text-center py-12 space-y-3">
+          <div className="w-16 h-16 mx-auto bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center">
+            <File className="w-8 h-8 text-slate-400" />
+          </div>
+          <p className="text-slate-600 dark:text-slate-400">No occurrences found for this algorithm.</p>
+        </div>
+      );
+    }
+
+    const filesByDirectory = filteredFiles.reduce((acc, file) => {
+      const dir = file.directory || 'root';
+      if (!acc[dir]) {
+        acc[dir] = [];
+      }
+      acc[dir].push(file);
+      return acc;
+    }, {} as Record<string, FileFinding[]>);
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 p-2 border rounded-lg">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder={`Search in ${filteredFiles.length} files...`}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="flex-1 bg-transparent outline-none text-sm"
+          />
+          {searchTerm && (
+            <button onClick={() => setSearchTerm('')}>
+              <XCircle className="h-4 w-4 text-muted-foreground" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <span>{findings.total_occurrences} occurrences</span>
+          <span>•</span>
+          <span>{filteredFiles.length} of {findings.total_files} files shown</span>
+        </div>
+
+        <div className="max-h-[60vh] overflow-y-auto space-y-2 p-1">
+          {Object.keys(filesByDirectory).length > 0 ? (
+            Object.entries(filesByDirectory)
+              .sort(([dirA], [dirB]) => dirA.localeCompare(dirB))
+              .map(([dir, files]) => (
+              <DirectoryView key={dir} directory={dir} files={files} scanDetail={scanDetail} />
+            ))
+          ) : (
+            <div className="text-center py-12 space-y-3">
+              <p className="text-slate-600 dark:text-slate-400">No files match your search.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <Modal open={open} onClose={onClose}>
-      <Box sx={style}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider', pb: 2, mb: 2 }}>
-          <Typography variant="h6" component="h2">
-            Code Findings for "{algorithmName}"
-          </Typography>
-          <IconButton onClick={onClose}>
-            <XIcon />
-          </IconButton>
-        </Box>
-        <TextField
-          fullWidth
-          variant="outlined"
-          placeholder="Search files and snippets..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <Search style={{ marginRight: '8px', color: 'grey.500' }} />
-            ),
-          }}
-          sx={{ mb: 2 }}
-        />
-        <Box sx={{ overflowY: 'auto', flexGrow: 1 }}>
-          {isLoading && <CircularProgress />}
-          {error && <Alert severity="error">{error}</Alert>}
-          {data && (
-            <>
-              <Typography variant="subtitle1" gutterBottom>
-                Found {filteredFiles.length} matching files out of {data.total_files} total.
-              </Typography>
-              {Object.entries(groupedByDirectory).map(([dir, files]) => (
-                <DirectoryGroup key={dir} directory={dir} files={files} repoUrl={repoUrl} branch={branch} />
-              ))}
-              {filteredFiles.length === 0 && (
-                <Typography variant="body1" sx={{ mt: 2, textAlign: 'center', color: 'text.secondary' }}>
-                  No files found matching your search term.
-                </Typography>
-              )}
-            </>
-          )}
-        </Box>
-      </Box>
+    <Modal 
+      isOpen={isOpen} 
+      onClose={onClose} 
+      title={`Code Occurrences: ${algorithmName}`} 
+      size="4xl"
+      description={`Detailed findings for the ${algorithmName} algorithm.`}
+    >
+      {renderContent()}
     </Modal>
   );
+};
+
+const DirectoryView: React.FC<{ directory: string; files: FileFinding[], scanDetail: ScanDetail | null }> = ({ directory, files, scanDetail }) => {
+  const [isOpen, setIsOpen] = useState(true);
+
+  return (
+    <div>
+      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center w-full text-left text-sm font-medium p-2 hover:bg-muted/50 rounded">
+        {isOpen ? <ChevronDown className="h-4 w-4 mr-2" /> : <ChevronRight className="h-4 w-4 mr-2" />}
+        <Folder className="h-4 w-4 mr-2 text-yellow-500" />
+        <span className="font-bold">{directory}</span>
+        <span className="ml-2 text-xs text-muted-foreground">({files.length} {files.length === 1 ? 'file' : 'files'})</span>
+      </button>
+      {isOpen && (
+        <div className="pl-6 border-l ml-4">
+          {files
+            .sort((a,b) => a.file_path.localeCompare(b.file_path))
+            .map(file => (
+              <FileView key={file.file_path} file={file} scanDetail={scanDetail} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+const FileView: React.FC<{ file: FileFinding, scanDetail: ScanDetail | null }> = ({ file, scanDetail }) => {
+    const [isOpen, setIsOpen] = useState(false);
+
+    const getLanguage = (filepath: string) => {
+        const ext = filepath.split('.').pop()?.toLowerCase();
+        const langMap: Record<string, string> = {
+            'py': 'python', 'js': 'javascript', 'ts': 'typescript',
+            'jsx': 'jsx', 'tsx': 'tsx', 'java': 'java', 'cpp': 'cpp',
+            'c': 'c', 'go': 'go', 'rs': 'rust', 'rb': 'ruby'
+        };
+        return langMap[ext || ''] || 'clike';
+    };
+
+    return (
+        <div className="my-2">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="flex items-center w-full text-left text-sm hover:bg-muted/50 p-2 rounded transition-colors"
+            >
+                {isOpen ? <ChevronDown className="h-4 w-4 mr-2" /> : <ChevronRight className="h-4 w-4 mr-2" />}
+                <File className="h-4 w-4 mr-2 text-blue-500" />
+                <span className="font-medium">{file.file_path}</span>
+                <span className="ml-auto text-xs text-muted-foreground pr-2">
+                    {file.occurrence_count} {file.occurrence_count === 1 ? 'occurrence' : 'occurrences'}
+                </span>
+            </button>
+            {isOpen && (
+                <div className="pl-6 border-l-2 border-blue-200 dark:border-blue-800 ml-4 mt-1 space-y-2 py-2">
+                    {file.findings.map((finding, index) => (
+                        <div key={index} className="my-2 p-3 bg-slate-50 dark:bg-slate-900/70 rounded-lg border">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                                <div className="flex items-center gap-2">
+                                    <Code className="h-3 w-3" />
+                                    <span className="font-mono">Line {finding.line_number}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 text-xs"
+                                        onClick={() => {
+                                            if (scanDetail) {
+                                                const githubUrl = `${scanDetail.repo_url.replace('.git', '')}/blob/${scanDetail.branch_name}/${file.file_path}#L${finding.line_number}`;
+                                                window.open(githubUrl, '_blank');
+                                            }
+                                        }}
+                                    >
+                                        <ExternalLink className="h-3 w-3 mr-1" />
+                                        View on GitHub
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 text-xs"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(finding.code_snippet || '');
+                                        }}
+                                    >
+                                        Copy
+                                    </Button>
+                                </div>
+                            </div>
+                            <pre className="text-xs !bg-slate-900 dark:!bg-black/80 p-3 rounded overflow-x-auto">
+                                <code
+                                    className={`language-${getLanguage(file.file_path)}`}
+                                    dangerouslySetInnerHTML={{
+                                        __html: Prism.highlight(
+                                            finding.code_snippet || '',
+                                            Prism.languages[getLanguage(file.file_path)] || Prism.languages.clike,
+                                            getLanguage(file.file_path)
+                                        )
+                                    }}
+                                />
+                            </pre>
+                        </div>
+                    ))}
+                    {file.has_more && (
+                        <Button variant="link" size="sm" className="mt-2 text-blue-600 dark:text-blue-400">
+                            Show all {file.occurrence_count} occurrences →
+                        </Button>
+                    )}
+                </div>
+            )}
+        </div>
+    );
 };
 
 export default AlgorithmFindingsModal;

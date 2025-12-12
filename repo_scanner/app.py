@@ -1321,8 +1321,11 @@ class AlgorithmFindingsResponse(BaseModel):
     algorithm: str
     total_occurrences: int
     total_files: int
+    total_files_all: int
     files: List[FileFinding]
     directory_summary: Dict[str, int]
+    has_more: bool
+    current_page: int
 
 class ScanDetailsResponse(BaseModel):
     repo_id: int
@@ -1761,7 +1764,9 @@ async def get_algorithm_findings(
     algorithm: str,
     limit_files: int = 20,
     limit_per_file: int = 10,
-    offset_files: int = 0
+    offset_files: int = 0,
+    sort_by: str = "file_path",  # NEW: file_path, occurrences, directory
+    filter_directory: Optional[str] = None  # NEW: Filter by directory
 ):
     """Get detailed, grouped, and paginated findings for a specific algorithm in a scan."""
     with get_db() as db:
@@ -1783,15 +1788,27 @@ async def get_algorithm_findings(
             grouped = defaultdict(list)
             for finding in all_findings:
                 grouped[finding.file_path].append(finding)
+
+            all_findings_grouped = grouped.copy()
             
             directory_summary = defaultdict(int)
             for file_path, findings_list in grouped.items():
                 directory = os.path.dirname(file_path) or "root"
                 directory_summary[directory] += len(findings_list)
+            
+            # NEW: Filter by directory if specified
+            if filter_directory:
+                grouped = {k: v for k, v in grouped.items() if os.path.dirname(k) == filter_directory}
+            
+            # NEW: Sort files
+            if sort_by == "occurrences":
+                sorted_files = sorted(grouped.keys(), key=lambda f: len(grouped[f]), reverse=True)
+            elif sort_by == "directory":
+                sorted_files = sorted(grouped.keys(), key=lambda f: (os.path.dirname(f), os.path.basename(f)))
+            else:
+                sorted_files = sorted(grouped.keys())
 
             files = []
-            sorted_files = sorted(grouped.keys())
-            
             paginated_files = sorted_files[offset_files : offset_files + limit_files]
 
             for file_path in paginated_files:
@@ -1817,8 +1834,11 @@ async def get_algorithm_findings(
                 "algorithm": algorithm,
                 "total_occurrences": scan_result.occurrences,
                 "total_files": len(grouped),
+                "total_files_all": len(all_findings_grouped),  # NEW: Before filtering
                 "files": files,
-                "directory_summary": dict(directory_summary)
+                "directory_summary": dict(directory_summary),
+                "has_more": (offset_files + limit_files) < len(sorted_files),  # NEW
+                "current_page": offset_files // limit_files + 1  # NEW
             }
         except Exception as e:
             logger.error(f"Failed to get algorithm findings: {e}", exc_info=True)

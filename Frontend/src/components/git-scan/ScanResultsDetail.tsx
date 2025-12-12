@@ -3,61 +3,80 @@ import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle,
 import { Button } from "@/components/ui/button";
 import { ScanDetail, Algorithm } from './types';
 
-import AlgorithmFindingsModal from './AlgorithmFindingsModal';
-
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
 
-const getGradeColor = (grade: string | undefined) => {
-  switch (grade) {
-    case 'A': return 'text-emerald-500 dark:text-emerald-400';
-    case 'B': return 'text-yellow-500 dark:text-yellow-400';
-    case 'C': return 'text-orange-500 dark:text-orange-400';
-    case 'D': return 'text-rose-500 dark:text-rose-400';
-    case 'F': return 'text-red-600 dark:text-red-500';
-    default: return 'text-slate-500 dark:text-slate-400';
+// Helper function to get color for letter grades
+const getGradeColor = (grade: string): string => {
+  if (!grade) return 'text-zinc-500';
+  const letter = grade.charAt(0);
+  switch (letter) {
+    case 'A': return 'text-emerald-600 dark:text-emerald-400';
+    case 'B': return 'text-blue-600 dark:text-blue-400';
+    case 'C': return 'text-yellow-600 dark:text-yellow-400';
+    case 'D': return 'text-orange-600 dark:text-orange-400';
+    case 'F': return 'text-rose-600 dark:text-rose-400';
+    default: return 'text-zinc-600 dark:text-zinc-400';
   }
 };
 
-const getScoreBarColor = (score: number) => {
-  if (score >= 80) return 'bg-emerald-500';
-  if (score >= 60) return 'bg-yellow-500';
-  if (score >= 40) return 'bg-orange-500';
+// Helper function to get color for score progress bars
+const getScoreBarColor = (score: number): string => {
+  if (score >= 90) return 'bg-emerald-500';
+  if (score >= 80) return 'bg-blue-500';
+  if (score >= 70) return 'bg-yellow-500';
+  if (score >= 60) return 'bg-orange-500';
   return 'bg-rose-500';
 };
 
-const getRiskLevelInfo = (score: number) => {
-  if (score >= 80) {
-    return {
-      label: 'Low Risk',
-      description: 'Repository demonstrates strong cryptographic hygiene.',
-      color: 'text-emerald-600 dark:text-emerald-400',
-    };
-  }
-  if (score >= 60) {
-    return {
-      label: 'Medium Risk',
-      description: 'Some outdated or weak algorithms detected. Review recommended.',
-      color: 'text-yellow-600 dark:text-yellow-400',
-    };
-  }
+// Helper function to get risk level information
+const getRiskLevelInfo = (score: number): { label: string; color: string; description: string } => {
+  if (score >= 90) return {
+    label: 'Low Risk',
+    color: 'text-emerald-600 dark:text-emerald-400',
+    description: 'Excellent cryptographic security posture'
+  };
+  if (score >= 80) return {
+    label: 'Medium-Low Risk',
+    color: 'text-blue-600 dark:text-blue-400',
+    description: 'Good security with minor improvements needed'
+  };
+  if (score >= 70) return {
+    label: 'Medium Risk',
+    color: 'text-yellow-600 dark:text-yellow-400',
+    description: 'Adequate security but needs attention'
+  };
+  if (score >= 60) return {
+    label: 'Medium-High Risk',
+    color: 'text-orange-600 dark:text-orange-400',
+    description: 'Significant security concerns present'
+  };
   return {
     label: 'High Risk',
-    description: 'Significant use of vulnerable algorithms. Immediate action required.',
     color: 'text-rose-600 dark:text-rose-400',
+    description: 'Critical security vulnerabilities detected'
   };
 };
 
-const getCategoryDisplayName = (category: string) => {
-  return category.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+// Helper function to display category names nicely
+const getCategoryDisplayName = (category: string): string => {
+  const names: Record<string, string> = {
+    'kex': 'Key Exchange',
+    'signature': 'Digital Signatures',
+    'symmetric': 'Symmetric Encryption',
+    'hash': 'Hash Functions'
+  };
+  return names[category] || category;
 };
 
-const AlgorithmSection: React.FC<{
+interface AlgorithmSectionProps {
   title: string;
   description: string;
   algorithms: (Algorithm & { name: string })[];
   type: 'safe' | 'unsafe' | 'pqc';
-  onViewFindings: (algorithmName: string) => void;
-}> = ({ title, description, algorithms, type, onViewFindings }) => {
+  onViewOccurrences: (algorithmName: string) => void;
+}
+
+const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description, algorithms, type, onViewOccurrences }) => {
   const getBorderColor = () => {
     switch (type) {
       case 'pqc': return 'border-blue-500';
@@ -163,13 +182,18 @@ const AlgorithmSection: React.FC<{
                 <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.files_affected || 0}</span>
               </div>
             </div>
-
-            <button 
-              onClick={() => onViewFindings(algo.name)}
-              className="mt-4 w-full text-center text-sm font-bold text-blue-600 hover:underline"
-            >
-              View Findings
-            </button>
+            
+            {/* View Occurrences Button */}
+            <div className="mt-4 pt-4 border-t">
+              <Button 
+                variant="outline"
+                className="w-full"
+                onClick={() => onViewOccurrences(algo.name)}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                View Occurrences
+              </Button>
+            </div>
             
             {/* Quantum Safety Section */}
             {algo.quantum_safe !== undefined && (
@@ -220,6 +244,8 @@ const AlgorithmSection: React.FC<{
   );
 };
 
+import AlgorithmFindingsModal from './AlgorithmFindingsModal';
+
 interface ScanResultsDetailProps {
   scanId: number;
   onBack: () => void;
@@ -229,18 +255,9 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
   const [scanDetail, setScanDetail] = useState<ScanDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isFindingsModalOpen, setIsFindingsModalOpen] = useState(false);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string | null>(null);
+  const [isFindingsModalOpen, setIsFindingsModalOpen] = useState(false);
 
-  const handleViewFindings = (algorithmName: string) => {
-    setSelectedAlgorithm(algorithmName);
-    setIsFindingsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsFindingsModalOpen(false);
-    setSelectedAlgorithm(null);
-  };
 
   useEffect(() => {
     const loadScanDetail = async (id: number) => {
@@ -319,6 +336,16 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
         quantumVulnerable.push(algoWithName);
       }
     });
+
+    const handleViewOccurrences = (algorithmName: string) => {
+      setSelectedAlgorithm(algorithmName);
+      setIsFindingsModalOpen(true);
+    };
+
+    const handleCloseModal = () => {
+      setIsFindingsModalOpen(false);
+      setSelectedAlgorithm(null);
+    };
 
     const quantumSafeCount = quantumSafe.length;
     const quantumVulnerableCount = quantumVulnerable.length;
@@ -526,7 +553,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             description="Will be broken by quantum computers: RSA, ECDSA, DH, or weak parameters (AES-128, SHA-256)" 
             algorithms={quantumVulnerable} 
             type="unsafe"
-            onViewFindings={handleViewFindings} 
+            onViewOccurrences={handleViewOccurrences}
           />
         )}
         {truePQC.length > 0 && (
@@ -535,7 +562,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             description="Mathematically resistant to quantum attacks: Kyber, Dilithium, SPHINCS+, Falcon, NTRU" 
             algorithms={truePQC} 
             type="pqc"
-            onViewFindings={handleViewFindings}
+            onViewOccurrences={handleViewOccurrences}
           />
         )}
         {quantumSafe.length > 0 && (
@@ -544,7 +571,17 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             description="Classical algorithms with quantum-resistant parameters: AES-256, SHA-512, ChaCha20-256" 
             algorithms={quantumSafe} 
             type="safe"
-            onViewFindings={handleViewFindings}
+            onViewOccurrences={handleViewOccurrences}
+          />
+        )}
+        
+        {selectedAlgorithm && (
+          <AlgorithmFindingsModal
+            isOpen={isFindingsModalOpen}
+            onClose={handleCloseModal}
+            scanId={scanId}
+            algorithmName={selectedAlgorithm}
+            scanDetail={scanDetail}
           />
         )}
       </div>
@@ -577,17 +614,6 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
       <main className="max-w-7xl mx-auto px-6 py-10">
         {renderContent()}
       </main>
-      
-      {scanDetail && (
-        <AlgorithmFindingsModal 
-          open={isFindingsModalOpen}
-          onClose={handleCloseModal}
-          scanId={scanId}
-          algorithmName={selectedAlgorithm}
-          repoUrl={scanDetail.repo_url}
-          branch={scanDetail.branch_name}
-        />
-      )}
     </div>
   );
 };
