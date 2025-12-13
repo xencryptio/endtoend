@@ -1158,7 +1158,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
           </div>
         </div>
         <Button variant="outline" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-2" /> Back to Dashboard
+          <ArrowLeft className="h-4 w-4 mr-2" /> Back
         </Button>
       </div>
 

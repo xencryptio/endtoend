@@ -763,7 +763,7 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) =
             onClick={onBack}
             className="mb-4"
           >
-            <ArrowLeft className="h-4 w-4 mr-2" /> Back to Scan History
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back
           </Button>
         </motion.div>
 

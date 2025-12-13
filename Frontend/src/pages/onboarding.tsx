@@ -732,7 +732,7 @@ const OnboardingPage = () => {
                     exit="exit"
                     className="p-4 md:p-8 max-w-4xl mx-auto"
                 >
-                    <Button variant="ghost" onClick={navigateBack} className="mb-6"><ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard</Button>
+                    <Button variant="ghost" onClick={navigateBack} className="mb-6"><ArrowLeft className="w-4 h-4 mr-2" /> Back</Button>
                     
                     {/* TLS SCANNER VIEW */}
                     {view === 'tls' && (

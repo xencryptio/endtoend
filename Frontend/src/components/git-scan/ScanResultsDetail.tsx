@@ -649,7 +649,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             </div>
             <Button variant="outline" onClick={onBack}>
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Scan List
+              Back
             </Button>
           </div>
         </div>

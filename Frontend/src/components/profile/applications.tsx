@@ -679,7 +679,7 @@ const ApplicationsList = ({
         </div>
         <Button onClick={onBack} variant="outline">
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Dashboard
+          Back
         </Button>
       </div>
 

@@ -386,7 +386,7 @@ const Scan = () => {
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">Cryptography Profile Management</h1>
             <Button variant="outline" onClick={() => setView('dashboard')}>
-              <ArrowLeft className="h-4 w-4 mr-2" /> Back to Dashboard
+              <ArrowLeft className="h-4 w-4 mr-2" /> Back
             </Button>
           </div>
 

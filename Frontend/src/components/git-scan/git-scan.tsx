@@ -360,7 +360,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
             </div>
             <Button variant="outline" onClick={onBack}>
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
+              Back
             </Button>
           </div>
         </div>
