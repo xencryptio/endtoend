@@ -1,1 +1,13 @@
 *.gitignore text
+# Shell scripts must stay LF
+*.sh text eol=lf
+
+# Dockerfiles must stay LF
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+
+# Linux service files
+*.service text eol=lf
+
+# Python (safe either way, but keep consistent)
+*.py text eol=lf
