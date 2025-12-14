@@ -133,7 +133,7 @@ export default function EnhancedDashboard() {
       title: 'IntelliJ IDEA',
       description: 'Integrated development environment',
       icon: <Code className="h-6 w-6" />,
-      color: 'bg-red-500',
+      color: 'bg-destructive',
       status: 'Connected',
       statusColor: 'bg-success'
     },

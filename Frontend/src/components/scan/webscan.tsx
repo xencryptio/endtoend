@@ -1290,220 +1290,55 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
             ) : (
               <div className="space-y-4">
                 {scanHistory.map((scan) => (
-                  <UnifiedCard key={scan.request_id} padding="default" className="transition-all hover:shadow-md">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3 flex-1">
-                          {getStatusIcon(scan.status)}
-                          <div>
-                            <h4 className="font-semibold">Request ID: {scan.request_id}</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {new Date(scan.requested_at).toLocaleString()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            scan.status === 'completed' ? 'bg-success/10 text-success dark:bg-success/30 dark:text-success' :
-                            scan.status === 'failed' || scan.error_message ? 'bg-destructive/10 text-destructive dark:bg-destructive/30 dark:text-destructive' :
-                            scan.status === 'processing' ? 'bg-primary/10 text-primary dark:bg-primary/50 dark:text-primary' :
-                            'bg-warning/10 text-warning dark:bg-warning/30 dark:text-warning'
-                          }`}>
-                            {scan.status.toUpperCase()}
-                          </span>
-                          
-                          {/* DELETE BUTTON FOR INDIVIDUAL BATCH */}
-                          <motion.button
-                            whileHover={{ scale: 1.1 }}
-                            whileTap={{ scale: 0.9 }}
-                            onClick={async () => {
-                              const batchId = scan.batch_id || scan.request_id;
-                              showMessage('Deleting scan batch...', 'info');
-                              
-                              const success = await deleteScanBatch(apiBaseUrl, batchId);
-                              
-                              if (success) {
-                                setScanHistory(prev => 
-                                  prev.filter(s => s.request_id !== scan.request_id)
-                                );
-                                showMessage('Scan batch deleted successfully', 'success');
-                              } else {
-                                showMessage('Failed to delete scan batch', 'error');
-                              }
-                            }}
-                            className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-                            title="Delete this scan batch"
-                            disabled={false}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </motion.button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">URLs:</span> {scan.total_urls}
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Execution Time:</span>{' '}
-                          {(() => {
-                            // ✅ FIX: Calculate total execution time from detailed results if available
-                            if (scan.detailedResults && scan.detailedResults.length > 0) {
-                              const totalTime = scan.detailedResults.reduce((sum, result) => {
-                                return sum + (result.execution_time_seconds || 0);
-                              }, 0);
-                      
-                              return totalTime > 0 
-                                ? `${totalTime.toFixed(2)}s`
-                                : 'N/A';
-                            }
-                      
-                            // Fallback: use scan-level execution time if details not loaded
-                            return scan.execution_time_seconds !== undefined
-                              ? `${scan.execution_time_seconds.toFixed(2)}s`
-                              : 'N/A';
-                          })()}
-                        </div>
-                      </div>
-
-                      {/* BUTTONS SECTION */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Show progress button only for processing scans */}
-                        {scan.status === 'processing' && (
-                          <Button
-                            variant="outline"
-                            onClick={() => toggleProgress(scan.request_id)}
-                            size="sm"
-                          >
-                            {expandedProgress.has(scan.request_id) ? 'Hide' : 'View'} Progress
-                          </Button>
-                        )}
-
-                        {/* Show summary button when scan has completed and has domain progress data */}
-                        {(scan.status === 'completed' || scan.status === 'failed') && scan.finalDomainProgress && (
-                          <Button
-                            variant="outline"
-                            onClick={() => toggleSummary(scan.request_id)}
-                            size="sm"
-                          >
-                            {expandedSummary.has(scan.request_id) ? 'Hide' : 'View'} Summary
-                          </Button>
-                        )}
-
-                        {(scan.status === 'completed' || (scan.status === 'failed' && scan.detailedResults && scan.detailedResults.length > 0)) && (
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              handleLoadBatchDetails(scan.request_id);
-                            }}
-                            size="sm"
-                          >
-                            View Results
-                            {scan.detailedResults && (
-                              (() => {
-                                const uniqueDomains: {[key: string]: ScanResult} = {};
-                                scan.detailedResults.forEach(result => {
-                                  uniqueDomains[result.url] = result;
-                                });
-                                const uniqueResults = Object.values(uniqueDomains); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-                                
-                                // ✅ FIX: Handle both 'success' and 'completed' statuses with case insensitivity
-                                const successCount = uniqueResults.filter(r => {
-                                  const status = r.scan_status?.toLowerCase();
-                                  return status === 'completed' || status === 'success';
-                                }).length;
-                                
-                                const failCount = uniqueResults.filter(r => {
-                                  const status = r.scan_status?.toLowerCase();
-                                  return status !== 'completed' && status !== 'success';
-                                }).length;
-
-                                return (
-                                  <span className="ml-2 text-xs text-muted-foreground">
-                                    (
-                                      <span className="text-success">{successCount}</span>
-                                      /
-                                      <span className="text-destructive">{failCount}</span>
-                                    )
-                                  </span>
-                                );
-                              })()
-                            )}
-                          </Button>
-                        )}
-                      </div>
-
-                      {/* PROGRESS DISPLAY */}
-                      {scan.status === 'processing' && expandedProgress.has(scan.request_id) && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mt-4 col-span-full"
+                  <UnifiedResultCard
+                    status={scan.status === 'completed' ? 'success' : 'error'}
+                    title={scan.url}
+                    description={`Request ID: ${scan.request_id}`}
+                    metrics={[
+                      { label: 'URLs', value: scan.total_urls },
+                      { label: 'Time', value: `${scan.execution_time_seconds?.toFixed(2) ?? 'N/A'}s` }
+                    ]}
+                    onClick={() => handleLoadBatchDetails(scan.request_id)}
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {(scan.status === 'completed' || (scan.status === 'failed' && scan.detailedResults && scan.detailedResults.length > 0)) && (
+                        <Button
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLoadBatchDetails(scan.request_id);
+                          }}
+                          size="sm"
                         >
-                          <ProgressDisplay 
-                            scanProgress={scanProgress} 
-                            domainProgress={domainProgress}
-                            processingDomains={processingDomains}
-                            onCancel={handleCancelScan}
-                            roundHistory={roundHistory}
-                            isCancelling={isCancelling}
-                            currentRound={currentRound}
-                            isActiveProgress={true}
-                          />
-                        </motion.div>
+                          View Results
+                        </Button>
                       )}
-
-                      {/* SUMMARY DISPLAY */}
-                      {(scan.status === 'completed' || scan.status === 'failed') && 
-                        expandedSummary.has(scan.request_id) && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="mt-4 col-span-full border-t pt-4"
-                          >
-                            {/* Use ProgressDisplay with properly categorized data */}
-                            <ProgressDisplay 
-                              scanProgress={{ 
-                                total: scan.total_urls, 
-                                completed: scan.total_urls 
-                              }}
-                              domainProgress={(() => {
-                                // Build proper domain progress from detailedResults
-                                const progress: {[key: string]: DomainProgressInfo} = {};
-                                
-                                scan.detailedResults?.forEach((result) => {
-                                  const domain = result.url;
-                                  
-                                  // Determine correct status
-                                  const scanStatus = result.scan_status?.toLowerCase();
-                                  let status = 'failed';
-                                  if (scanStatus === 'success' || scanStatus === 'completed') {
-                                    status = 'completed';
-                                  } else if (scanStatus === 'http_skipped') {
-                                    status = 'http_skipped';
-                                  }
-                                  
-                                  progress[domain] = {
-                                    status: status,
-                                    duration: result.execution_time_seconds,
-                                    error: result.error_message,
-                                    round: (result as any).round || 1
-                                  };
-                                });
-                                
-                                return progress;
-                              })()}
-                              processingDomains={{}}
-                              roundHistory={[]}
-                              isActiveProgress={false}
-                            />
-
-                            {/* Rest of your summary display code... */}
-                          </motion.div>
-                        )}
-
-                    </UnifiedCard>
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const batchId = scan.batch_id || scan.request_id;
+                          showMessage('Deleting scan batch...', 'info');
+                          
+                          const success = await deleteScanBatch(apiBaseUrl, batchId);
+                          
+                          if (success) {
+                            setScanHistory(prev => 
+                              prev.filter(s => s.request_id !== scan.request_id)
+                            );
+                            showMessage('Scan batch deleted successfully', 'success');
+                          } else {
+                            showMessage('Failed to delete scan batch', 'error');
+                          }
+                        }}
+                        className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                        title="Delete this scan batch"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </motion.button>
+                    </div>
+                  </UnifiedResultCard>
                 ))}
               </div>
             )}

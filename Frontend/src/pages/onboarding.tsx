@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { UnifiedCard, UnifiedBackButton } from "@/components/ui/unified";
+import { UnifiedCard, UnifiedBackButton, UnifiedFileInput } from "@/components/ui/unified";
 import { typography } from "@/lib/design-tokens";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, UploadCloud, FileText, Github, Loader2, Download, Trash2, RefreshCw, XCircle, Server, Terminal, BookOpen, CheckCircle, Activity, AlertCircle } from "lucide-react";
 
-// ============================================================================
+// ============================================================================ 
 // INTERFACES & TYPES
-// ============================================================================
+// ============================================================================ 
 
 interface Job {
     job_id: string;
@@ -39,9 +38,9 @@ interface FileInfo {
 
 type ViewType = 'dashboard' | 'tls' | 'repo' | 'system';
 
-// ============================================================================
+// ============================================================================ 
 // CONSTANTS
-// ============================================================================
+// ============================================================================ 
 
 const cardVariants = {
     hidden: { opacity: 0, y: 20 },
@@ -53,9 +52,9 @@ const cardVariants = {
 const BATCH_API_BASE = 'http://localhost:8008';  // Excel Batch Scanner API
 const AGENT_API_BASE = 'http://localhost:9000';  // Crypto Audit API Server
 
-// ============================================================================
+// ============================================================================ 
 // HELPER COMPONENTS
-// ============================================================================
+// ============================================================================ 
 
 const ScanProgress = ({ progress, logs }) => (
     <div className="mt-6 p-4 bg-muted/50 rounded-lg">
@@ -96,45 +95,7 @@ const ScanProgress = ({ progress, logs }) => (
     </div>
 );
 
-const FileDropzone = ({ onFileSelect, selectedFile, fileType }) => {
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleFileChange = (files: FileList | null) => {
-        if (files && files[0]) {
-            if (files[0].name.endsWith('.xlsx') || files[0].name.endsWith('.xls')) {
-                onFileSelect(files[0]);
-            } else {
-                alert(`Please select an Excel file (.xlsx or .xls) for ${fileType} scans.`);
-                onFileSelect(null);
-            }
-        }
-    };
-
-    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        e.stopPropagation();
-        handleFileChange(e.dataTransfer.files);
-    };
-
-    return (
-        <div
-            className="border-2 border-dashed border-muted-foreground/50 rounded-lg p-8 text-center cursor-pointer hover:bg-accent hover:border-primary/50 transition-all duration-300"
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDrop}
-        >
-            <UploadCloud className="w-12 h-12 mx-auto text-primary mb-4" />
-            <p className="text-muted-foreground">Drop Excel file here or click to browse</p>
-            <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx,.xls" onChange={(e) => handleFileChange(e.target.files)} />
-            {selectedFile && (
-                <div className="mt-4 text-primary font-semibold flex items-center justify-center gap-2">
-                    <FileText className="w-5 h-5" />
-                    <span>{selectedFile.name}</span>
-                </div>
-            )}
-        </div>
-    );
-};
 
 const SystemDownloadCard: React.FC<{
     title: string;
@@ -172,8 +133,7 @@ const SystemDownloadCard: React.FC<{
         : 'bg-scan-pqc/5 dark:bg-scan-pqc/20 text-scan-pqc dark:text-scan-pqc/70';
 
     return (
-        <Card className="shadow-lg">
-            <CardContent className="p-6 sm:p-8">
+        <UnifiedCard className="shadow-lg p-6 sm:p-8">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
                     <div className="flex items-center gap-4">
                         <div className={`p-4 rounded-xl ${colorClass}`}>
@@ -202,26 +162,25 @@ const SystemDownloadCard: React.FC<{
                         Download {title}
                     </Button>
                 </div>
-            </CardContent>
-        </Card>
+        </UnifiedCard>
     );
 };
 
-// ============================================================================
+// ============================================================================ 
 // INSTRUCTION CARD COMPONENTS
-// ============================================================================
+// ============================================================================ 
 
 const LinuxInstructionsCard = () => (
-    <UnifiedCard>
-        <CardHeader>
+    <UnifiedCard padding="none">
+        <div className="p-6">
             <div className="flex items-center gap-3">
                 <BookOpen className="text-primary" size={24} />
-                <CardTitle className={typography.h3}>Linux Setup Instructions</CardTitle>
+                <h3 className={typography.h3}>Linux Setup Instructions</h3>
             </div>
-        </CardHeader>
-        <CardContent className="p-6">
+        </div>
+        <div className="p-6">
             <ol className="space-y-6">
-                {[
+                {[ 
                     { num: 1, text: 'Download the Linux Agent ZIP file', note: 'Click the download button above' },
                     { num: 2, text: 'Extract the ZIP file', code: 'unzip Linux_Agent.zip' },
                     { num: 3, text: 'Navigate to the extracted folder', code: 'cd "Linux Agent"' },
@@ -239,21 +198,21 @@ const LinuxInstructionsCard = () => (
                     </li>
                 ))}
             </ol>
-        </CardContent>
+        </div>
     </UnifiedCard>
 );
 
 const WindowsInstructionsCard = () => (
-    <UnifiedCard>
-        <CardHeader>
+    <UnifiedCard padding="none">
+        <div className="p-6">
             <div className="flex items-center gap-3">
                 <BookOpen className="text-scan-pqc" size={24} />
-                <CardTitle className={typography.h3}>Windows Setup Instructions</CardTitle>
+                <h3 className={typography.h3}>Windows Setup Instructions</h3>
             </div>
-        </CardHeader>
-        <CardContent className="p-6">
+        </div>
+        <div className="p-6">
             <ol className="space-y-6">
-                {[
+                {[ 
                     { num: 1, text: 'Download the Windows Agent ZIP file', note: 'Click the download button above' },
                     { num: 2, text: 'Extract the ZIP file to a directory', note: 'Example: C:\\CryptoAgent' },
                     { num: 3, text: 'Open Command Prompt or PowerShell as Administrator', note: 'Right-click and select "Run as Administrator"' },
@@ -271,24 +230,24 @@ const WindowsInstructionsCard = () => (
                     </li>
                 ))}
             </ol>
-        </CardContent>
+        </div>
     </UnifiedCard>
 );
 
 const ConfigurationCard = () => (
-    <UnifiedCard>
-        <CardHeader>
+    <UnifiedCard padding="none">
+        <div className="p-6">
             <div className="flex items-center gap-3">
                 <BookOpen className="text-success" size={24} />
-                <CardTitle className={typography.h3}>Configuration</CardTitle>
+                <h3 className={typography.h3}>Configuration</h3>
             </div>
-            <CardDescription>Both agents use the same configuration file format</CardDescription>
-        </CardHeader>
-        <CardContent className="p-6">
+            <p className="text-muted-foreground text-sm">Both agents use the same configuration file format</p>
+        </div>
+        <div className="p-6">
             <div className="mb-6">
                 <p className="text-slate-900 dark:text-slate-100 mb-4">Edit the <code className="px-2 py-1 rounded bg-slate-200 dark:bg-slate-800 text-sm font-mono">config.json</code> file to configure:</p>
                 <div className="space-y-4">
-                    {[
+                    {[ 
                         { label: 'server_url', desc: 'API server address', value: AGENT_API_BASE, required: true },
                         { label: 'poll_interval', desc: 'How often the agent checks for tasks', value: '30 seconds (default)', required: false },
                         { label: 'agent_id', desc: 'Unique identifier for the agent', value: 'Auto-generated on first run', required: false },
@@ -315,22 +274,22 @@ const ConfigurationCard = () => (
   "agent_id": "auto-generated-uuid"
 }`}</pre>
             </div>
-        </CardContent>
+        </div>
     </UnifiedCard>
 );
 
 const MonitoringCard = () => (
-    <UnifiedCard>
-        <CardHeader>
+    <UnifiedCard padding="none">
+        <div className="p-6">
             <div className="flex items-center gap-3">
                 <Activity className="text-warning" size={24} />
-                <CardTitle className={typography.h3}>Monitoring & Management</CardTitle>
+                <h3 className={typography.h3}>Monitoring & Management</h3>
             </div>
-            <CardDescription>Understanding agent behavior and dashboard features</CardDescription>
-        </CardHeader>
-        <CardContent className="p-6">
+            <p className="text-muted-foreground text-sm">Understanding agent behavior and dashboard features</p>
+        </div>
+        <div className="p-6">
             <div className="space-y-4">
-                {[
+                {[ 
                     { icon: <Activity size={20} />, text: 'Agents automatically send heartbeats every poll interval', color: 'text-primary' },
                     { icon: <Download size={20} />, text: 'Use the "Scan" button in the dashboard to manually initiate a crypto audit', color: 'text-success' },
                     { icon: <ArrowLeft size={20} />, text: 'View audit results by clicking the arrow next to each agent', color: 'text-scan-pqc' },
@@ -343,13 +302,13 @@ const MonitoringCard = () => (
                     </div>
                 ))}
             </div>
-        </CardContent>
+        </div>
     </UnifiedCard>
 );
 
-// ============================================================================
+// ============================================================================ 
 // MAIN ONBOARDING COMPONENT
-// ============================================================================
+// ============================================================================ 
 
 const OnboardingPage = () => {
     // View State
@@ -608,9 +567,9 @@ const OnboardingPage = () => {
         return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
     };
 
-    // ============================================================================
+    // ============================================================================ 
     // RENDER LOGIC
-    // ============================================================================
+    // ============================================================================ 
 
     return (
         <AnimatePresence mode="wait">
@@ -641,67 +600,63 @@ const OnboardingPage = () => {
                             onClick={() => setView('tls')}
                             className="h-full flex flex-col justify-between cursor-pointer group"
                         >
-                            <CardHeader>
+                            <div className="p-6">
                                 <div className="flex items-center gap-4">
                                     <div className="p-3 bg-primary/10 rounded-lg">
                                         <UploadCloud className="h-8 w-8 text-primary" />
                                     </div>
                                     <div>
-                                        <CardTitle className={typography.h2}>TLS/SSL Scanner</CardTitle>
-                                        <CardDescription>Scan domains from an Excel file.</CardDescription>
+                                        <h2 className={typography.h2}>TLS/SSL Scanner</h2>
+                                        <p className="text-muted-foreground">Scan domains from an Excel file.</p>
                                     </div>
                                 </div>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-muted-foreground">Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations.</p>
-                            </CardContent>
+                                <p className="text-muted-foreground mt-4">Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations.</p>
+                            </div>
                         </UnifiedCard>
                         <UnifiedCard
                             variant="premium"
                             onClick={() => setView('repo')}
                             className="h-full flex flex-col justify-between cursor-pointer group"
                         >
-                            <CardHeader>
+                            <div className="p-6">
                                 <div className="flex items-center gap-4">
                                     <div className="p-3 bg-scan-pqc/10 dark:bg-scan-pqc/30 rounded-lg"><Github className="h-8 w-8 text-scan-pqc" /></div>
                                     <div>
-                                        <CardTitle className={typography.h2}>Repository Scanner</CardTitle>
-                                        <CardDescription>Scan repos from GitHub or Excel.</CardDescription>
+                                        <h2 className={typography.h2}>Repository Scanner</h2>
+                                        <p className="text-muted-foreground">Scan repos from GitHub or Excel.</p>
                                     </div>
                                 </div>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-muted-foreground">Analyze Git repositories for cryptographic algorithm usage and security best practices.</p>
-                            </CardContent>
+                                <p className="text-muted-foreground mt-4">Analyze Git repositories for cryptographic algorithm usage and security best practices.</p>
+                            </div>
                         </UnifiedCard>
                         <UnifiedCard
                             variant="premium"
                             onClick={() => setView('system')}
                             className="h-full flex flex-col justify-between cursor-pointer group"
                         >
-                            <CardHeader>
+                            <div className="p-6">
                                 <div className="flex items-center gap-4">
                                     <div className="p-3 bg-success/10 dark:bg-success/30 rounded-lg">
                                         <Download className="h-8 w-8 text-success" />
                                     </div>
                                     <div>
-                                        <CardTitle className={typography.h2}>System Scanner</CardTitle>
-                                        <CardDescription>Download and setup agents.</CardDescription>
+                                        <h2 className={typography.h2}>System Scanner</h2>
+                                        <p className="text-muted-foreground">Download and setup agents.</p>
                                     </div>
                                 </div>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-muted-foreground">Download agents for Linux and Windows to scan system cryptographic configurations.</p>
-                            </CardContent>
+                                <p className="text-muted-foreground mt-4">Download agents for Linux and Windows to scan system cryptographic configurations.</p>
+                            </div>
                         </UnifiedCard>
                     </div>
 
-                    <Card className="mt-12 max-w-6xl mx-auto">
-                        <CardHeader className="flex flex-row items-center justify-between">
-                            <CardTitle>Recent Batch Jobs</CardTitle>
-                            <Button variant="outline" size="sm" onClick={loadJobs}><RefreshCw className="w-4 h-4 mr-2" /> Refresh</Button>
-                        </CardHeader>
-                        <CardContent className="p-6">
+                    <UnifiedCard className="mt-12 max-w-6xl mx-auto">
+                        <div className="p-6">
+                            <div className="flex flex-row items-center justify-between">
+                                <h3 className="text-lg font-bold">Recent Batch Jobs</h3>
+                                <Button variant="outline" size="sm" onClick={loadJobs}><RefreshCw className="w-4 h-4 mr-2" /> Refresh</Button>
+                            </div>
+                        </div>
+                        <div className="p-6">
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
@@ -719,7 +674,7 @@ const OnboardingPage = () => {
                                             <tr key={job.job_id} className="border-t">
                                                 <td className="p-3 font-mono text-sm">{job.job_id.substring(0, 8)}...</td>
                                                 <td className="p-3 uppercase">{job.scan_type}</td>
-                                                <td className="p-3"><span className={`px-2 py-1 text-xs font-bold rounded-full bg-${job.status === 'completed' ? 'green' : 'yellow'}-500/20 text-${job.status === 'completed' ? 'green' : 'yellow'}-600`}>{job.status}</span></td>
+                                                <td className="p-3"><span className={`px-2 py-1 text-xs font-bold rounded-full ${job.status === 'completed' ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'}`}>{job.status}</span></td>
                                                 <td className="p-3">{`${job.completed_items + job.failed_items} / ${job.total_items}`}</td>
                                                 <td className="p-3 text-sm">{new Date(job.started_at).toLocaleString()}</td>
                                                 <td className="p-3 space-x-2">
@@ -733,8 +688,8 @@ const OnboardingPage = () => {
                                     </tbody>
                                 </table>
                             </div>
-                        </CardContent>
-                    </Card>
+                        </div>
+                    </UnifiedCard>
                 </motion.div>
             )}
 
@@ -751,22 +706,30 @@ const OnboardingPage = () => {
                     
                     {/* TLS SCANNER VIEW */}
                     {view === 'tls' && (
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className={typography.h2}>TLS/SSL Scanner</CardTitle>
-                                <CardDescription>Upload an Excel file with a 'domain' column.</CardDescription>
-                            </CardHeader>
-                            <CardContent>
+                        <UnifiedCard padding="none">
+                            <div className="p-6">
+                                <h2 className={typography.h2}>TLS/SSL Scanner</h2>
+                                <p className="text-muted-foreground">Upload an Excel file with a 'domain' column.</p>
+                            </div>
+                            <div className="p-6">
                                 {!showProgress ? (
                                     <>
-                                        <FileDropzone onFileSelect={setTlsFile} selectedFile={tlsFile} fileType="TLS" />
+                                        <UnifiedFileInput
+                                          label="Upload Excel File"
+                                          accept=".xlsx,.xls"
+                                          helperText="Upload an Excel file with a 'domain' column."
+                                          selectedFile={tlsFile}
+                                          onFileSelect={setTlsFile}
+                                          onFileRemove={() => setTlsFile(null)}
+                                          dragAndDrop={true}
+                                        />
                                         <Button className="w-full mt-6" disabled={!tlsFile} onClick={startTLSScan}>Start TLS Scan</Button>
                                     </>
                                 ) : (
                                     <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
                                 )}
-                            </CardContent>
-                        </Card>
+                            </div>
+                        </UnifiedCard>
                     )}
 
                     {/* REPO SCANNER VIEW */}
@@ -777,15 +740,15 @@ const OnboardingPage = () => {
                                 <TabsTrigger value="excel">From Excel</TabsTrigger>
                             </TabsList>
                             <TabsContent value="github">
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle>Discover from GitHub</CardTitle>
-                                        <CardDescription>
+                                <UnifiedCard padding="none">
+                                    <div className="p-6">
+                                        <h3 className="text-lg font-bold">Discover from GitHub</h3>
+                                        <p className="text-muted-foreground text-sm">
                                             Enter a GitHub username or organization URL to find public repositories.
-                                        </CardDescription>
-                                    </CardHeader>
+                                        </p>
+                                    </div>
 
-                                    <CardContent>
+                                    <div className="p-6">
                                         {/* URL + Discover */}
                                         <div className="flex gap-2">
                                             <Input
@@ -843,7 +806,7 @@ const OnboardingPage = () => {
                                                             {discoveredRepos.map((repo) => (
                                                                 <tr
                                                                     key={repo.id}
-                                                                    className={`border-t last:border-b-0 transition-colors ${
+                                                                    className={`border-t last:border-b-0 transition-colors ${ 
                                                                         selectedRepos.has(repo.id) 
                                                                             ? 'bg-primary/5 dark:bg-primary/30 hover:bg-primary/10 dark:hover:bg-primary/50' 
                                                                             : 'hover:bg-accent/50'
@@ -914,26 +877,34 @@ const OnboardingPage = () => {
                                                 </Button>
                                             </div>
                                         )}
-                                    </CardContent>
-                                </Card>
+                                    </div>
+                                </UnifiedCard>
                             </TabsContent>
                             <TabsContent value="excel">
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle>Scan from Excel</CardTitle>
-                                        <CardDescription>Upload an Excel file with 'repo_url' and 'branch_name' columns.</CardDescription>
-                                    </CardHeader>
-                                    <CardContent>
+                                <UnifiedCard padding="none">
+                                    <div className="p-6">
+                                        <h3 className="text-lg font-bold">Scan from Excel</h3>
+                                        <p className="text-muted-foreground text-sm">Upload an Excel file with 'repo_url' and 'branch_name' columns.</p>
+                                    </div>
+                                    <div className="p-6">
                                         {!showProgress ? (
                                             <>
-                                                <FileDropzone onFileSelect={setRepoFile} selectedFile={repoFile} fileType="Repo" />
+                                                <UnifiedFileInput
+                                                  label="Upload Excel File"
+                                                  accept=".xlsx,.xls"
+                                                  helperText="Upload an Excel file with 'repo_url' and 'branch_name' columns."
+                                                  selectedFile={repoFile}
+                                                  onFileSelect={setRepoFile}
+                                                  onFileRemove={() => setRepoFile(null)}
+                                                  dragAndDrop={true}
+                                                />
                                                 <Button className="w-full mt-6" disabled={!repoFile} onClick={startRepoScan}>Start Scan from Excel</Button>
                                             </>
                                         ) : (
                                             <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
                                         )}
-                                    </CardContent>
-                                </Card>
+                                    </div>
+                                </UnifiedCard>
                             </TabsContent>
                         </Tabs>
                     )}

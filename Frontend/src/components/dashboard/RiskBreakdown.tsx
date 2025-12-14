@@ -146,7 +146,7 @@ const RiskBreakdown: React.FC<{ data: CSVData[] }> = ({ data }) => {
                 <td className="p-4">
                   <div className="relative w-full max-w-[120px] h-2 bg-muted rounded-full">
                     <div
-                      className="h-2 bg-blue-500 rounded-full"
+                      className="h-2 bg-primary rounded-full"
                       style={{ width: `${group.avgPqcReady}%` }}
                     />
                   </div>
