@@ -2,13 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle,ArrowLeft, ArrowRight, Globe, RefreshCw, Play, Edit, Save, RotateCcw, Plus, Check, X, Shield, Lock, Hash, Key, Zap, Trash2 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+
 import {
   Dialog,
   DialogContent,
@@ -21,7 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import ResultsDetailPage from './ResultsDetailPage'; // NEW IMPORT
+import { UnifiedBackButton, UnifiedResultCard, UnifiedCard, UnifiedFileInput } from "@/components/ui/unified";
 
 // ============================================================================
 // INTERFACES & TYPES
@@ -135,10 +129,10 @@ const getSectionIcon = (section: string) => {
 
 const getStatusBadge = (status: string) => {
   const colors: Record<string, string> = {
-    "Strong": "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300",
-    "Medium": "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300",
-    "Weak": "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300",
-    "Safe": "bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300",
+    "Strong": "bg-success/10 text-success dark:bg-success/50 dark:text-success",
+    "Medium": "bg-warning/10 text-warning dark:bg-warning/50 dark:text-warning",
+    "Weak": "bg-destructive/10 text-destructive dark:bg-destructive/50 dark:text-destructive",
+    "Safe": "bg-primary/10 text-primary dark:bg-primary/50 dark:text-primary",
     "Standardized": "bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300"
   };
   return colors[status] || "bg-muted text-muted-foreground";
@@ -146,11 +140,11 @@ const getStatusBadge = (status: string) => {
 
 const getGradeColor = (grade: string): string => {
   if (!grade) return 'text-muted-foreground';
-  if (grade.startsWith('A')) return 'text-green-500';
-  if (grade.startsWith('B')) return 'text-blue-500';
-  if (grade.startsWith('C')) return 'text-yellow-500';
-  if (grade.startsWith('D')) return 'text-orange-500';
-  return 'text-red-500';
+  if (grade.startsWith('A')) return 'text-success';
+  if (grade.startsWith('B')) return 'text-primary';
+  if (grade.startsWith('C')) return 'text-warning';
+  if (grade.startsWith('D')) return 'text-warning';
+  return 'text-destructive';
 };
 
 const ProgressDisplay: React.FC<ProgressDisplayProps> = ({ 
@@ -176,44 +170,42 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   const percentage = scanProgress.total > 0 ? (scanProgress.completed / scanProgress.total) * 100 : 0;
 
   return (
-    <Card className={`mb-6 ${isActiveProgress ? 'animate-pulse' : ''}`}>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex-1">
-            <CardTitle>
-              {isActiveProgress
-                ? `Scan Progress... (Round ${currentRound || 1})`
-                : 'Scan Summary'}
-            </CardTitle>
-            {scanProgress.total > 0 && (
-              <CardDescription>
-                {scanProgress.completed}/{scanProgress.total} domains scanned ({percentage.toFixed(0)}%)
-              </CardDescription>
-            )}
-          </div>
-          {isActiveProgress && onCancel && (
-            <Button 
-              variant="destructive" 
-              size="sm"
-              onClick={onCancel}
-              disabled={isCancelling}
-            >
-              {isCancelling ? (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  Cancelling...
-                </>
-              ) : (
-                <>
-                  <X className="h-4 w-4 mr-2" />
-                  Cancel Scan
-                </>
-              )}
-            </Button>
+    <UnifiedCard padding="default" className={`mb-6 ${isActiveProgress ? 'animate-pulse' : ''}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <h3 className="font-semibold text-lg">
+            {isActiveProgress
+              ? `Scan Progress... (Round ${currentRound || 1})`
+              : 'Scan Summary'}
+          </h3>
+          {scanProgress.total > 0 && (
+            <p className="text-muted-foreground text-sm">
+              {scanProgress.completed}/{scanProgress.total} domains scanned ({percentage.toFixed(0)}%)
+            </p>
           )}
         </div>
-      </CardHeader>
-      <CardContent>
+        {isActiveProgress && onCancel && (
+          <Button 
+            variant="destructive" 
+            size="sm"
+            onClick={onCancel}
+            disabled={isCancelling}
+          >
+            {isCancelling ? (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Cancelling...
+              </>
+            ) : (
+              <>
+                <X className="h-4 w-4 mr-2" />
+                Cancel Scan
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+      <div className="mt-4">
         {scanProgress.total > 0 && (
           <div className="w-full bg-muted rounded-full h-2.5 overflow-hidden mb-4">
             <motion.div
@@ -229,16 +221,16 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           {/* Successful Section */}
           <div>
             <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-              <Check className="h-4 w-4 text-green-500" />
+              <Check className="h-4 w-4 text-success" />
               Successful ({successfulCount})
             </h4>
             <div className="space-y-1">
               {Object.entries(domainProgress)
                 .filter(([, info]) => info.status === 'completed')
                 .map(([domain, info]) => (
-                  <div key={domain} className="flex items-center justify-between text-sm py-1 px-2 bg-green-100/50 dark:bg-green-900/20 rounded-md">
+                  <div key={domain} className="flex items-center justify-between text-sm py-1 px-2 bg-success/10 dark:bg-success/20 rounded-md">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="w-2 h-2 rounded-full bg-green-500" />
+                      <div className="w-2 h-2 rounded-full bg-success" />
                       <span className="truncate" title={domain}>{domain}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 ml-2">
@@ -256,14 +248,14 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           {isActiveProgress && (
             <div>
               <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-                <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />
+                <RefreshCw className="h-4 w-4 text-primary animate-spin" />
                 In Progress ({Object.keys(processingDomains).length})
               </h4>
               <div className="space-y-1">
                 {Object.entries(processingDomains).map(([domain, info]) => (
-                  <div key={domain} className="text-sm py-1 px-2 bg-blue-100/50 dark:bg-blue-900/20 rounded-md">
+                  <div key={domain} className="text-sm py-1 px-2 bg-primary/10 dark:bg-primary/20 rounded-md">
                     <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                       <span className="truncate">{domain}</span>
                     </div>
                   </div>
@@ -275,19 +267,19 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           {/* HTTP Skipped Section */}
           <div>
             <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <AlertTriangle className="h-4 w-4 text-warning" />
               HTTP/Unreachable ({httpSkippedCount})
             </h4>
             <div className="space-y-2">
               {failedDomains
                 .filter(([, info]) => info.status === 'http_skipped')
                 .map(([domain, info]) => (
-                  <div key={domain} className="p-2 rounded-md bg-amber-100/60 dark:bg-amber-900/20">
+                  <div key={domain} className="p-2 rounded-md bg-warning/10 dark:bg-warning/20">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="w-2 h-2 rounded-full bg-amber-500" />
+                      <div className="w-2 h-2 rounded-full bg-warning" />
                       <span className="truncate font-medium text-xs" title={domain}>{domain}</span>
                     </div>
-                    <div className="text-xs mt-1 text-amber-700 dark:text-amber-300">
+                    <div className="text-xs mt-1 text-warning">
                       HTTP/Unreachable - cannot scan
                     </div>
                   </div>
@@ -298,20 +290,20 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           {/* Failed Section */}
           <div>
             <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-              <X className="h-4 w-4 text-red-500" />
+              <X className="h-4 w-4 text-destructive" />
               Failed ({actualFailedCount})
             </h4>
             <div className="space-y-2">
               {failedDomains
                 .filter(([, info]) => info.status === 'failed')
                 .map(([domain, info]) => (
-                  <div key={domain} className="p-2 rounded-md bg-red-100/50 dark:bg-red-900/20">
+                  <div key={domain} className="p-2 rounded-md bg-destructive/10 dark:bg-destructive/20">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="w-2 h-2 rounded-full bg-red-500" />
+                      <div className="w-2 h-2 rounded-full bg-destructive" />
                       <span className="truncate font-medium text-xs" title={domain}>{domain}</span>
                     </div>
                     {info.error && (
-                      <div className="text-xs mt-1 text-red-600 dark:text-red-400">
+                      <div className="text-xs mt-1 text-destructive">
                         {info.error}
                       </div>
                     )}
@@ -320,8 +312,8 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
             </div>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </UnifiedCard>
   );
 };
 
@@ -512,10 +504,10 @@ const loadBatchDetails = async (apiBaseUrl: string, batchId: string) => {
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case 'completed': return <div className="h-2 w-2 bg-green-500 rounded-full" />;
-    case 'failed': return <div className="h-2 w-2 bg-red-500 rounded-full" />;
-    case 'processing': return <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse" />;
-    default: return <div className="h-2 w-2 bg-yellow-500 rounded-full" />;
+    case 'completed': return <div className="h-2 w-2 bg-success rounded-full" />;
+    case 'failed': return <div className="h-2 w-2 bg-destructive rounded-full" />;
+    case 'processing': return <div className="h-2 w-2 bg-primary rounded-full animate-pulse" />;
+    default: return <div className="h-2 w-2 bg-warning rounded-full" />;
   }
 };
 
@@ -1110,9 +1102,9 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
       return getGradeColor(grade);
     } else {
       const score = calculateSecurityScore(result);
-      if (score >= 80) return 'bg-green-500';
-      if (score >= 60) return 'bg-yellow-500';
-      return 'bg-red-500';
+      if (score >= 80) return 'bg-success';
+      if (score >= 60) return 'bg-warning';
+      return 'bg-destructive';
     }
   };
 
@@ -1149,17 +1141,15 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
     >
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
-          <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-            <Globe className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+          <div className="p-3 bg-primary/10 dark:bg-primary/30 rounded-lg">
+            <Globe className="h-8 w-8 text-primary" />
           </div>
           <div>
             <h1 className="text-2xl font-bold">Web Scan</h1>
             <p className="text-muted-foreground">Scan your web assets for cryptographic vulnerabilities</p>
           </div>
         </div>
-        <Button variant="outline" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-2" /> Back
-        </Button>
+        <UnifiedBackButton onClick={onBack} label="Back" />
       </div>
 
       {message && (
@@ -1168,10 +1158,10 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
           className={`mb-6 p-4 rounded-lg ${
-            message.type === 'success' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200' :
-            message.type === 'error' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200' :
-            message.type === 'warning' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200' :
-            'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200'
+            message.type === 'success' ? 'bg-success/10 dark:bg-success/30 text-success' :
+            message.type === 'error' ? 'bg-destructive/10 dark:bg-destructive/30 text-destructive' :
+            message.type === 'warning' ? 'bg-warning/10 dark:bg-warning/30 text-warning' :
+            'bg-primary/10 dark:bg-primary/30 text-primary'
           }`}
         >
           {message.text}
@@ -1212,71 +1202,39 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
             className="space-y-6"
           >
             <div className="grid md:grid-cols-2 gap-6 items-start">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Manually Enter Domains</CardTitle>
-                  <CardDescription>
+              <UnifiedCard padding="default">
+                <div className="mb-4">
+                  <h3 className="font-semibold text-lg">Manually Enter Domains</h3>
+                  <p className="text-muted-foreground text-sm">
                     Type or paste domains directly.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <textarea
-                    id="urls"
-                    value={urls}
-                    onChange={(e) => setUrls(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { handleScanSubmit(e as any); } }}
-                    placeholder="example.com&#10;google.com, github.com"
-                    className="w-full p-3 border rounded-lg min-h-[150px] resize-y bg-background"
-                    disabled={!!uploadedFile}
-                  />
-                  <p className="text-sm text-muted-foreground mt-2">
-                    Enter domains separated by <strong>commas</strong>, <strong>spaces</strong>, or <strong>new lines</strong>.
                   </p>
-                </CardContent>
-              </Card>
+                </div>
+                <textarea
+                  id="urls"
+                  value={urls}
+                  onChange={(e) => setUrls(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { handleScanSubmit(e as any); } }}
+                  placeholder="example.com&#10;google.com, github.com"
+                  className="w-full p-3 border rounded-lg min-h-[150px] resize-y bg-background"
+                  disabled={!!uploadedFile}
+                />
+                <p className="text-sm text-muted-foreground mt-2">
+                  Enter domains separated by <strong>commas</strong>, <strong>spaces</strong>, or <strong>new lines</strong>.
+                </p>
+              </UnifiedCard>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Upload a .txt File</CardTitle>
-                  <CardDescription>
-                    Drag & drop or select a file.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                      {uploadedFile ? (
-                        <div className="p-4 border rounded-lg bg-muted/50 flex items-center justify-between">
-                          <div className="flex items-center gap-3 overflow-hidden">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            <span className="font-medium truncate" title={uploadedFile.name}>{uploadedFile.name}</span>
-                          </div>
-                          <button onClick={removeFile} className="text-muted-foreground hover:text-destructive text-2xl leading-none flex-shrink-0 ml-2">&times;</button>
-                        </div>
-                      ) : (
-                        <div
-                          onDrop={handleDrop}
-                          onDragOver={handleDragOver}
-                          onDragLeave={handleDragLeave}
-                          className={`relative border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'}`}
-                        >
-                          <input type="file" accept=".txt" onChange={handleFileInputChange} 
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                            aria-label="Upload domain list file"
-                            title="Select a .txt file containing domains"
-                          />
-                          <div className="flex flex-col items-center justify-center space-y-2 text-muted-foreground">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-4-4V7a4 4 0 014-4h1.586a1 1 0 01.707.293l1.414 1.414a1 1 0 00.707.293H13.5a4 4 0 014 4v1.586a1 1 0 01-.293.707l-1.414 1.414a1 1 0 00-.293.707V16a4 4 0 01-4 4H7z" /></svg>
-                            <p><strong>Drag & drop a .txt file</strong></p>
-                            <p className="text-sm">or click to select</p>
-                          </div>
-                        </div>
-                      )}
-                      <p className="text-sm text-muted-foreground">
-                        File must be .txt, &lt; 1MB. One URL per line. Lines starting with # are ignored.
-                      </p>
-                      </div>
-                </CardContent>
-              </Card>
+              <UnifiedCard padding="default">
+                <UnifiedFileInput
+                  label="Upload a .txt File"
+                  accept=".txt"
+                  helperText="File must be .txt, < 1MB. One URL per line. Lines starting with # are ignored."
+                  selectedFile={uploadedFile}
+                  onFileSelect={handleFileSelect}
+                  onFileRemove={removeFile}
+                  maxSize={1}
+                  dragAndDrop={true}
+                />
+              </UnifiedCard>
             </div>
             <div className="mt-6">
                 <Button 
@@ -1326,16 +1284,13 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
             </div>
 
             {scanHistory.length === 0 ? (
-              <Card>
-                <CardContent className="flex items-center justify-center py-12">
-                  <p className="text-muted-foreground">No scans found</p>
-                </CardContent>
-              </Card>
+              <UnifiedCard padding="spacious" className="flex items-center justify-center py-12">
+                <p className="text-muted-foreground">No scans found</p>
+              </UnifiedCard>
             ) : (
               <div className="space-y-4">
                 {scanHistory.map((scan) => (
-                  <Card key={scan.request_id} className="transition-all hover:shadow-md">
-                    <CardContent className="p-6">
+                  <UnifiedCard key={scan.request_id} padding="default" className="transition-all hover:shadow-md">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3 flex-1">
                           {getStatusIcon(scan.status)}
@@ -1348,10 +1303,10 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            scan.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200' :
-                            scan.status === 'failed' || scan.error_message ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200' :
-                            scan.status === 'processing' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200' :
-                            'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200'
+                            scan.status === 'completed' ? 'bg-success/10 text-success dark:bg-success/30 dark:text-success' :
+                            scan.status === 'failed' || scan.error_message ? 'bg-destructive/10 text-destructive dark:bg-destructive/30 dark:text-destructive' :
+                            scan.status === 'processing' ? 'bg-primary/10 text-primary dark:bg-primary/50 dark:text-primary' :
+                            'bg-warning/10 text-warning dark:bg-warning/30 dark:text-warning'
                           }`}>
                             {scan.status.toUpperCase()}
                           </span>
@@ -1465,9 +1420,9 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                                 return (
                                   <span className="ml-2 text-xs text-muted-foreground">
                                     (
-                                      <span className="text-green-500">{successCount}</span>
+                                      <span className="text-success">{successCount}</span>
                                       /
-                                      <span className="text-red-500">{failCount}</span>
+                                      <span className="text-destructive">{failCount}</span>
                                     )
                                   </span>
                                 );
@@ -1548,8 +1503,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                           </motion.div>
                         )}
 
-                    </CardContent>
-                  </Card>
+                    </UnifiedCard>
                 ))}
               </div>
             )}

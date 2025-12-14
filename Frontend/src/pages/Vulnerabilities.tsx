@@ -169,8 +169,7 @@ export default function VulnerabilitiesPage() {
         <MetricCard
           title="Critical"
           value={severityCounts.Critical}
-          icon={ShieldAlert}
-          iconClassName="text-red-500"
+iconClassName="text-destructive"
           gradient
         />
         <MetricCard
@@ -184,13 +183,10 @@ export default function VulnerabilitiesPage() {
           title="Medium"
           value={severityCounts.Medium}
           icon={Shield}
-          iconClassName="text-yellow-500"
+          iconClassName="text-warning"
         />
         <MetricCard
-          title="Low"
-          value={severityCounts.Low}
-          icon={ShieldCheck}
-          iconClassName="text-green-500"
+iconClassName="text-success"
         />
         <MetricCard
           title="Total Algorithms"
@@ -202,14 +198,14 @@ export default function VulnerabilitiesPage() {
           value={pqcStats.pqc}
           change={`${pqcStats.pqcPercentage}% of total`}
           icon={ShieldCheck}
-          iconClassName="text-green-500"
+          iconClassName="text-success"
         />
         <MetricCard
           title="Legacy Algorithms"
           value={pqcStats.legacy}
           change={`${legacyPercentage}% of total`}
           icon={ShieldOff}
-          iconClassName="text-red-500"
+          iconClassName="text-destructive"
         />
       </div>
       <Charts typeDistribution={typeDistribution} algorithmsData={algorithmsData} />

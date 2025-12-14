@@ -35,9 +35,9 @@ export function SummaryCards({ severityCounts, pqcStats }: SummaryCardsProps) {
         </Card>
         <Card className="border-primary/20 bg-transparent shadow-none hover:shadow-lg transition-all duration-300">
           <CardContent className="p-4 flex flex-col items-center justify-center text-center">
-            <CheckCircle className="h-5 w-5 text-green-500 mb-2" />
+            <CheckCircle className="h-5 w-5 text-success mb-2" />
             <p className="text-sm sm:text-base text-muted-foreground">Low</p>
-            <p className="text-2xl sm:text-3xl font-bold text-green-500">{severityCounts.Low}</p>
+            <p className="text-2xl sm:text-3xl font-bold text-success">{severityCounts.Low}</p>
           </CardContent>
         </Card>
       </div>
@@ -53,7 +53,7 @@ export function SummaryCards({ severityCounts, pqcStats }: SummaryCardsProps) {
         <Card className="border-primary/20 bg-transparent shadow-none hover:shadow-lg transition-all duration-300">
           <CardContent className="p-4 flex flex-col items-center justify-center text-center">
             <p className="text-sm sm:text-base text-muted-foreground">Post-Quantum Ready</p>
-            <p className="text-2xl sm:text-3xl font-bold text-green-600">{pqcStats.pqc}</p>
+            <p className="text-2xl sm:text-3xl font-bold text-success">{pqcStats.pqc}</p>
             <p className="text-sm text-muted-foreground">{pqcStats.pqcPercentage}% of total</p>
           </CardContent>
         </Card>

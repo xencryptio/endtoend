@@ -4,8 +4,7 @@ import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle,
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UnifiedCard } from '@/components/ui/unified-card';
-import { UnifiedBadge } from '@/components/ui/unified-badge';
+import { UnifiedCard, UnifiedBadge, UnifiedBackButton } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 import { Scan, StatusType } from './types';
 import ScanResultsDetail from './ScanResultsDetail';
@@ -358,10 +357,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
                 <p className="text-muted-foreground">Post-Quantum Cryptography Security Analysis</p>
               </div>
             </div>
-            <Button variant="outline" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
-            </Button>
+            <UnifiedBackButton onClick={onBack} label="Back" />
           </div>
         </div>
       </header>
@@ -411,7 +407,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
                 )}
                 
                 {detectedPlatform && !isValidating && (
-                  <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-sm font-medium shadow-sm">
+                  <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 dark:bg-primary/30 text-primary text-sm font-medium shadow-sm">
                     <CheckCircle className="w-4 h-4" />
                     <span>Detected: {detectedPlatform}</span>
                   </div>

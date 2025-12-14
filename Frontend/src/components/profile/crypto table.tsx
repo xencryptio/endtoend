@@ -53,19 +53,19 @@ const StatusBadge = ({ status }: { status: string }) => {
       case "standardized":
       case "yes":
       case "low":
-        return "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300";
+        return "bg-success/10 text-success dark:bg-success/50 dark:text-success";
       case "medium":
       case "candidate":
-        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300";
+        return "bg-warning/10 text-warning dark:bg-warning/50 dark:text-warning";
       case "weak":
         return "bg-orange-100 text-orange-800 dark:bg-orange-900/50 dark:text-orange-300";
       case "insecure":
       case "no":
-        return "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300";
+        return "bg-destructive/10 text-destructive dark:bg-destructive/50 dark:text-destructive";
       
       // Priority
       case "high":
-        return "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300";
+        return "bg-destructive/10 text-destructive dark:bg-destructive/50 dark:text-destructive";
 
       default:
         return "bg-muted text-muted-foreground";

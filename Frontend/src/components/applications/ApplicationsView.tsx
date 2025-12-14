@@ -17,9 +17,9 @@ const getRiskBadgeVariant = (risk: string) => {
 };
 
 const getProgressBarColor = (percentage: number) => {
-  if (percentage >= 80) return "bg-green-600";
-  if (percentage >= 60) return "bg-yellow-600";
-  return "bg-red-600";
+  if (percentage >= 80) return "bg-success";
+  if (percentage >= 60) return "bg-warning";
+  return "bg-destructive";
 };
 
 interface ApplicationsFilterProps {
@@ -73,7 +73,7 @@ function ApplicationsFilter({
           <div className="flex flex-row flex-wrap gap-4">
             <div className="relative">
               <Button variant="outline" className="gap-2" onClick={() => setIsRiskDropdownOpen(v => !v)} aria-label="Risk Level Filter">
-                <Shield className="h-4 w-4 text-red-600" />
+                <Shield className="h-4 w-4 text-destructive" />
                 Risk Level
                 <ChevronDown className={`h-4 w-4 transition-transform ${isRiskDropdownOpen ? 'rotate-180' : ''}`} />
               </Button>
@@ -82,7 +82,7 @@ function ApplicationsFilter({
                   <div className="p-2">
                     {DUMMY_DATA.filterOptions.risk.map(opt => (
                       <div key={opt.value} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-muted/50 ${selectedRiskFilters.includes(opt.value) ? 'bg-primary/10' : ''}`} onClick={() => toggleRiskFilter(opt.value)} tabIndex={0} role="checkbox" aria-checked={selectedRiskFilters.includes(opt.value) ? "true" : "false"}>
-                        <div className={`w-3 h-3 rounded border ${selectedRiskFilters.includes(opt.value) ? 'bg-red-600 border-red-600' : 'border-muted-foreground'}`} />
+                        <div className={`w-3 h-3 rounded border ${selectedRiskFilters.includes(opt.value) ? 'bg-destructive border-destructive' : 'border-muted-foreground'}`} />
                         <span className="text-sm">{opt.label}</span>
                       </div>
                     ))}
@@ -92,7 +92,7 @@ function ApplicationsFilter({
             </div>
             <div className="relative">
               <Button variant="outline" className="gap-2" onClick={() => setIsTimeComplexityDropdownOpen(v => !v)} aria-label="Time Complexity Filter">
-                <Clock className="h-4 w-4 text-yellow-600" />
+                <Clock className="h-4 w-4 text-warning" />
                 Time Complexity
                 <ChevronDown className={`h-4 w-4 transition-transform ${isTimeComplexityDropdownOpen ? 'rotate-180' : ''}`} />
               </Button>
@@ -101,7 +101,7 @@ function ApplicationsFilter({
                   <div className="p-2">
                     {DUMMY_DATA.filterOptions.timeComplexity.map(opt => (
                       <div key={opt.value} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-muted/50 ${selectedTimeComplexityFilters.includes(opt.value) ? 'bg-primary/10' : ''}`} onClick={() => toggleTimeComplexityFilter(opt.value)} tabIndex={0} role="checkbox" aria-checked={selectedTimeComplexityFilters.includes(opt.value) ? "true" : "false"}>
-                        <div className={`w-3 h-3 rounded border ${selectedTimeComplexityFilters.includes(opt.value) ? 'bg-yellow-600 border-yellow-600' : 'border-muted-foreground'}`} />
+                        <div className={`w-3 h-3 rounded border ${selectedTimeComplexityFilters.includes(opt.value) ? 'bg-warning border-warning' : 'border-muted-foreground'}`} />
                         <span className="text-sm">{opt.label}</span>
                       </div>
                     ))}
@@ -111,7 +111,7 @@ function ApplicationsFilter({
             </div>
             <div className="relative">
               <Button variant="outline" className="gap-2" onClick={() => setIsQuarterDropdownOpen(v => !v)} aria-label="Quarter Filter">
-                <Filter className="h-4 w-4 text-blue-600" />
+                <Filter className="h-4 w-4 text-primary" />
                 Quarter
                 <ChevronDown className={`h-4 w-4 transition-transform ${isQuarterDropdownOpen ? 'rotate-180' : ''}`} />
               </Button>
@@ -124,7 +124,7 @@ function ApplicationsFilter({
                     </div>
                     {DUMMY_DATA.filterOptions.quarter.map(opt => (
                       <div key={opt.value} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-muted/50 ${selectedQuarterFilters.includes(opt.value) ? 'bg-primary/10' : ''}`} onClick={() => toggleQuarterFilter(opt.value)} tabIndex={0} role="checkbox" aria-checked={selectedQuarterFilters.includes(opt.value) ? "true" : "false"}>
-                        <div className={`w-3 h-3 rounded border ${selectedQuarterFilters.includes(opt.value) ? 'bg-blue-600 border-blue-600' : 'border-muted-foreground'}`} />
+                        <div className={`w-3 h-3 rounded border ${selectedQuarterFilters.includes(opt.value) ? 'bg-primary border-primary' : 'border-muted-foreground'}`} />
                         <span className="text-sm">{opt.label}</span>
                       </div>
                     ))}
@@ -205,12 +205,12 @@ function ApplicationsTable({ applications, view }: ApplicationsTableProps) {
                   {view === 'allapps' && (<td className="p-4 text-sm text-muted-foreground">{app.sub_org}</td>)}
                   <td className="p-4"><Badge variant={getRiskBadgeVariant(app.risk_level)}>{app.risk_level}</Badge></td>
                   <td className="p-4"><Badge variant="outline">{app.time_complexity}</Badge></td>
-                  <td className="p-4"><Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">{app.time_quarter}</Badge></td>
+                  <td className="p-4"><Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{app.time_quarter}</Badge></td>
                   <td className="p-4"><div className="flex items-center gap-2">
                       <div className="w-16 bg-muted rounded-full h-2"><div className={`h-2 rounded-full ${getProgressBarColor(app.pqc_ready)}`} style={{ width: `${app.pqc_ready}%` }} /></div>
                       <span className="text-sm text-muted-foreground">{app.pqc_ready}%</span>
                   </div></td>
-                  <td className="p-4"><span className={`font-semibold ${app.vulnerabilities > 20 ? 'text-red-600' : app.vulnerabilities > 10 ? 'text-yellow-600' : 'text-green-600'}`}>{app.vulnerabilities}</span></td>
+                  <td className="p-4"><span className={`font-semibold ${app.vulnerabilities > 20 ? 'text-destructive' : app.vulnerabilities > 10 ? 'text-warning' : 'text-success'}`}>{app.vulnerabilities}</span></td>
                   <td className="p-4 text-sm text-muted-foreground max-w-xs truncate">{app.algorithms_used}</td>
                   <td className="p-4 text-sm text-muted-foreground">{app.last_scan}</td>
                 </tr>

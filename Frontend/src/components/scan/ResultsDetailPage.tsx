@@ -5,6 +5,7 @@ import { ArrowLeft, Search, X, Globe, Lock, Key, Hash, Shield, Zap, Check, Check
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { UnifiedBackButton } from "@/components/ui/unified";
 
 interface ScanResult {
   request_id: string;
@@ -101,8 +102,8 @@ const PQCStatusBadges: React.FC<{
 }> = ({ is_pqc, is_hybrid, quantum_safe }) => (
   <div className="flex items-center gap-2 flex-wrap">
     {is_pqc && <span className="px-1.5 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 rounded text-purple-700 dark:text-purple-300">PQC</span>}
-    {is_hybrid && <span className="px-1.5 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 rounded text-blue-700 dark:text-blue-300">Hybrid</span>}
-    {quantum_safe && <span className="px-1.5 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 rounded text-green-700 dark:text-green-300">Quantum-Safe</span>}
+    {is_hybrid && <span className="px-1.5 py-0.5 text-xs bg-primary/10 dark:bg-primary/30 rounded text-primary">Hybrid</span>}
+    {quantum_safe && <span className="px-1.5 py-0.5 text-xs bg-success/10 dark:bg-success/30 rounded text-success">Quantum-Safe</span>}
   </div>
 );
 
@@ -757,15 +758,7 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) =
     >
       {/* Header */}
       <div className="mb-8">
-        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-          <Button
-            variant="outline"
-            onClick={onBack}
-            className="mb-4"
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" /> Back
-          </Button>
-        </motion.div>
+        <UnifiedBackButton onClick={onBack} label="Back" className="mb-4" />
 
         <div>
           <h2 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">

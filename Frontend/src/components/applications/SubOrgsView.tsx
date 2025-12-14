@@ -15,17 +15,17 @@ const getStatusBadgeVariant = (status: string) => {
 
 const getRiskColor = (risk: string) => {
   switch (risk) {
-    case "Low": return "text-green-600";
-    case "Medium": return "text-yellow-600";
-    case "High": return "text-red-600";
+    case "Low": return "text-success";
+    case "Medium": return "text-warning";
+    case "High": return "text-destructive";
     default: return "text-gray-500";
   }
 };
 
 const getProgressBarColor = (percentage: number) => {
-  if (percentage >= 80) return "bg-green-600";
-  if (percentage >= 60) return "bg-yellow-600";
-  return "bg-red-600";
+  if (percentage >= 80) return "bg-success";
+  if (percentage >= 60) return "bg-warning";
+  return "bg-destructive";
 };
 
 interface SubOrgCardProps {

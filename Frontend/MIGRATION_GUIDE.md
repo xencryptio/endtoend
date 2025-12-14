@@ -63,4 +63,28 @@ All modals must use the standard Shadcn `Dialog` component.
 
 ---
 
-This guide is a living document and will be updated as the migration progresses.
+## ⚠️ STRICT RULES - NO EXCEPTIONS
+
+### ❌ FORBIDDEN
+1. **DO NOT** create custom card/badge/button components
+2. **DO NOT** use hardcoded Tailwind colors (blue-*, green-*, etc.)
+3. **DO NOT** use inline styles or custom CSS classes for spacing
+4. **DO NOT** create duplicate modal implementations
+5. **DO NOT** use hardcoded pixel values (h-[73px], mt-[13px])
+
+### ✅ REQUIRED
+1. **USE** components from `@/components/ui/unified` ONLY
+2. **USE** design tokens from `lib/design-tokens.ts`
+3. **USE** Shadcn UI components for base elements
+4. **USE** typography tokens (text-h1, text-base, text-label)
+5. **USE** spacing tokens (gap-4, space-y-6, p-6)
+
+###  Code Review Checklist
+Before submitting PR, verify:
+- [ ] No `text-blue-*/bg-green-*` etc. (use semantic tokens)
+- [ ] No custom cards (use UnifiedCard or UnifiedResultCard)
+- [ ] No duplicate badge logic (use UnifiedBadge)
+- [ ] No custom file inputs (use UnifiedFileInput)
+- [ ] No hardcoded spacing (use tokens)
+- [ ] All modals use Shadcn Dialog or UnifiedModal
+- [ ] Back buttons use UnifiedBackButton

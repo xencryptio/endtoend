@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
 import { Button } from '@/components/ui/button';
 import { AgentResultsPage } from '@/components/system-scan/scan-results';
-import { UnifiedBadge } from '@/components/ui/unified-badge';
-import { UnifiedCard } from '@/components/ui/unified-card';
-import { UnifiedExpandable } from '@/components/ui/unified-expandable';
+import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 
 
@@ -718,7 +716,7 @@ const AgentResultsView: React.FC<{
   return (
     <div className="space-y-4">
       {/* Header with metadata */}
-      <div className="bg-blue-50 dark:bg-blue-900/10 p-6 rounded-lg border-l-4 border-blue-500">
+      <div className="bg-primary/5 dark:bg-primary/10 p-6 rounded-lg border-l-4 border-primary">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div className="flex-1 min-w-0">
             <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-3">
@@ -738,8 +736,7 @@ const AgentResultsView: React.FC<{
               <div className="flex flex-col gap-1">
                 <span className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">OS</span>
                 <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${os === 'Windows' ? 'bg-blue-500' : 'bg-green-500'
-                    }`} />
+                  <div className={`w-3 h-3 rounded-full ${os === 'Windows' ? 'bg-primary' : 'bg-success'}`} />
                   <span className="text-slate-900 dark:text-slate-100 font-semibold">
                     {os}
                   </span>
@@ -818,15 +815,14 @@ const AgentResultsView: React.FC<{
               <button
                 key={section.title}
                 onClick={() => setActiveSection(section.title)}
-                className={`flex items-center gap-2 px-6 py-4 whitespace-nowrap font-medium transition-colors relative ${activeSection === section.title
-                  ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                className={`flex items-center gap-2 px-6 py-4 whitespace-nowrap font-medium transition-colors relative ${activeSection === section.title ? 'text-primary dark:text-primary/70 bg-primary/5 dark:bg-primary/20'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
               >
                 {section.icon}
                 <span>{section.title}</span>
                 {activeSection === section.title && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                 )}
               </button>
             ))}
@@ -906,8 +902,8 @@ const AgentResultsView: React.FC<{
 
       {/* Historical scans summary */}
       {results.length > 1 && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 leading-relaxed">
+        <div className="bg-primary/5 dark:bg-primary/20 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center gap-2 text-primary leading-relaxed">
             <Clock size={16} />
             <span className="text-sm font-medium">
               Showing latest result. {results.length - 1} previous scan{results.length > 2 ? 's' : ''} available in history.
@@ -1472,7 +1468,7 @@ const CryptoAuditDashboard: React.FC = () => {
                 {tab === 'downloads' && 'Downloads'}
                 {tab === 'docs' && 'Documentation'}
                 {activeTab === tab && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                 )}
               </button>
             ))}
@@ -1482,10 +1478,10 @@ const CryptoAuditDashboard: React.FC = () => {
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         {error && (
-          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <div className="mb-6 p-4 bg-destructive/5 dark:bg-destructive/20 border border-destructive/20 dark:border-destructive/80 rounded-lg">
             <div className="flex items-center gap-2">
-              <AlertCircle className="text-red-600 dark:text-red-400" size={20} />
-              <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+              <AlertCircle className="text-destructive" size={20} />
+              <p className="text-sm text-destructive">{error}</p>
             </div>
           </div>
         )}
@@ -1512,68 +1508,68 @@ const CryptoAuditDashboard: React.FC = () => {
                 ) : stats && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
                     {/* Total Agents */}
-                    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground">Total Agents</CardTitle>
+                    <UnifiedCard variant="metric" padding="default">
+                      <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Total Agents</h3>
                         <Server className="h-5 w-5 text-muted-foreground" />
-                      </CardHeader>
-                      <CardContent className="px-6 pb-6">
+                      </div>
+                      <div>
                         <div className="text-3xl font-bold mb-2">{stats?.agents?.total || 0}</div>
                         <p className="text-sm font-medium text-muted-foreground">Total fleet size</p>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </UnifiedCard>
 
                     {/* Active */}
-                    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground">Active</CardTitle>
+                    <UnifiedCard variant="metric" padding="default">
+                      <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Active</h3>
                         <Activity className="h-5 w-5 text-success" />
-                      </CardHeader>
-                      <CardContent className="px-6 pb-6">
+                      </div>
+                      <div>
                         <div className="text-3xl font-bold text-success mb-2">{stats?.agents?.active || 0}</div>
                         <p className="text-sm font-medium text-muted-foreground">
                           {stats?.agents?.total > 0 ? ((stats.agents.active / stats.agents.total) * 100).toFixed(1) : 0}% of total
                         </p>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </UnifiedCard>
 
                     {/* Inactive */}
-                    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground">Inactive</CardTitle>
+                    <UnifiedCard variant="metric" padding="default">
+                      <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Inactive</h3>
                         <AlertCircle className="h-5 w-5 text-destructive" />
-                      </CardHeader>
-                      <CardContent className="px-6 pb-6">
+                      </div>
+                      <div>
                         <div className="text-3xl font-bold text-destructive mb-2">{stats?.agents?.inactive || 0}</div>
                         <p className="text-sm font-medium text-muted-foreground">
                           {stats?.agents?.total > 0 ? ((stats.agents.inactive / stats.agents.total) * 100).toFixed(1) : 0}% offline
                         </p>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </UnifiedCard>
 
                     {/* Pending */}
-                    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground">Pending</CardTitle>
+                    <UnifiedCard variant="metric" padding="default">
+                      <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Pending</h3>
                         <Clock className="h-5 w-5 text-warning" />
-                      </CardHeader>
-                      <CardContent className="px-6 pb-6">
+                      </div>
+                      <div>
                         <div className="text-3xl font-bold text-warning mb-2">{stats?.tasks?.pending || 0}</div>
                         <p className="text-sm font-medium text-muted-foreground">Tasks awaiting execution</p>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </UnifiedCard>
 
                     {/* Completed */}
-                    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground">Completed</CardTitle>
-                        <CheckCircle className="h-5 w-5 text-emerald-500" />
-                      </CardHeader>
-                      <CardContent className="px-6 pb-6">
-                        <div className="text-3xl font-bold text-emerald-500 mb-2">{stats?.tasks?.completed || 0}</div>
+                    <UnifiedCard variant="metric" padding="default">
+                      <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Completed</h3>
+                        <CheckCircle className="h-5 w-5 text-success" />
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-success mb-2">{stats?.tasks?.completed || 0}</div>
                         <p className="text-sm font-medium text-muted-foreground">Tasks finished successfully</p>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </UnifiedCard>
                   </div>
                 )}
 
@@ -1656,7 +1652,7 @@ const CryptoAuditDashboard: React.FC = () => {
                           className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-20 flex items-center justify-center"
                         >
                           <div className="bg-white dark:bg-slate-900 px-6 py-3 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 flex items-center gap-3">
-                            <Loader className="animate-spin text-blue-600" size={20} />
+                            <Loader className="animate-spin text-primary" size={20} />
                             <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
                               Updating data...
                             </span>
@@ -1929,53 +1925,53 @@ const SimplifiedAgentView: React.FC<{
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Total Scans</CardTitle>
+        <UnifiedCard variant="metric" padding="default">
+          <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">Total Scans</h3>
             <FileText className="h-5 w-5 text-primary" />
-          </CardHeader>
-          <CardContent className="px-6 pb-6">
+          </div>
+          <div>
             <div className="text-3xl font-bold mb-2">{results.length}</div>
             <p className="text-sm font-medium text-muted-foreground">Lifetime scans</p>
-          </CardContent>
-        </Card>
+          </div>
+        </UnifiedCard>
 
-        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Success Rate</CardTitle>
+        <UnifiedCard variant="metric" padding="default">
+          <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">Success Rate</h3>
             <CheckCircle className="h-5 w-5 text-success" />
-          </CardHeader>
-          <CardContent className="px-6 pb-6">
+          </div>
+          <div>
             <div className="text-3xl font-bold text-success mb-2">{successRate}%</div>
             <p className="text-sm font-medium text-muted-foreground">Pass rate</p>
-          </CardContent>
-        </Card>
+          </div>
+        </UnifiedCard>
 
-        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Latest Scan</CardTitle>
+        <UnifiedCard variant="metric" padding="default">
+          <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">Latest Scan</h3>
             <Clock className="h-5 w-5 text-primary" />
-          </CardHeader>
-          <CardContent className="px-6 pb-6">
+          </div>
+          <div>
             <div className="text-2xl font-bold mb-2">
               {latestResult ? new Date(latestResult.submitted_at).toLocaleDateString() : 'N/A'}
             </div>
             <p className="text-sm font-medium text-muted-foreground">Last execution</p>
-          </CardContent>
-        </Card>
+          </div>
+        </UnifiedCard>
 
-        <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Last Contact</CardTitle>
+        <UnifiedCard variant="metric" padding="default">
+          <div className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">Last Contact</h3>
             <Activity className="h-5 w-5 text-warning" />
-          </CardHeader>
-          <CardContent className="px-6 pb-6">
+          </div>
+          <div>
             <div className="text-2xl font-bold text-warning mb-2">
               {formatTimeSince(agent.minutes_since_last_seen)}
             </div>
             <p className="text-sm font-medium text-muted-foreground">Heartbeat</p>
-          </CardContent>
-        </Card>
+          </div>
+        </UnifiedCard>
       </div>
 
       <UnifiedCard>
@@ -2003,11 +1999,10 @@ const ResultCard: React.FC<{
   isExpanded: boolean;
   onToggle: () => void;
   onViewDetails: () => void;
-}> = ({ result, index, isExpanded, onToggle, onViewDetails }) => {
+}> = ({ result, index, isExpanded, onViewDetails }) => {
   const hasData = !!result.audit_results;
   const os = hasData ? detectOS(result.audit_results) : 'Unknown';
 
-  // Get key metrics
   const getKeyMetrics = () => {
     if (!hasData) return null;
 
@@ -2034,250 +2029,34 @@ const ResultCard: React.FC<{
   };
 
   const metrics = getKeyMetrics();
+  const cardMetrics = metrics ? (os === 'Linux' ? [
+    { label: 'OpenSSL', value: metrics.opensslVersion },
+    { label: 'Ciphers', value: metrics.totalCiphers },
+    { label: 'Certs', value: metrics.certificates },
+    { label: 'CPU', value: metrics.cpuFeatures }
+  ] : [
+    { label: 'FIPS', value: metrics.fipsMode },
+    { label: 'Suites', value: metrics.cipherSuites },
+    { label: 'Certs', value: metrics.certificates },
+    { label: 'Providers', value: metrics.cryptoProviders }
+  ]) : [];
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05, duration: 0.4 }}
-      whileHover={{ y: -4 }}
-      className="group"
+      className="h-full"
     >
-      <Card className={`relative overflow-hidden backdrop-blur-xl bg-white/80 dark:bg-slate-900/80 border-2 transition-all duration-300 cursor-pointer ${hasData
-        ? 'border-green-200 dark:border-green-800 hover:border-green-400 dark:hover:border-green-600 hover:shadow-xl hover:shadow-green-500/10'
-        : 'border-red-200 dark:border-red-800 hover:border-red-400 dark:hover:border-red-600 hover:shadow-xl hover:shadow-red-500/10'
-        }`}>
-        {/* Gradient Overlay */}
-        <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${hasData
-          ? 'bg-gradient-to-br from-green-500/5 to-emerald-500/5'
-          : 'bg-gradient-to-br from-red-500/5 to-rose-500/5'
-          }`} />
-
-        <CardContent className="p-6 relative z-10">
-          {/* Card Header */}
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <div className={`w-3 h-3 rounded-full ${hasData
-                  ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse'
-                  : 'bg-red-500 shadow-lg shadow-red-500/50'
-                  }`} />
-                <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">
-                  Scan #{index + 1}
-                </h3>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <Clock size={12} />
-                <span>{new Date(result.submitted_at).toLocaleString()}</span>
-              </div>
-            </div>
-
-            {/* OS Badge */}
-            <div className={`px-3 py-1 rounded-full text-xs font-semibold ${os === 'Windows'
-              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-              : os === 'Linux'
-                ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-              }`}>
-              {os}
-            </div>
-          </div>
-
-          {/* Status Badge */}
-          <div className="mb-4">
-            {hasData ? (
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm font-semibold">
-                <CheckCircle size={16} />
-                Scan Completed
-              </div>
-            ) : (
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-semibold">
-                <AlertCircle size={16} />
-                Scan Failed
-              </div>
-            )}
-          </div>
-
-          {/* Key Metrics Grid */}
-          {hasData && metrics && (
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              {os === 'Linux' ? (
-                <>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      OpenSSL
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate" title={metrics.opensslVersion}>
-                      {metrics.opensslVersion}
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      Ciphers
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      {metrics.totalCiphers}
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      Certificates
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      {metrics.certificates}
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      CPU Features
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      {metrics.cpuFeatures}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      FIPS Mode
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      {metrics.fipsMode}
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      Cipher Suites
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      {metrics.cipherSuites}
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      Certificates
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      {metrics.certificates}
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                      Providers
-                    </div>
-                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                      {metrics.cryptoProviders}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Quick Info */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-            <div className="grid grid-cols-2 gap-3 text-xs mb-4">
-              <div>
-                <span className="text-slate-500 dark:text-slate-400">Task ID:</span>
-                <div className="font-mono text-slate-900 dark:text-slate-100 mt-1 truncate" title={result.task_id}>
-                  {result.task_id.substring(0, 16)}...
-                </div>
-              </div>
-              <div>
-                <span className="text-slate-500 dark:text-slate-400">Received:</span>
-                <div className="font-medium text-slate-900 dark:text-slate-100 mt-1">
-                  {new Date(result.received_at).toLocaleTimeString()}
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-2">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onViewDetails();
-                }}
-                disabled={!hasData}
-                className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm"
-              >
-                <FileText size={16} />
-                View Details
-              </motion.button>
-
-              {hasData && (
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigator.clipboard.writeText(JSON.stringify(result.audit_results, null, 2));
-                  }}
-                  className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
-                  title="Copy JSON"
-                >
-                  <Copy size={16} />
-                </motion.button>
-              )}
-            </div>
-          </div>
-
-          {/* Expand Toggle */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggle();
-            }}
-            className="w-full mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
-          >
-            <span className="font-medium">
-              {isExpanded ? 'Hide' : 'Show'} Additional Info
-            </span>
-            <ChevronDown
-              size={14}
-              className={`transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-            />
-          </button>
-
-          {/* Expanded Additional Info */}
-          <AnimatePresence>
-            {isExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
-                className="overflow-hidden"
-              >
-                <div className="pt-3 space-y-2 text-xs">
-                  <div className="flex justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
-                    <span className="text-slate-500 dark:text-slate-400">Result ID:</span>
-                    <span className="font-mono text-slate-900 dark:text-slate-100">
-                      {result.result_id.substring(0, 12)}...
-                    </span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
-                    <span className="text-slate-500 dark:text-slate-400">Agent ID:</span>
-                    <span className="font-mono text-slate-900 dark:text-slate-100">
-                      {result.agent_id.substring(0, 12)}...
-                    </span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
-                    <span className="text-slate-500 dark:text-slate-400">Duration:</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
-                      {((new Date(result.received_at).getTime() - new Date(result.submitted_at).getTime()) / 1000).toFixed(2)}s
-                    </span>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </CardContent>
-      </Card>
-    </motion.div >
+      <UnifiedResultCard
+        status={hasData ? 'success' : 'error'}
+        title={`Scan #${index + 1} - ${os}`}
+        description={new Date(result.submitted_at).toLocaleString()}
+        metrics={cardMetrics}
+        onClick={onViewDetails}
+        className="h-full"
+      />
+    </motion.div>
   );
 };
 
@@ -2323,15 +2102,15 @@ const ExpandedResultModal: React.FC<{
         className="fixed inset-4 md:inset-8 lg:inset-16 z-50 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <Card className="flex flex-col h-full shadow-2xl border-2 border-white/20 ring-1 ring-black/5 backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 overflow-hidden">
+        <UnifiedCard className="flex flex-col h-full shadow-2xl border-2 border-white/20 ring-1 ring-black/5 backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 overflow-hidden" padding="none">
           {/* Modal Header */}
           <div className="flex-shrink-0 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 border-b-2 border-slate-200 dark:border-slate-700 p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 mb-3">
                   <div className={`w-4 h-4 rounded-full ${hasData
-                    ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse'
-                    : 'bg-red-500 shadow-lg shadow-red-500/50'
+                    ? 'bg-success shadow-lg shadow-success/50 animate-pulse'
+                    : 'bg-destructive shadow-lg shadow-destructive/50'
                     }`} />
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
                     Detailed Scan Results
@@ -2344,7 +2123,7 @@ const ExpandedResultModal: React.FC<{
                   </div>
                   <span>•</span>
                   <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${os === 'Windows'
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    ? 'bg-primary/10 dark:bg-primary/30 text-primary'
                     : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
                     }`}>
                     {os}
@@ -2373,13 +2152,13 @@ const ExpandedResultModal: React.FC<{
                 <button
                   onClick={() => setActiveTab('overview')}
                   className={`px-6 py-4 font-medium text-sm transition-colors relative whitespace-nowrap ${activeTab === 'overview'
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                    ? 'text-primary dark:text-primary/70 bg-primary/5 dark:bg-primary/20'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                     }`}
                 >
                   Overview
                   {activeTab === 'overview' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                   )}
                 </button>
                 {processedSections.map((section) => (
@@ -2387,7 +2166,7 @@ const ExpandedResultModal: React.FC<{
                     key={section.title}
                     onClick={() => setActiveTab(section.title)}
                     className={`px-6 py-4 font-medium text-sm transition-colors relative whitespace-nowrap ${activeTab === section.title
-                      ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                      ? 'text-primary dark:text-primary/70 bg-primary/5 dark:bg-primary/20'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                       }`}
                   >
@@ -2396,14 +2175,14 @@ const ExpandedResultModal: React.FC<{
                       <span>{section.title}</span>
                     </div>
                     {activeTab === section.title && (
-                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                     )}
                   </button>
                 ))}
                 <button
                   onClick={() => setActiveTab('raw')}
                   className={`px-6 py-4 font-medium text-sm transition-colors relative whitespace-nowrap ${activeTab === 'raw'
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                    ? 'text-primary dark:text-primary/70 bg-primary/5 dark:bg-primary/20'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                     }`}
                 >
@@ -2412,7 +2191,7 @@ const ExpandedResultModal: React.FC<{
                     <span>Raw JSON</span>
                   </div>
                   {activeTab === 'raw' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                   )}
                 </button>
               </div>
@@ -2420,11 +2199,11 @@ const ExpandedResultModal: React.FC<{
           )}
 
           {/* Modal Content */}
-          <CardContent className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto p-6">
             {!hasData ? (
               <div className="flex flex-col items-center justify-center h-full">
-                <div className="w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-4">
-                  <AlertCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
+                <div className="w-20 h-20 rounded-full bg-destructive/10 dark:bg-destructive/30 flex items-center justify-center mb-4">
+                  <AlertCircle className="w-10 h-10 text-destructive" />
                 </div>
                 <p className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
                   Scan Failed
@@ -2506,8 +2285,8 @@ const ExpandedResultModal: React.FC<{
                             className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-600 transition-colors group"
                           >
                             <div className="flex items-center gap-3">
-                              <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg group-hover:bg-blue-100 dark:group-hover:bg-blue-900/50 transition-colors">
-                                <div className="text-blue-600 dark:text-blue-400">
+                              <div className="p-2 bg-primary/5 dark:bg-primary/30 rounded-lg group-hover:bg-primary/10 dark:group-hover:bg-primary/50 transition-colors">
+                                <div className="text-primary">
                                   {section.icon}
                                 </div>
                               </div>
@@ -2515,7 +2294,7 @@ const ExpandedResultModal: React.FC<{
                                 {section.title}
                               </span>
                             </div>
-                            <ChevronRight size={18} className="text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" />
+                            <ChevronRight size={18} className="text-slate-400 group-hover:text-primary transition-colors" />
                           </button>
                         ))}
                       </div>
@@ -2561,8 +2340,8 @@ const ExpandedResultModal: React.FC<{
                 )}
               </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </UnifiedCard>
       </motion.div>
     </>
   );
@@ -2778,7 +2557,7 @@ const FileDownloadSection: React.FC<{
       <div className="p-6">
         <div className="flex items-center justify-between gap-6">
           <div className="flex items-center gap-4">
-            <div className={`p-3 rounded-lg ${folderType === 'linux' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+            <div className={`p-3 rounded-lg ${folderType === 'linux' ? 'bg-primary/5 text-primary' : 'bg-purple-50 text-purple-600'}`}>
               {icon}
             </div>
             <div>
@@ -2792,7 +2571,7 @@ const FileDownloadSection: React.FC<{
           <a
             href={`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/download-zip/${folderType}`}
             download
-            className="px-6 py-3 h-12 rounded-md font-medium text-base bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white transition-colors flex items-center gap-2 shadow-sm whitespace-nowrap" // eslint-disable-line react/jsx-no-target-blank
+            className="px-6 py-3 h-12 rounded-md font-medium text-base bg-primary hover:bg-primary/90 active:bg-primary/80 text-white transition-colors flex items-center gap-2 shadow-sm whitespace-nowrap" // eslint-disable-line react/jsx-no-target-blank
           >
             <Download size={18} />
             Download
@@ -2818,8 +2597,8 @@ const DocumentationSection: React.FC = () => (
     </div>
 
     <div className="space-y-6">
-      <div className="rounded-lg border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/10 p-6">
-        <h3 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-400">Linux Agent Setup</h3>
+      <div className="rounded-lg border-l-4 border-primary bg-primary/5 dark:bg-primary/10 p-6">
+        <h3 className="text-xl font-bold mb-4 text-primary">Linux Agent Setup</h3>
         <ol className="space-y-4">
           {[
             { num: 1, text: 'Download the Linux Agent ZIP file from the downloads section' },
@@ -2830,7 +2609,7 @@ const DocumentationSection: React.FC = () => (
             { num: 6, text: 'Agent will automatically start and register with the server' },
           ].map(step => (
             <li key={step.num} className="flex gap-3">
-              <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center text-base font-bold shadow-sm">
+              <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center text-base font-bold shadow-sm">
                 {step.num}
               </span>
               <div className="flex-1">
@@ -2844,8 +2623,8 @@ const DocumentationSection: React.FC = () => (
             </li>
           ))}
         </ol>
-        <div className="mt-6 p-6 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-slate-200 dark:border-slate-700">
-          <p className="text-sm font-semibold mb-3 text-blue-900 dark:text-blue-300">Expected Files:</p>
+        <div className="mt-6 p-6 rounded-lg bg-primary/5 dark:bg-primary/10 border border-slate-200 dark:border-slate-700">
+          <p className="text-sm font-semibold mb-3 text-primary">Expected Files:</p>
           <div className="flex flex-wrap gap-2">
             {['crypto_agent.py', 'install_crypto_agent.sh', 'config.json'].map(file => (
               <code key={file} className="px-2 py-1 rounded text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono border border-slate-200 dark:border-slate-700">
@@ -2894,10 +2673,10 @@ const DocumentationSection: React.FC = () => (
         </div>
       </div>
 
-      <div className="rounded-lg border-l-4 border-green-500 bg-green-50 dark:bg-green-900/10 p-6">
-        <h3 className="text-xl font-bold mb-4 text-green-700 dark:text-green-400">Configuration</h3>
+      <div className="rounded-lg border-l-4 border-success bg-success/5 dark:bg-success/10 p-6">
+        <h3 className="text-xl font-bold mb-4 text-success">Configuration</h3>
         <p className="mb-4 text-slate-900 dark:text-slate-100 leading-relaxed">
-          Edit the <code className="px-2 py-1 rounded text-sm bg-slate-900 dark:bg-slate-950 text-green-400 font-mono">config.json</code> file to configure:
+          Edit the <code className="px-2 py-1 rounded text-sm bg-slate-900 dark:bg-slate-950 text-success font-mono">config.json</code> file to configure:
         </p>
         <ul className="space-y-3">
           {[
@@ -2906,7 +2685,7 @@ const DocumentationSection: React.FC = () => (
             { label: 'agent_id', desc: 'Auto-generated unique identifier for the agent' },
           ].map((item, idx) => (
             <li key={idx} className="flex items-start gap-3">
-              <CheckCircle size={20} className="flex-shrink-0 text-green-600 dark:text-green-400 mt-0.5" />
+              <CheckCircle size={20} className="flex-shrink-0 text-success mt-0.5" />
               <div>
                 <strong className="text-slate-900 dark:text-slate-100">{item.label}:</strong>
                 <span className="text-slate-700 dark:text-slate-300"> {item.desc}</span>

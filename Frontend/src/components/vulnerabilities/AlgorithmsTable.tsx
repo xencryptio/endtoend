@@ -77,8 +77,8 @@ export function AlgorithmsTable({ algorithmsData }: AlgorithmsTableProps) {
                     <td className="p-3 min-w-[80px]">
                       {alg.isPqc ? (
                         <div className="flex items-center gap-1">
-                          <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
-                          <span className="text-green-600 text-xs">Yes</span>
+                          <CheckCircle className="h-4 w-4 text-success flex-shrink-0" />
+                          <span className="text-success text-xs">Yes</span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-1">
@@ -112,7 +112,7 @@ export function AlgorithmsTable({ algorithmsData }: AlgorithmsTableProps) {
                     <td className="p-3 min-w-[120px]">
                       <div
                         className={`text-sm truncate max-w-[120px] ${
-                          alg.quantumVulnerability.includes('resistant') ? 'text-green-600' : 'text-destructive'
+                          alg.quantumVulnerability.includes('resistant') ? 'text-success' : 'text-destructive'
                         }`}
                         title={alg.quantumVulnerability}
                       >

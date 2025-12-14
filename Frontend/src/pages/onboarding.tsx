@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { UnifiedCard, UnifiedBackButton } from "@/components/ui/unified";
+import { typography } from "@/lib/design-tokens";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, UploadCloud, FileText, Github, Loader2, Download, Trash2, RefreshCw, XCircle, Server, Terminal, BookOpen, CheckCircle, Activity, AlertCircle } from "lucide-react";
@@ -35,11 +37,10 @@ interface FileInfo {
   modified: string;
 }
 
-
 type ViewType = 'dashboard' | 'tls' | 'repo' | 'system';
 
 // ============================================================================
-// HELPER COMPONENTS
+// CONSTANTS
 // ============================================================================
 
 const cardVariants = {
@@ -51,6 +52,10 @@ const cardVariants = {
 // API base URLs
 const BATCH_API_BASE = 'http://localhost:8008';  // Excel Batch Scanner API
 const AGENT_API_BASE = 'http://localhost:9000';  // Crypto Audit API Server
+
+// ============================================================================
+// HELPER COMPONENTS
+// ============================================================================
 
 const ScanProgress = ({ progress, logs }) => (
     <div className="mt-6 p-4 bg-muted/50 rounded-lg">
@@ -69,21 +74,21 @@ const ScanProgress = ({ progress, logs }) => (
         <div className="grid grid-cols-3 gap-2 mb-4 text-center">
             <div>
                 <p className="text-xs text-muted-foreground">Completed</p>
-                <p className="text-xl font-bold text-green-500">{progress.completed}</p>
+                <p className={`${typography.h3} text-success`}>{progress.completed}</p>
             </div>
             <div>
                 <p className="text-xs text-muted-foreground">Failed</p>
-                <p className="text-xl font-bold text-red-500">{progress.failed}</p>
+                <p className={`${typography.h3} text-destructive`}>{progress.failed}</p>
             </div>
             <div>
                 <p className="text-xs text-muted-foreground">Total</p>
-                <p className="text-xl font-bold">{progress.completed + progress.failed}</p>
+                <p className={typography.h3}>{progress.completed + progress.failed}</p>
             </div>
         </div>
 
         <div className="max-h-48 overflow-y-auto bg-background rounded p-3 font-mono text-xs border">
             {logs.map((log, idx) => (
-                <div key={idx} className={`mb-1 p-1 rounded text-xs ${log.level === 'error' ? 'text-red-500' : 'text-muted-foreground'}`}>
+                <div key={idx} className={`mb-1 p-1 rounded text-xs ${log.level === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
                     <span className="font-semibold">[{log.timestamp}]</span> {log.message}
                 </div>
             ))}
@@ -162,10 +167,9 @@ const SystemDownloadCard: React.FC<{
         }
     };
 
-
     const colorClass = folderType === 'linux'
-        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-        : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400';
+        ? 'bg-primary/5 dark:bg-primary/20 text-primary'
+        : 'bg-scan-pqc/5 dark:bg-scan-pqc/20 text-scan-pqc dark:text-scan-pqc/70';
 
     return (
         <Card className="shadow-lg">
@@ -176,7 +180,7 @@ const SystemDownloadCard: React.FC<{
                             {icon}
                         </div>
                         <div>
-                            <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                            <h2 className={typography.h2}>
                                 {title}
                             </h2>
                             <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
@@ -189,29 +193,34 @@ const SystemDownloadCard: React.FC<{
                             )}
                         </div>
                     </div>
-                    <button
+                    <Button
                         onClick={handleDownload}
-                        className="w-full sm:w-auto px-6 py-3 rounded-lg font-semibold text-base bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                        size="lg"
+                        className="w-full sm:w-auto"
                     >
-                        <Download size={20} />
+                        <Download size={20} className="mr-2" />
                         Download {title}
-                    </button>
+                    </Button>
                 </div>
             </CardContent>
         </Card>
     );
 };
 
-const LinuxInstructionsCard: React.FC = () => (
-    <Card className="mt-6 border-l-4 border-l-blue-500">
+// ============================================================================
+// INSTRUCTION CARD COMPONENTS
+// ============================================================================
+
+const LinuxInstructionsCard = () => (
+    <UnifiedCard>
         <CardHeader>
             <div className="flex items-center gap-3">
-                <BookOpen className="text-blue-600 dark:text-blue-400" size={24} />
-                <CardTitle className="text-xl">Linux Setup Instructions</CardTitle>
+                <BookOpen className="text-primary" size={24} />
+                <CardTitle className={typography.h3}>Linux Setup Instructions</CardTitle>
             </div>
         </CardHeader>
-        <CardContent>
-            <ol className="space-y-5">
+        <CardContent className="p-6">
+            <ol className="space-y-6">
                 {[
                     { num: 1, text: 'Download the Linux Agent ZIP file', note: 'Click the download button above' },
                     { num: 2, text: 'Extract the ZIP file', code: 'unzip Linux_Agent.zip' },
@@ -221,7 +230,7 @@ const LinuxInstructionsCard: React.FC = () => (
                     { num: 6, text: 'Verify installation', note: 'The agent will automatically start and register with the server' },
                 ].map(step => (
                     <li key={step.num} className="flex gap-4">
-                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-blue-600 dark:bg-blue-500 text-white flex items-center justify-center text-base font-bold shadow-md">{step.num}</span>
+                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center text-base font-bold shadow-md">{step.num}</span>
                         <div className="flex-1">
                             <p className="text-slate-900 dark:text-slate-100 font-medium">{step.text}</p>
                             {step.note && <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{step.note}</p>}
@@ -231,19 +240,19 @@ const LinuxInstructionsCard: React.FC = () => (
                 ))}
             </ol>
         </CardContent>
-    </Card>
+    </UnifiedCard>
 );
 
-const WindowsInstructionsCard: React.FC = () => (
-    <Card className="mt-6 border-l-4 border-l-purple-500">
+const WindowsInstructionsCard = () => (
+    <UnifiedCard>
         <CardHeader>
             <div className="flex items-center gap-3">
-                <BookOpen className="text-purple-600 dark:text-purple-400" size={24} />
-                <CardTitle className="text-xl">Windows Setup Instructions</CardTitle>
+                <BookOpen className="text-scan-pqc" size={24} />
+                <CardTitle className={typography.h3}>Windows Setup Instructions</CardTitle>
             </div>
         </CardHeader>
-        <CardContent>
-            <ol className="space-y-5">
+        <CardContent className="p-6">
+            <ol className="space-y-6">
                 {[
                     { num: 1, text: 'Download the Windows Agent ZIP file', note: 'Click the download button above' },
                     { num: 2, text: 'Extract the ZIP file to a directory', note: 'Example: C:\\CryptoAgent' },
@@ -253,7 +262,7 @@ const WindowsInstructionsCard: React.FC = () => (
                     { num: 6, text: 'Verify installation', note: 'The agent will be installed as a Windows service and start automatically' },
                 ].map(step => (
                     <li key={step.num} className="flex gap-4">
-                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-purple-600 dark:bg-purple-500 text-white flex items-center justify-center text-base font-bold shadow-md">{step.num}</span>
+                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-scan-pqc text-white flex items-center justify-center text-base font-bold shadow-md">{step.num}</span>
                         <div className="flex-1">
                             <p className="text-slate-900 dark:text-slate-100 font-medium">{step.text}</p>
                             {step.note && <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{step.note}</p>}
@@ -263,33 +272,33 @@ const WindowsInstructionsCard: React.FC = () => (
                 ))}
             </ol>
         </CardContent>
-    </Card>
+    </UnifiedCard>
 );
 
-const ConfigurationCard: React.FC<{ apiUrl: string }> = ({ apiUrl }) => (
-    <Card className="border-l-4 border-l-green-500">
+const ConfigurationCard = () => (
+    <UnifiedCard>
         <CardHeader>
             <div className="flex items-center gap-3">
-                <BookOpen className="text-green-600 dark:text-green-400" size={24} />
-                <CardTitle className="text-xl">Configuration</CardTitle>
+                <BookOpen className="text-success" size={24} />
+                <CardTitle className={typography.h3}>Configuration</CardTitle>
             </div>
             <CardDescription>Both agents use the same configuration file format</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-6">
             <div className="mb-6">
                 <p className="text-slate-900 dark:text-slate-100 mb-4">Edit the <code className="px-2 py-1 rounded bg-slate-200 dark:bg-slate-800 text-sm font-mono">config.json</code> file to configure:</p>
                 <div className="space-y-4">
                     {[
-                        { label: 'server_url', desc: 'API server address', value: apiUrl, required: true },
+                        { label: 'server_url', desc: 'API server address', value: AGENT_API_BASE, required: true },
                         { label: 'poll_interval', desc: 'How often the agent checks for tasks', value: '30 seconds (default)', required: false },
                         { label: 'agent_id', desc: 'Unique identifier for the agent', value: 'Auto-generated on first run', required: false },
                     ].map((item, idx) => (
                         <div key={idx} className="flex items-start gap-3 p-4 bg-white dark:bg-slate-800 rounded-lg border border-green-200 dark:border-green-800">
-                            <CheckCircle size={20} className="flex-shrink-0 text-green-600 dark:text-green-400 mt-0.5" />
+                            <CheckCircle size={20} className="flex-shrink-0 text-success mt-0.5" />
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <code className="text-sm font-mono font-semibold text-slate-900 dark:text-slate-100">{item.label}</code>
-                                    {item.required && <span className="text-xs px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded font-semibold">Required</span>}
+                                    {item.required && <span className="text-xs px-2 py-0.5 bg-destructive/10 dark:bg-destructive/30 text-destructive rounded font-semibold">Required</span>}
                                 </div>
                                 <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{item.desc}</p>
                                 <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 font-mono">{item.value}</p>
@@ -299,34 +308,34 @@ const ConfigurationCard: React.FC<{ apiUrl: string }> = ({ apiUrl }) => (
                 </div>
             </div>
             <div className="p-5 rounded-lg bg-white dark:bg-slate-800 border border-green-200 dark:border-green-800">
-                <p className="text-sm font-semibold mb-3 text-green-900 dark:text-green-300">Example config.json:</p>
+                <p className="text-sm font-semibold mb-3 text-success">Example config.json:</p>
                 <pre className="text-sm bg-slate-900 dark:bg-slate-950 text-emerald-400 font-mono p-4 rounded-lg overflow-x-auto">{`{
-  "server_url": "${apiUrl}",
+  "server_url": "${AGENT_API_BASE}",
   "poll_interval": 30,
   "agent_id": "auto-generated-uuid"
 }`}</pre>
             </div>
         </CardContent>
-    </Card>
+    </UnifiedCard>
 );
 
-const MonitoringCard: React.FC = () => (
-    <Card className="border-l-4 border-l-amber-500">
+const MonitoringCard = () => (
+    <UnifiedCard>
         <CardHeader>
             <div className="flex items-center gap-3">
-                <Activity className="text-amber-600 dark:text-amber-400" size={24} />
-                <CardTitle className="text-xl">Monitoring & Management</CardTitle>
+                <Activity className="text-warning" size={24} />
+                <CardTitle className={typography.h3}>Monitoring & Management</CardTitle>
             </div>
             <CardDescription>Understanding agent behavior and dashboard features</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-6">
             <div className="space-y-4">
                 {[
-                    { icon: <Activity size={20} />, text: 'Agents automatically send heartbeats every poll interval', color: 'text-blue-600 dark:text-blue-400' },
-                    { icon: <Download size={20} />, text: 'Use the "Scan" button in the dashboard to manually initiate a crypto audit', color: 'text-green-600 dark:text-green-400' },
-                    { icon: <ArrowLeft size={20} />, text: 'View audit results by clicking the arrow next to each agent', color: 'text-purple-600 dark:text-purple-400' },
-                    { icon: <AlertCircle size={20} />, text: 'Agents are marked inactive if no heartbeat is received for 1 minute', color: 'text-red-600 dark:text-red-400' },
-                    { icon: <RefreshCw size={20} />, text: 'Enable auto-refresh to automatically update the dashboard every 10 seconds', color: 'text-indigo-600 dark:text-indigo-400' },
+                    { icon: <Activity size={20} />, text: 'Agents automatically send heartbeats every poll interval', color: 'text-primary' },
+                    { icon: <Download size={20} />, text: 'Use the "Scan" button in the dashboard to manually initiate a crypto audit', color: 'text-success' },
+                    { icon: <ArrowLeft size={20} />, text: 'View audit results by clicking the arrow next to each agent', color: 'text-scan-pqc' },
+                    { icon: <AlertCircle size={20} />, text: 'Agents are marked inactive if no heartbeat is received for 1 minute', color: 'text-destructive' },
+                    { icon: <RefreshCw size={20} />, text: 'Enable auto-refresh to automatically update the dashboard every 10 seconds', color: 'text-primary' },
                 ].map((item, idx) => (
                     <div key={idx} className="flex items-start gap-4 p-4 bg-white dark:bg-slate-800 rounded-lg border border-amber-200 dark:border-amber-800">
                         <div className={`flex-shrink-0 mt-0.5 ${item.color}`}>{item.icon}</div>
@@ -335,7 +344,7 @@ const MonitoringCard: React.FC = () => (
                 ))}
             </div>
         </CardContent>
-    </Card>
+    </UnifiedCard>
 );
 
 // ============================================================================
@@ -371,9 +380,6 @@ const OnboardingPage = () => {
     const [windowsFiles, setWindowsFiles] = useState<FileInfo[]>([]);
     const [systemLoading, setSystemLoading] = useState(false);
 
-
-    // `API_BASE` moved to top-level as `BATCH_API_BASE` and `AGENT_API_BASE`
-
     // Fetch jobs on mount and periodically
     useEffect(() => {
         if (view === 'dashboard') {
@@ -404,9 +410,6 @@ const OnboardingPage = () => {
             setSystemLoading(false);
         }
     };
-
-
-
 
     const loadJobs = async () => {
         try {
@@ -620,65 +623,77 @@ const OnboardingPage = () => {
                     exit="exit"
                     className="p-4 md:p-8"
                 >
-                    <header className="text-center mb-12">
-                        <h1 className="text-4xl font-bold tracking-tight">Batch Scanner</h1>
-                        <p className="text-lg text-muted-foreground mt-2">Scan multiple domains or repositories at once.</p>
-                    </header>
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-primary/10 rounded-lg">
+                                <UploadCloud className="h-8 w-8 text-primary" />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold">Onboarding</h1>
+                                <p className="text-muted-foreground">Get started by scanning your assets</p>
+                            </div>
+                        </div>
+                    </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-                        <motion.div whileHover={{ y: -5, scale: 1.02 }}>
-                            <Card onClick={() => setView('tls')} className="h-full flex flex-col justify-between cursor-pointer group hover:border-primary transition-all">
-                                <CardHeader>
-                                    <div className="flex items-center gap-4">
-                                        <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg"><UploadCloud className="h-8 w-8 text-blue-500" /></div>
-                                        <div>
-                                            <CardTitle className="text-2xl">TLS/SSL Scanner</CardTitle>
-                                            <CardDescription>Scan domains from an Excel file.</CardDescription>
-                                        </div>
+                        <UnifiedCard
+                            variant="premium"
+                            onClick={() => setView('tls')}
+                            className="h-full flex flex-col justify-between cursor-pointer group"
+                        >
+                            <CardHeader>
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-primary/10 rounded-lg">
+                                        <UploadCloud className="h-8 w-8 text-primary" />
                                     </div>
-                                </CardHeader>
-                                <CardContent>
-                                    <p className="text-muted-foreground">Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations.</p>
-                                </CardContent>
-                            </Card>
-                        </motion.div>
-                        <motion.div whileHover={{ y: -5, scale: 1.02 }}>
-                            <Card onClick={() => setView('repo')} className="h-full flex flex-col justify-between cursor-pointer group hover:border-primary transition-all">
-                                <CardHeader>
-                                    <div className="flex items-center gap-4">
-                                        <div className="p-3 bg-purple-100 dark:bg-purple-900/30 rounded-lg"><Github className="h-8 w-8 text-purple-500" /></div>
-                                        <div>
-                                            <CardTitle className="text-2xl">Repository Scanner</CardTitle>
-                                            <CardDescription>Scan repos from GitHub or Excel.</CardDescription>
-                                        </div>
+                                    <div>
+                                        <CardTitle className={typography.h2}>TLS/SSL Scanner</CardTitle>
+                                        <CardDescription>Scan domains from an Excel file.</CardDescription>
                                     </div>
-                                </CardHeader>
-                                <CardContent>
-                                    <p className="text-muted-foreground">Analyze Git repositories for cryptographic algorithm usage and security best practices.</p>
-                                </CardContent>
-                            </Card>
-                        </motion.div>
-                        <motion.div whileHover={{ y: -5, scale: 1.02 }}>
-                            <Card 
-                                onClick={() => setView('system')} 
-                                className="h-full flex flex-col justify-between cursor-pointer group hover:border-primary transition-all"
-                            >
-                                <CardHeader>
-                                    <div className="flex items-center gap-4">
-                                        <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                                            <Download className="h-8 w-8 text-green-500" />
-                                        </div>
-                                        <div>
-                                            <CardTitle className="text-2xl">System Scanner</CardTitle>
-                                            <CardDescription>Download and setup agents.</CardDescription>
-                                        </div>
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-muted-foreground">Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations.</p>
+                            </CardContent>
+                        </UnifiedCard>
+                        <UnifiedCard
+                            variant="premium"
+                            onClick={() => setView('repo')}
+                            className="h-full flex flex-col justify-between cursor-pointer group"
+                        >
+                            <CardHeader>
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-scan-pqc/10 dark:bg-scan-pqc/30 rounded-lg"><Github className="h-8 w-8 text-scan-pqc" /></div>
+                                    <div>
+                                        <CardTitle className={typography.h2}>Repository Scanner</CardTitle>
+                                        <CardDescription>Scan repos from GitHub or Excel.</CardDescription>
                                     </div>
-                                </CardHeader>
-                                <CardContent>
-                                    <p className="text-muted-foreground">Download agents for Linux and Windows to scan system cryptographic configurations.</p>
-                                </CardContent>
-                            </Card>
-                        </motion.div>
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-muted-foreground">Analyze Git repositories for cryptographic algorithm usage and security best practices.</p>
+                            </CardContent>
+                        </UnifiedCard>
+                        <UnifiedCard
+                            variant="premium"
+                            onClick={() => setView('system')}
+                            className="h-full flex flex-col justify-between cursor-pointer group"
+                        >
+                            <CardHeader>
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-success/10 dark:bg-success/30 rounded-lg">
+                                        <Download className="h-8 w-8 text-success" />
+                                    </div>
+                                    <div>
+                                        <CardTitle className={typography.h2}>System Scanner</CardTitle>
+                                        <CardDescription>Download and setup agents.</CardDescription>
+                                    </div>
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-muted-foreground">Download agents for Linux and Windows to scan system cryptographic configurations.</p>
+                            </CardContent>
+                        </UnifiedCard>
                     </div>
 
                     <Card className="mt-12 max-w-6xl mx-auto">
@@ -686,7 +701,7 @@ const OnboardingPage = () => {
                             <CardTitle>Recent Batch Jobs</CardTitle>
                             <Button variant="outline" size="sm" onClick={loadJobs}><RefreshCw className="w-4 h-4 mr-2" /> Refresh</Button>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="p-6">
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
@@ -732,13 +747,13 @@ const OnboardingPage = () => {
                     exit="exit"
                     className="p-4 md:p-8 max-w-4xl mx-auto"
                 >
-                    <Button variant="ghost" onClick={navigateBack} className="mb-6"><ArrowLeft className="w-4 h-4 mr-2" /> Back</Button>
+                    <UnifiedBackButton onClick={navigateBack} label="Back" className="mb-6" />
                     
                     {/* TLS SCANNER VIEW */}
                     {view === 'tls' && (
                         <Card>
                             <CardHeader>
-                                <CardTitle className="text-2xl">TLS/SSL Scanner</CardTitle>
+                                <CardTitle className={typography.h2}>TLS/SSL Scanner</CardTitle>
                                 <CardDescription>Upload an Excel file with a 'domain' column.</CardDescription>
                             </CardHeader>
                             <CardContent>
@@ -762,146 +777,146 @@ const OnboardingPage = () => {
                                 <TabsTrigger value="excel">From Excel</TabsTrigger>
                             </TabsList>
                             <TabsContent value="github">
-  <Card>
-    <CardHeader>
-      <CardTitle>Discover from GitHub</CardTitle>
-      <CardDescription>
-        Enter a GitHub username or organization URL to find public repositories.
-      </CardDescription>
-    </CardHeader>
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Discover from GitHub</CardTitle>
+                                        <CardDescription>
+                                            Enter a GitHub username or organization URL to find public repositories.
+                                        </CardDescription>
+                                    </CardHeader>
 
-    <CardContent>
-      {/* URL + Discover */}
-      <div className="flex gap-2">
-        <Input
-          placeholder="e.g., https://github.com/torvalds"
-          value={githubUrl}
-          onChange={(e) => setGithubUrl(e.target.value)}
-        />
-        <Button onClick={discoverGitHubRepos} disabled={isDiscovering}>
-          {isDiscovering ? <Loader2 className="w-4 h-4 animate-spin" /> : "Discover"}
-        </Button>
-      </div>
+                                    <CardContent>
+                                        {/* URL + Discover */}
+                                        <div className="flex gap-2">
+                                            <Input
+                                                placeholder="e.g., https://github.com/torvalds"
+                                                value={githubUrl}
+                                                onChange={(e) => setGithubUrl(e.target.value)}
+                                            />
+                                            <Button onClick={discoverGitHubRepos} disabled={isDiscovering}>
+                                                {isDiscovering ? <Loader2 className="w-4 h-4 animate-spin" /> : "Discover"}
+                                            </Button>
+                                        </div>
 
-      {/* Error */}
-      {githubError && (
-        <p className="text-red-500 text-sm mt-2 flex items-center gap-2">
-          <XCircle className="w-4 h-4" />
-          {githubError}
-        </p>
-      )}
+                                        {/* Error */}
+                                        {githubError && (
+                                            <p className="text-destructive text-sm mt-2 flex items-center gap-2">
+                                                <XCircle className="w-4 h-4" />
+                                                {githubError}
+                                            </p>
+                                        )}
 
-      {/* Loading */}
-      {isDiscovering && (
-        <div className="text-center p-10">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
-        </div>
-      )}
+                                        {/* Loading */}
+                                        {isDiscovering && (
+                                            <div className="text-center p-10">
+                                                <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
+                                            </div>
+                                        )}
 
-      {/* Repos list with branch selector */}
-      {!isDiscovering && discoveredRepos.length > 0 && (
-        <div className="mt-6">
-          <div className="mb-3">
-            <h3 className="font-bold">{discoveredRepos.length} Repos Found</h3>
-          </div>
+                                        {/* Repos list with branch selector */}
+                                        {!isDiscovering && discoveredRepos.length > 0 && (
+                                            <div className="mt-6">
+                                                <div className="mb-3">
+                                                    <h3 className="font-bold">{discoveredRepos.length} Repos Found</h3>
+                                                </div>
 
-          <div className="max-h-60 overflow-y-auto border rounded-md">
-            <table className="w-full text-xs md:text-sm">
-              <thead className="bg-muted sticky top-0 z-10">
-                <tr className="text-left text-muted-foreground">
-                  <th className="p-2">
-                    <div className="flex items-center gap-2">
-                        <input 
-                            type="checkbox" 
-                            checked={discoveredRepos.length > 0 && selectedRepos.size === discoveredRepos.length}
-                            onChange={toggleSelectAll}
-                            className="cursor-pointer w-4 h-4 accent-primary"
-                        />
-                        <span className="font-semibold">Select All</span>
-                    </div>
-                  </th>
-                  <th className="p-2">Repository</th>
-                  <th className="p-2">Branch</th>
-                </tr>
-              </thead>
-              <tbody>
-                {discoveredRepos.map((repo) => (
-                  <tr
-                    key={repo.id}
-                    className={`border-t last:border-b-0 transition-colors ${
-                      selectedRepos.has(repo.id) 
-                        ? 'bg-blue-50 dark:bg-blue-950/30 hover:bg-blue-100 dark:hover:bg-blue-950/50' 
-                        : 'hover:bg-accent/50'
-                    }`}
-                  >
-                    <td className="p-2 align-middle">
-                      <input
-                        type="checkbox"
-                        checked={selectedRepos.has(repo.id)}
-                        onChange={() => toggleRepoSelection(repo.id)}
-                        className="cursor-pointer w-4 h-4 accent-primary"
-                      />
-                    </td>
-                    <td className="p-2 align-middle font-medium truncate max-w-[220px]">
-                      {repo.full_name.split('/')[1]}
-                    </td>
-                    <td className="p-2 align-middle">
-                      <select
-                        className="w-full min-w-[180px] max-w-full px-3 py-2 border border-border rounded-md text-sm font-medium bg-background focus:outline-none focus:ring-2 focus:ring-primary whitespace-nowrap"
-                        value={repoBranches[repo.id] || repo.default_branch}
-                        onChange={(e) => handleBranchChange(repo.id, e.target.value)}
-                      >
-                        {repo.branches && repo.branches.length > 0 ? (
-                          repo.branches.map((branch) => (
-                            <option key={branch} value={branch}>
-                              {branch}
-                              {branch === repo.default_branch ? " (default)" : ""}
-                            </option>
-                          ))
-                        ) : (
-                          <option value={repo.default_branch}>
-                            {repo.default_branch} (default)
-                          </option>
-                        )}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                                                <div className="max-h-60 overflow-y-auto border rounded-md">
+                                                    <table className="w-full text-xs md:text-sm">
+                                                        <thead className="bg-muted sticky top-0 z-10">
+                                                            <tr className="text-left text-muted-foreground">
+                                                                <th className="p-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={discoveredRepos.length > 0 && selectedRepos.size === discoveredRepos.length}
+                                                                            onChange={toggleSelectAll}
+                                                                            className="cursor-pointer w-4 h-4 accent-primary"
+                                                                        />
+                                                                        <span className="font-semibold">Select All</span>
+                                                                    </div>
+                                                                </th>
+                                                                <th className="p-2">Repository</th>
+                                                                <th className="p-2">Branch</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {discoveredRepos.map((repo) => (
+                                                                <tr
+                                                                    key={repo.id}
+                                                                    className={`border-t last:border-b-0 transition-colors ${
+                                                                        selectedRepos.has(repo.id) 
+                                                                            ? 'bg-primary/5 dark:bg-primary/30 hover:bg-primary/10 dark:hover:bg-primary/50' 
+                                                                            : 'hover:bg-accent/50'
+                                                                    }`}
+                                                                >
+                                                                    <td className="p-2 align-middle">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={selectedRepos.has(repo.id)}
+                                                                            onChange={() => toggleRepoSelection(repo.id)}
+                                                                            className="cursor-pointer w-4 h-4 accent-primary"
+                                                                        />
+                                                                    </td>
+                                                                    <td className="p-2 align-middle font-medium truncate max-w-[220px]">
+                                                                        {repo.full_name.split('/')[1]}
+                                                                    </td>
+                                                                    <td className="p-2 align-middle">
+                                                                        <select
+                                                                            className="w-full min-w-[180px] max-w-full px-3 py-2 border border-border rounded-md text-sm font-medium bg-background focus:outline-none focus:ring-2 focus:ring-primary whitespace-nowrap"
+                                                                            value={repoBranches[repo.id] || repo.default_branch}
+                                                                            onChange={(e) => handleBranchChange(repo.id, e.target.value)}
+                                                                        >
+                                                                            {repo.branches && repo.branches.length > 0 ? (
+                                                                                repo.branches.map((branch) => (
+                                                                                    <option key={branch} value={branch}>
+                                                                                        {branch}
+                                                                                        {branch === repo.default_branch ? " (default)" : ""}
+                                                                                    </option>
+                                                                                ))
+                                                                            ) : (
+                                                                                <option value={repo.default_branch}>
+                                                                                    {repo.default_branch} (default)
+                                                                                </option>
+                                                                            )}
+                                                                        </select>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
 
-          <div className="mt-4 p-4 bg-muted/50 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Repositories</p>
-                <p className="text-2xl font-bold">{discoveredRepos.length}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Selected</p>
-                <p className="text-2xl font-bold text-primary">{selectedRepos.size}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Not Selected</p>
-                <p className="text-2xl font-bold text-muted-foreground">
-                  {discoveredRepos.length - selectedRepos.size}
-                </p>
-              </div>
-            </div>
-          </div>
+                                                <div className="mt-4 p-4 bg-muted/50 rounded-lg">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">Total Repositories</p>
+                                                            <p className="text-2xl font-bold">{discoveredRepos.length}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">Selected</p>
+                                                            <p className="text-2xl font-bold text-primary">{selectedRepos.size}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">Not Selected</p>
+                                                            <p className="text-2xl font-bold text-muted-foreground">
+                                                                {discoveredRepos.length - selectedRepos.size}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
 
-          <Button
-            className="w-full mt-4"
-            onClick={startGitHubRepoScan}
-            disabled={selectedRepos.size === 0}
-          >
-            Scan Selected ({selectedRepos.size})
-          </Button>
-        </div>
-      )}
-    </CardContent>
-  </Card>
-</TabsContent>
+                                                <Button
+                                                    className="w-full mt-4"
+                                                    onClick={startGitHubRepoScan}
+                                                    disabled={selectedRepos.size === 0}
+                                                >
+                                                    Scan Selected ({selectedRepos.size})
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </TabsContent>
                             <TabsContent value="excel">
                                 <Card>
                                     <CardHeader>
@@ -922,19 +937,19 @@ const OnboardingPage = () => {
                             </TabsContent>
                         </Tabs>
                     )}
+
+                    {/* SYSTEM SCANNER VIEW */}
                     {view === 'system' && (
-                        <motion.div key="system" variants={cardVariants} initial="hidden" animate="visible" exit="exit" className="p-4 md:p-8">
-                            
-                            
+                        <div className="space-y-8">
                             <div className="max-w-6xl mx-auto">
                                 <header className="text-center mb-8">
-                                    <h1 className="text-4xl font-bold tracking-tight">System Agent Downloads</h1>
+                                    <h1 className={typography.display}>System Agent Downloads</h1>
                                     <p className="text-lg text-muted-foreground mt-2">
                                         Download agents and follow setup instructions for your platform
                                     </p>
                                 </header>
 
-                                <div className="space-y-12">
+                                <div className="space-y-10">
                                     {/* Linux Section */}
                                     <section>
                                         <SystemDownloadCard
@@ -947,7 +962,9 @@ const OnboardingPage = () => {
                                             formatBytes={formatBytes}
                                             apiUrl={AGENT_API_BASE}
                                         />
-                                        <LinuxInstructionsCard />
+                                        <div className="mt-6">
+                                            <LinuxInstructionsCard />
+                                        </div>
                                     </section>
 
                                     {/* Windows Section */}
@@ -962,11 +979,23 @@ const OnboardingPage = () => {
                                             formatBytes={formatBytes}
                                             apiUrl={AGENT_API_BASE}
                                         />
-                                        <WindowsInstructionsCard />
+                                        <div className="mt-6">
+                                            <WindowsInstructionsCard />
+                                        </div>
+                                    </section>
+
+                                    {/* Configuration Section */}
+                                    <section>
+                                        <ConfigurationCard />
+                                    </section>
+
+                                    {/* Monitoring Section */}
+                                    <section>
+                                        <MonitoringCard />
                                     </section>
                                 </div>
                             </div>
-                        </motion.div>
+                        </div>
                     )}
                 </motion.div>
             )}

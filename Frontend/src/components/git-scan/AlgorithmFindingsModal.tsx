@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { UnifiedModal, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/unified-modal';
-import { UnifiedExpandable } from '@/components/ui/unified-expandable';
+import { UnifiedModal, UnifiedExpandable } from '@/components/ui/unified';
+import { DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from "@/components/ui/button";
 import { AlgorithmFindingsResponse, FileFinding, ScanDetail } from './types';
 import { Loader2, File, Folder, Code, XCircle, Search, ExternalLink } from 'lucide-react';
@@ -75,7 +75,7 @@ const AlgorithmFindingsModal: React.FC<AlgorithmFindingsModalProps> = ({ scanId,
     if (isLoading) {
       return (
         <div className="flex flex-col justify-center items-center h-64 space-y-4">
-          <Loader2 className="animate-spin h-12 w-12 text-blue-500" />
+          <Loader2 className="animate-spin h-12 w-12 text-primary" />
           <p className="text-sm text-muted-foreground">Loading occurrences...</p>
         </div>
       );
@@ -84,10 +84,10 @@ const AlgorithmFindingsModal: React.FC<AlgorithmFindingsModalProps> = ({ scanId,
     if (error) {
       return (
         <div className="text-center py-8 space-y-4">
-          <div className="w-16 h-16 mx-auto bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
-            <XCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
+          <div className="w-16 h-16 mx-auto bg-destructive/10 dark:bg-destructive/30 rounded-full flex items-center justify-center">
+            <XCircle className="w-8 h-8 text-destructive" />
           </div>
-          <p className="text-red-600 dark:text-red-400 font-medium">{error}</p>
+          <p className="text-destructive font-medium">{error}</p>
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>

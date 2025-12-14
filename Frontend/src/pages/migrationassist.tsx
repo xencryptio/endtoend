@@ -157,7 +157,7 @@ export default function PQCDashboard() {
       title: 'Migration Steps',
       description: 'Comprehensive roadmap for PQC adoption',
       icon: <Target className="h-6 w-6" />,
-      color: 'bg-blue-500 dark:bg-blue-600',
+      color: 'bg-primary',
       content: 'migration'
     },
     {
@@ -173,7 +173,7 @@ export default function PQCDashboard() {
       title: 'Challenges',
       description: 'Key obstacles in PQC implementation',
       icon: <AlertTriangle className="h-6 w-6" />,
-      color: 'bg-red-500 dark:bg-red-600',
+      color: 'bg-destructive',
       content: 'challenges'
     },
     {
@@ -181,7 +181,7 @@ export default function PQCDashboard() {
       title: 'Best Practices',
       description: 'Proven strategies for successful migration',
       icon: <CheckCircle className="h-6 w-6" />,
-      color: 'bg-green-500 dark:bg-green-600',
+      color: 'bg-success',
       content: 'practices'
     },
     {
@@ -224,8 +224,8 @@ export default function PQCDashboard() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4">
                       <div className={`w-3 h-3 rounded-full ${
-                        step.status === 'complete' ? 'bg-green-500' :
-                        step.status === 'in-progress' ? 'bg-yellow-500' : 'bg-muted'
+                        step.status === 'complete' ? 'bg-success' :
+                        step.status === 'in-progress' ? 'bg-warning' : 'bg-muted'
                       }`} />
                       <div>
                         <h3 className="font-semibold text-foreground">{step.phase}</h3>
@@ -273,11 +273,11 @@ export default function PQCDashboard() {
                 <Card key={index} className="p-4 text-center bg-card border-border">
                   <h3 className="font-bold text-lg text-foreground">{item.year}</h3>
                   <Badge className={`mt-2 ${
-                    item.threat === 'Low' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                    item.threat === 'Low-Medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                    item.threat === 'Low' ? 'bg-success/10 text-success dark:bg-success/90 dark:text-success/20' :
+                    item.threat === 'Low-Medium' ? 'bg-warning/10 text-warning dark:bg-warning/90 dark:text-warning/20' :
                     item.threat === 'Medium' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' :
-                    item.threat === 'High' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
-                    'bg-red-500 text-white dark:bg-red-600'
+                    item.threat === 'High' ? 'bg-destructive/10 text-destructive dark:bg-destructive/90 dark:text-destructive/20' :
+                    'bg-destructive text-white dark:bg-destructive'
                   }`}>
                     {item.threat}
                   </Badge>
@@ -312,7 +312,7 @@ export default function PQCDashboard() {
             {migrationData.practices.map((practice, index) => (
               <Card key={index} className="p-4 hover:shadow-md transition-shadow bg-card border-border">
                 <div className="flex items-center space-x-3">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
+                  <CheckCircle className="h-5 w-5 text-success" />
                   <span className="font-medium text-foreground">{practice}</span>
                 </div>
               </Card>
@@ -329,7 +329,7 @@ export default function PQCDashboard() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center space-x-2 text-foreground">
-                      <AlertTriangle className="h-5 w-5 text-red-500" />
+                      <AlertTriangle className="h-5 w-5 text-destructive" />
                       <span>RSA-KEM (Vulnerable)</span>
                     </CardTitle>
                     <Badge variant="destructive">Quantum Vulnerable</Badge>
@@ -351,7 +351,7 @@ export default function PQCDashboard() {
                     </pre>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    <h4 className="font-semibold text-red-600 dark:text-red-400">Vulnerability:</h4>
+                    <h4 className="font-semibold text-destructive">Vulnerability:</h4>
                     <p>{codeExamples.kem_examples.vulnerable.vulnerability}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-sm text-foreground">
@@ -369,10 +369,10 @@ export default function PQCDashboard() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center space-x-2 text-foreground">
-                      <Shield className="h-5 w-5 text-green-500" />
+                      <Shield className="h-5 w-5 text-success" />
                       <span>CRYSTALS-Kyber (PQC)</span>
                     </CardTitle>
-                    <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Quantum Resistant</Badge>
+                    <Badge className="bg-success/10 text-success dark:bg-success/90 dark:text-success/20">Quantum Resistant</Badge>
                   </div>
                   <CardDescription className="text-muted-foreground">{codeExamples.kem_examples.pqc_compliant.description}</CardDescription>
                 </CardHeader>
@@ -391,7 +391,7 @@ export default function PQCDashboard() {
                     </pre>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    <h4 className="font-semibold text-green-600 dark:text-green-400">Security:</h4>
+                    <h4 className="font-semibold text-success">Security:</h4>
                     <p>{codeExamples.kem_examples.pqc_compliant.security}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-sm text-foreground">
@@ -416,7 +416,7 @@ export default function PQCDashboard() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center space-x-2 text-foreground">
-                      <AlertTriangle className="h-5 w-5 text-red-500" />
+                      <AlertTriangle className="h-5 w-5 text-destructive" />
                       <span>ECDSA (Vulnerable)</span>
                     </CardTitle>
                     <Badge variant="destructive">Quantum Vulnerable</Badge>
@@ -500,7 +500,7 @@ is_valid = ecdsa_verify(public_key, message, signature)`}</code>
                     </pre>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    <h4 className="font-semibold text-red-600 dark:text-red-400">Vulnerability:</h4>
+                    <h4 className="font-semibold text-destructive">Vulnerability:</h4>
                     <p>ECDSA relies on the ECDLP, which Shor's algorithm can efficiently solve, allowing signature forgery.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-sm text-foreground">
@@ -517,10 +517,10 @@ is_valid = ecdsa_verify(public_key, message, signature)`}</code>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center space-x-2 text-foreground">
-                      <Shield className="h-5 w-5 text-green-500" />
+                      <Shield className="h-5 w-5 text-success" />
                       <span>CRYSTALS-Dilithium (PQC)</span>
                     </CardTitle>
-                    <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Quantum Resistant</Badge>
+                    <Badge className="bg-success/10 text-success dark:bg-success/90 dark:text-success/20">Quantum Resistant</Badge>
                   </div>
                   <CardDescription className="text-muted-foreground">Lattice-based Digital Signature Algorithm resistant to quantum attacks.</CardDescription>
                 </CardHeader>
@@ -589,7 +589,7 @@ is_valid = dilithium_signer.verify(message, signature, pk)`}</code>
                     </pre>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    <h4 className="font-semibold text-green-600 dark:text-green-400">Security:</h4>
+                    <h4 className="font-semibold text-success">Security:</h4>
                     <p>Based on SIS/LWE problems, believed to be quantum-resistant with no known efficient quantum attacks.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-sm text-foreground">
@@ -766,7 +766,7 @@ is_valid = dilithium_signer.verify(message, signature, pk)`}</code>
                     <p className="text-sm text-muted-foreground">{card.description}</p>
                   </div>
                   <div className="w-full pt-4 border-t border-border">
-                    <div className="flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:text-blue-700 dark:group-hover:text-blue-300">
+                    <div className="flex items-center justify-center text-primary group-hover:text-primary">
                       <span className="text-sm font-medium mr-2">Explore</span>
                       <ArrowLeft className="h-4 w-4 rotate-180 group-hover:translate-x-1 transition-transform" />
                     </div>
@@ -782,22 +782,22 @@ is_valid = dilithium_signer.verify(message, signature, pk)`}</code>
             <h2 className="text-2xl font-bold text-foreground mb-4">Quick Overview</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="text-center">
-                <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
-                  <AlertTriangle className="h-8 w-8 text-red-600 dark:text-red-400" />
+                <div className="bg-destructive/10 dark:bg-destructive/30 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
+                  <AlertTriangle className="h-8 w-8 text-destructive" />
                 </div>
                 <h3 className="font-semibold mb-2 text-foreground">Quantum Threat</h3>
                 <p className="text-sm text-muted-foreground">Current cryptographic systems will be vulnerable to quantum computers</p>
               </div>
               <div className="text-center">
-                <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
-                  <Clock className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                <div className="bg-primary/10 dark:bg-primary/30 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
+                  <Clock className="h-8 w-8 text-primary" />
                 </div>
                 <h3 className="font-semibold mb-2 text-foreground">Migration Timeline</h3>
                 <p className="text-sm text-muted-foreground">Organizations need to start planning and implementing PQC now</p>
               </div>
               <div className="text-center">
-                <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
-                  <Shield className="h-8 w-8 text-green-600 dark:text-green-400" />
+                <div className="bg-success/10 dark:bg-success/30 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
+                  <Shield className="h-8 w-8 text-success" />
                 </div>
                 <h3 className="font-semibold mb-2 text-foreground">PQC Solution</h3>
                 <p className="text-sm text-muted-foreground">New algorithms designed to resist both classical and quantum attacks</p>

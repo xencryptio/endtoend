@@ -29,10 +29,10 @@ const getSectionIcon = (section: string) => {
 
 const getStatusBadge = (status: string) => {
   const colors: Record<string, string> = {
-    "Strong": "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300",
-    "Medium": "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300",
-    "Weak": "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300",
-    "Safe": "bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300",
+    "Strong": "bg-success/10 text-success dark:bg-success/50 dark:text-success",
+    "Medium": "bg-warning/10 text-warning dark:bg-warning/50 dark:text-warning",
+    "Weak": "bg-destructive/10 text-destructive dark:bg-destructive/50 dark:text-destructive",
+    "Safe": "bg-primary/10 text-primary dark:bg-primary/50 dark:text-primary",
     "Standardized": "bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300"
   };
   return colors[status] || "bg-muted text-muted-foreground";
@@ -56,7 +56,7 @@ const EditableTableRow = ({
 }) => {
   if (isEditing) {
     return (
-      <tr className="bg-yellow-50 dark:bg-yellow-900/20">
+      <tr className="bg-warning/5 dark:bg-warning/20">
         <td className="px-4 py-4">
           <input
             className="w-full p-1 border rounded text-sm mt-1"
@@ -173,9 +173,9 @@ const EditableTableRow = ({
       </td>
       <td className="px-4 py-4 whitespace-nowrap">
         <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-          algorithm.priority === 'High' ? 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300' :
-          algorithm.priority === 'Medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300' :
-          'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'
+          algorithm.priority === 'High' ? 'bg-destructive/10 text-destructive dark:bg-destructive/50 dark:text-destructive' :
+          algorithm.priority === 'Medium' ? 'bg-warning/10 text-warning dark:bg-warning/50 dark:text-warning' :
+          'bg-success/10 text-success dark:bg-success/50 dark:text-success'
         }`}>
           {algorithm.priority}
         </span>

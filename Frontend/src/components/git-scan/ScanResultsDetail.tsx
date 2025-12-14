@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+import { UnifiedBackButton } from "@/components/ui/unified";
 import { ScanDetail, Algorithm } from './types';
 
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
@@ -11,8 +12,8 @@ const getGradeColor = (grade: string): string => {
   const letter = grade.charAt(0);
   switch (letter) {
     case 'A': return 'text-emerald-600 dark:text-emerald-400';
-    case 'B': return 'text-blue-600 dark:text-blue-400';
-    case 'C': return 'text-yellow-600 dark:text-yellow-400';
+    case 'B': return 'text-primary';
+    case 'C': return 'text-warning';
     case 'D': return 'text-orange-600 dark:text-orange-400';
     case 'F': return 'text-rose-600 dark:text-rose-400';
     default: return 'text-zinc-600 dark:text-zinc-400';
@@ -22,8 +23,8 @@ const getGradeColor = (grade: string): string => {
 // Helper function to get color for score progress bars
 const getScoreBarColor = (score: number): string => {
   if (score >= 90) return 'bg-emerald-500';
-  if (score >= 80) return 'bg-blue-500';
-  if (score >= 70) return 'bg-yellow-500';
+  if (score >= 80) return 'bg-primary';
+  if (score >= 70) return 'bg-warning';
   if (score >= 60) return 'bg-orange-500';
   return 'bg-rose-500';
 };
@@ -37,12 +38,12 @@ const getRiskLevelInfo = (score: number): { label: string; color: string; descri
   };
   if (score >= 80) return {
     label: 'Medium-Low Risk',
-    color: 'text-blue-600 dark:text-blue-400',
+    color: 'text-primary',
     description: 'Good security with minor improvements needed'
   };
   if (score >= 70) return {
     label: 'Medium Risk',
-    color: 'text-yellow-600 dark:text-yellow-400',
+    color: 'text-warning',
     description: 'Adequate security but needs attention'
   };
   if (score >= 60) return {
@@ -112,7 +113,7 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
 
   const getBadgeColor = () => {
     switch (type) {
-      case 'pqc': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+      case 'pqc': return 'bg-primary/10 dark:bg-primary/30 text-primary';
       case 'safe': return 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
       case 'unsafe': return 'bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300';
     }
@@ -120,7 +121,7 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
 
   const getIcon = () => {
     switch (type) {
-      case 'pqc': return <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
+      case 'pqc': return <Shield className="w-5 h-5 text-primary" />;
       case 'safe': return <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
       case 'unsafe': return <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400" />;
     }
@@ -130,7 +131,7 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
     <div className="mb-6">
       <div className={`flex items-center justify-between p-6 ${
         type === 'pqc' 
-          ? 'bg-blue-50 dark:bg-blue-950/40' 
+          ? 'bg-primary/5 dark:bg-primary/40' 
           : type === 'safe' 
           ? 'bg-emerald-50 dark:bg-emerald-950/40'
           : 'bg-rose-50 dark:bg-rose-950/40'
@@ -179,11 +180,11 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
               <div className="mb-4 flex flex-wrap gap-2 relative z-10">
                 <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold shadow-md border ${
                   algo.security_level === 'critical' 
-                    ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-900' 
+                    ? 'bg-destructive/5 dark:bg-destructive/40 text-destructive border-destructive/20 dark:border-destructive/90' 
                     : algo.security_level === 'high' 
                     ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900'
                     : algo.security_level === 'medium' 
-                    ? 'bg-yellow-50 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-900'
+                    ? 'bg-warning/5 dark:bg-warning/40 text-warning border-warning/20 dark:border-warning/90'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                 }`}>
                   {algo.security_level.toUpperCase()} SECURITY
@@ -249,9 +250,9 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
                   <div className="mt-4">
                     <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold shadow-md border ${
                       algo.quantum_resistance_type === 'fully_resistant'
-                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900'
+                        ? 'bg-primary/5 dark:bg-primary/40 text-primary border-primary/20 dark:border-primary/90'
                         : algo.quantum_resistance_type === 'grover_resistant'
-                        ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                        ? 'bg-primary/5 dark:bg-primary/30 text-primary border-primary/20 dark:border-primary/80'
                         : algo.quantum_resistance_type === 'vulnerable'
                         ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
@@ -401,13 +402,13 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             <div className="flex flex-wrap gap-6 items-center text-sm">
               <div>
                 <strong>Branch:</strong>{' '}
-                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 text-xs font-semibold border border-blue-200 dark:border-blue-900 shadow-sm">
+                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-primary/5 dark:bg-primary/50 text-primary text-xs font-semibold border border-primary/20 dark:border-primary/90 shadow-sm">
                   {data.branch_name || 'main'}
                 </span>
               </div>
               <div>
                 <strong>Platform:</strong>{' '}
-                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 text-xs font-semibold border border-blue-200 dark:border-blue-900 shadow-sm">
+                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-primary/5 dark:bg-primary/50 text-primary text-xs font-semibold border border-primary/20 dark:border-primary/90 shadow-sm">
                   {data.platform || 'Unknown'}
                 </span>
               </div>
@@ -425,8 +426,8 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
         <div className="bg-card/80 border rounded-2xl p-10 mb-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
           <div className="mb-8 pb-6 border-b">
             <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
+                <Shield className="w-5 h-5 text-primary" />
               </div>
               Overall Security Assessment
             </h3>
@@ -486,7 +487,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
                 (data.overall_security_score ?? 0) >= 80 
                   ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
                   : (data.overall_security_score ?? 0) >= 60
-                  ? 'bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-900 text-yellow-700 dark:text-yellow-300'
+                  ? 'bg-warning/5 dark:bg-warning/30 border-warning/20 dark:border-warning/90 text-warning'
                   : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
               }`}>
                 {getRiskLevelInfo(data.overall_security_score ?? 0).description}
@@ -499,8 +500,8 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
           <div className="bg-card/80 border rounded-2xl p-10 mb-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
             <div className="mb-8 pb-6 border-b">
               <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
-                  <Package className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
+                  <Package className="w-5 h-5 text-primary" />
                 </div>
                 Security by Algorithm Category
               </h3>
@@ -561,7 +562,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
             <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
               🔮 True PQC
             </div>
-            <div className="text-5xl font-bold text-blue-600 dark:text-blue-400 tracking-tight mb-2 relative z-10">{truePQCCount}</div>
+            <div className="text-5xl font-bold text-primary tracking-tight mb-2 relative z-10">{truePQCCount}</div>
             <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 relative z-10">
               Kyber, Dilithium, SPHINCS+
             </div>
@@ -647,10 +648,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
                 <div className="text-sm text-slate-600 dark:text-slate-400 font-medium">Post-Quantum Cryptography Security Analysis</div>
               </div>
             </div>
-            <Button variant="outline" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
-            </Button>
+            <UnifiedBackButton onClick={onBack} label="Back" />
           </div>
         </div>
       </header>

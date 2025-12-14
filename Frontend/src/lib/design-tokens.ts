@@ -26,34 +26,14 @@ export const colorTokens = {
   // Brand colors, representing the primary identity of the application.
   // This is the single source for the main brand color.
   primary: {
-    DEFAULT: "#1A4FFF", // The primary brand blue
-    foreground: "#ffffff", // Text color for elements with a primary background
-    50: '#eff6ff',
-    100: '#dbeafe',
-    500: '#3b82f6',
-    600: '#2563eb',
-    700: '#1d4ed8',
+    DEFAULT: "#1A4FFF",
+    foreground: "#ffffff",
   },
 
   // Semantic status colors for UI feedback (e.g., success, error states).
-  success: {
-    DEFAULT: "#10b981", // Emerald green for success states
-    foreground: "#ffffff",
-    50: '#ecfdf5',
-    100: '#d1fae5',
-  },
-  destructive: {
-    DEFAULT: "#ef4444", // Red for destructive actions or errors
-    foreground: "#ffffff",
-    50: '#fef2f2',
-    100: '#fee2e2',
-  },
-  warning: {
-    DEFAULT: "#f59e0b", // Amber for warnings or non-critical issues
-    foreground: "#ffffff",
-    50: '#fffbeb',
-    100: '#fef3c7',
-  },
+  success: { DEFAULT: "#10b981", foreground: "#ffffff" },
+  destructive: { DEFAULT: "#ef4444", foreground: "#ffffff" },
+  warning: { DEFAULT: "#f59e0b", foreground: "#ffffff" },
 
   // Domain-specific semantic colors related to scan results.
   scan: {

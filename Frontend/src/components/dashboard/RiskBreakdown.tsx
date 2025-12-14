@@ -34,12 +34,12 @@ const riskColors: Record<string, string> = {
 
 const badgeColor = (level: string) =>
   level === "Low"
-    ? "bg-green-100 text-green-800"
+    ? "bg-success/10 text-success"
     : level === "Medium"
-    ? "bg-yellow-100 text-yellow-800"
+    ? "bg-warning/10 text-warning"
     : level === "High"
     ? "bg-orange-100 text-orange-800"
-    : "bg-red-100 text-red-800";
+    : "bg-destructive/10 text-destructive";
 
 const RiskBreakdown: React.FC<{ data: CSVData[] }> = ({ data }) => {
   const [expandedSubOrgs, setExpandedSubOrgs] = useState<Record<string, boolean>>({});

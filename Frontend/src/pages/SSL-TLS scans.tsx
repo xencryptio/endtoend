@@ -140,7 +140,7 @@ const commonColumns: ColumnDef[] = [
   { key: "notes", header: "Notes" },
 ];
 
-import { UnifiedCard } from "@/components/ui/unified-card";
+import { UnifiedCard, UnifiedBackButton } from "@/components/ui/unified";
 import { typography } from "@/lib/design-tokens";
 
 // ... (keep existing interfaces, types, api config, and api functions)
@@ -385,9 +385,7 @@ const Scan = () => {
         >
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">Cryptography Profile Management</h1>
-            <Button variant="outline" onClick={() => setView('dashboard')}>
-              <ArrowLeft className="h-4 w-4 mr-2" /> Back
-            </Button>
+            <UnifiedBackButton onClick={() => setView('dashboard')} label="Back to Dashboard" />
           </div>
 
           <div className="space-y-8">

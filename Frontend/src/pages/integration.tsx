@@ -81,34 +81,34 @@ export default function EnhancedDashboard() {
       icon: <Github className="h-6 w-6" />,
       color: 'bg-gray-800',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'bitbucket',
       title: 'Bitbucket',
       description: 'Atlassian Git solution for teams',
       icon: <GitBranch className="h-6 w-6" />,
-      color: 'bg-blue-600',
+      color: 'bg-primary',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'servicenow',
       title: 'ServiceNow',
       description: 'IT service management platform',
       icon: <Settings className="h-6 w-6" />,
-      color: 'bg-green-600',
+      color: 'bg-success',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'jira',
       title: 'Jira', 
       description: 'Issue and project tracking',
       icon: <Bug className="h-6 w-6" />,
-      color: 'bg-blue-500',
+      color: 'bg-primary',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'claude',
@@ -117,16 +117,16 @@ export default function EnhancedDashboard() {
       icon: <MessageSquare className="h-6 w-6" />,
       color: 'bg-orange-500',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'openai',
       title: 'OpenAI',
       description: 'GPT models and AI capabilities',
       icon: <Brain className="h-6 w-6" />,
-      color: 'bg-green-500',
+      color: 'bg-success',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'intellij',
@@ -135,16 +135,16 @@ export default function EnhancedDashboard() {
       icon: <Code className="h-6 w-6" />,
       color: 'bg-red-500',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'vscode',
       title: 'VS Code',
       description: 'Lightweight code editor',
       icon: <Edit3 className="h-6 w-6" />,
-      color: 'bg-blue-400',
+      color: 'bg-primary',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     },
     {
       id: 'visualstudio',
@@ -153,7 +153,7 @@ export default function EnhancedDashboard() {
       icon: <Wrench className="h-6 w-6" />,
       color: 'bg-purple-600',
       status: 'Connected',
-      statusColor: 'bg-green-500'
+      statusColor: 'bg-success'
     }
   ]
 
@@ -171,14 +171,14 @@ export default function EnhancedDashboard() {
           <div className="grid grid-cols-2 gap-4">
             <div className="p-4 bg-muted rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className="h-4 w-4 text-green-500" />
+                <CheckCircle className="h-4 w-4 text-success" />
                 <span className="font-medium">Integration Status</span>
               </div>
               <p className="text-sm text-muted-foreground">Active since March 2024</p>
             </div>
             <div className="p-4 bg-muted rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <Activity className="h-4 w-4 text-blue-500" />
+                <Activity className="h-4 w-4 text-primary" />
                 <span className="font-medium">Last Sync</span>
               </div>
               <p className="text-sm text-muted-foreground">2 minutes ago</p>

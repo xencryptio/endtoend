@@ -277,11 +277,11 @@ const ReadinessAnalysis = () => {
 
   const getMaturityColor = (level) => {
     const colors = {
-      'Advanced': 'text-green-600',
-      'Maturing': 'text-blue-600',
-      'Developing': 'text-yellow-600',
+      'Advanced': 'text-success',
+      'Maturing': 'text-primary',
+      'Developing': 'text-warning',
       'Initiated': 'text-orange-600',
-      'Not Started': 'text-red-600'
+      'Not Started': 'text-destructive'
     };
     return colors[level] || 'text-muted-foreground';
   };
@@ -320,24 +320,24 @@ const ReadinessAnalysis = () => {
                 <Shield className="w-10 h-10" />
                 <div>
                   <h1 className="text-3xl font-bold">Post-Quantum Cryptography</h1>
-                  <p className="text-blue-200">Readiness Assessment Report</p>
+                  <p className="text-primary/50">Readiness Assessment Report</p>
                 </div>
               </div>
               <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="text-blue-200">Organization</p>
+                  <p className="text-primary/50">Organization</p>
                   <p className="font-semibold text-lg">{companyInfo.name || 'Not Specified'}</p>
                 </div>
                 <div>
-                  <p className="text-blue-200">Industry</p>
+                  <p className="text-primary/50">Industry</p>
                   <p className="font-semibold text-lg">{companyInfo.industry || 'Not Specified'}</p>
                 </div>
                 <div>
-                  <p className="text-blue-200">Organization Size</p>
+                  <p className="text-primary/50">Organization Size</p>
                   <p className="font-semibold text-lg">{companyInfo.size || 'Not Specified'}</p>
                 </div>
                 <div>
-                  <p className="text-blue-200">Assessment Date</p>
+                  <p className="text-primary/50">Assessment Date</p>
                   <p className="font-semibold text-lg">{new Date().toLocaleDateString()}</p>
                 </div>
               </div>
@@ -386,11 +386,11 @@ const ReadinessAnalysis = () => {
 
             <div className="p-8 border-b">
               <h2 className="text-2xl font-bold text-foreground mb-4">Executive Summary</h2>
-              <div className="bg-blue-50 border-l-4 border-blue-600 p-6 mb-6">
+              <div className="bg-primary/10 border-l-4 border-primary p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <p className="text-sm text-muted-foreground mb-1">Overall PQC Readiness Score</p>
-                    <p className="text-5xl font-bold text-blue-900">{overallScore.toFixed(1)}%</p>
+                    <p className="text-5xl font-bold text-primary-dark">{overallScore.toFixed(1)}%</p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-muted-foreground mb-1">Maturity Level</p>
@@ -445,9 +445,9 @@ const ReadinessAnalysis = () => {
                         </td>
                       </tr>
                     ))}
-                    <tr className="bg-blue-100 font-bold">
+                    <tr className="bg-primary/20 font-bold">
                       <td className="border border-border px-4 py-3 text-foreground">Overall PQC Readiness Score</td>
-                      <td className="border border-border px-4 py-3 text-center text-blue-900">
+                      <td className="border border-border px-4 py-3 text-center text-primary-dark">
                         {overallScore.toFixed(1)}%
                       </td>
                       <td className={`border border-gray-300 px-4 py-3 text-center ${getMaturityColor(overallLevel)}`}>
@@ -469,10 +469,10 @@ const ReadinessAnalysis = () => {
                   <div className="bg-gray-200 rounded-full h-3 mb-4">
                     <div 
                       className={`h-3 rounded-full ${
-                        section.level === 'Advanced' ? 'bg-green-600' :
-                        section.level === 'Maturing' ? 'bg-blue-600' :
-                        section.level === 'Developing' ? 'bg-yellow-600' :
-                        section.level === 'Initiated' ? 'bg-orange-600' : 'bg-red-600'
+                        section.level === 'Advanced' ? 'bg-success' :
+                        section.level === 'Maturing' ? 'bg-primary' :
+                        section.level === 'Developing' ? 'bg-warning' :
+                        section.level === 'Initiated' ? 'bg-orange-600' : 'bg-destructive'
                       }`}
                       style={{ width: `${section.score}%` }}
                     ></div>
@@ -655,7 +655,7 @@ const ReadinessAnalysis = () => {
                 </div>
               </div>
 
-              <div className="mt-8 p-6 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="mt-8 p-6 bg-warning/5 border border-warning/20 rounded-lg">
                 <h3 className="text-lg font-bold text-foreground mb-2">Priority Actions (Next 90 Days)</h3>
                 <ol className="list-decimal list-inside text-foreground/80 space-y-2 ml-4">
                   <li>Secure executive sponsorship and establish formal PQC steering committee</li>
@@ -667,7 +667,7 @@ const ReadinessAnalysis = () => {
                 </ol>
               </div>
 
-              <div className="mt-8 p-6 bg-green-50 border border-green-200 rounded-lg">
+              <div className="mt-8 p-6 bg-success/5 border border-success/20 rounded-lg">
                 <h3 className="text-lg font-bold text-foreground mb-3">Next Steps: Partner With Us</h3>
                 <p className="text-foreground/80 mb-4">
                   Our team of quantum security experts is ready to help you accelerate your PQC journey. We offer:
@@ -728,7 +728,7 @@ const ReadinessAnalysis = () => {
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <div className="max-w-2xl w-full bg-card rounded-lg shadow-2xl p-8">
           <div className="text-center mb-8">
-            <Shield className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+            <Shield className="w-16 h-16 text-primary mx-auto mb-4" />
             <h1 className="text-3xl font-bold text-foreground mb-2">
               Post-Quantum Cryptography Readiness Assessment
             </h1>
@@ -829,7 +829,7 @@ const ReadinessAnalysis = () => {
         <div className="bg-card rounded-lg shadow-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <Building2 className="w-8 h-8 text-blue-600" />
+              <Building2 className="w-8 h-8 text-primary" />
               <div>
                 <h1 className="text-2xl font-bold text-foreground">PQC Readiness Assessment</h1>
                 <p className="text-sm text-muted-foreground">{companyInfo.name}</p>
@@ -837,7 +837,7 @@ const ReadinessAnalysis = () => {
             </div>
             <div className="text-right">
               <p className="text-sm text-muted-foreground">Progress</p>
-              <p className="text-2xl font-bold text-blue-600">
+              <p className="text-2xl font-bold text-primary">
                 {currentSection + 1} / {allQuestions.length}
               </p>
             </div>
@@ -845,7 +845,7 @@ const ReadinessAnalysis = () => {
           
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
-              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              className="bg-primary h-2 rounded-full transition-all duration-300"
               style={{ width: `${progress}%` }}
             ></div>
           </div>
@@ -853,7 +853,7 @@ const ReadinessAnalysis = () => {
 
         <div className="bg-card rounded-lg shadow-lg p-8">
           <div className="mb-6">
-            <p className="text-sm font-semibold text-blue-600 mb-2">
+            <p className="text-sm font-semibold text-primary mb-2">
               {currentQuestion.section}
             </p>
             <h2 className="text-xl font-bold text-foreground mb-6">
@@ -909,7 +909,7 @@ const ReadinessAnalysis = () => {
               <button
                 onClick={generateReport}
                 disabled={answers[currentQuestion.id] === undefined}
-                className="px-6 py-2 bg-green-600 text-primary-foreground rounded-lg hover:bg-green-700 transition-colors font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-6 py-2 bg-success text-primary-foreground rounded-lg hover:bg-success/90 transition-colors font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 <FileText className="w-5 h-5" />
                 Generate Report

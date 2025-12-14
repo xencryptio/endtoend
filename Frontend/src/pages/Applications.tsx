@@ -193,7 +193,7 @@ export default function Applications() {
   if (error) return (
     <div className="min-h-dvh bg-background p-6 flex items-center justify-center">
       <div className="text-center">
-        <p className="text-lg text-red-500 mb-4">{error.message}</p>
+        <p className="text-lg text-destructive mb-4">{error.message}</p>
         <Button variant="outline" className="gap-2" onClick={() => refetch()}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Retry

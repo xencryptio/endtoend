@@ -54,6 +54,7 @@ interface AuditResult {
 
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { UnifiedBackButton } from "@/components/ui/unified";
 
 // ... (other imports)
 
@@ -638,7 +639,7 @@ export const PQCExpandedResultModal: React.FC<{
   shadow-lg shadow-red-500/10
 ">
                               <p className="
-    text-base font-bold text-red-700 dark:text-red-400 
+    text-base font-bold text-destructive 
     mb-3 
     flex items-center gap-2
   ">
@@ -648,7 +649,7 @@ export const PQCExpandedResultModal: React.FC<{
                               <div className="space-y-2">
                                 {algo.vulnerabilities.map((vuln: string, i: number) => (
                                   <p key={i} className="text-sm text-slate-700 dark:text-slate-300 flex items-start gap-2">
-                                    <span className="text-red-500 mt-0.5">•</span>
+                                    <span className="text-destructive mt-0.5">•</span>
                                     {vuln}
                                   </p>
                                 ))}
@@ -1628,13 +1629,7 @@ export const AgentResultsPage: React.FC<{
       {/* Header */}
       <div className="bg-card border-b border-border shadow-[var(--shadow-card)]">
         <div className="max-w-7xl mx-auto px-8 py-12">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground mb-4 transition-colors font-medium"
-          >
-            <ArrowLeft size={20} />
-            Back
-          </button>
+          <UnifiedBackButton onClick={onBack} label="Back" className="mb-4" />
 
           <div className="flex items-start justify-between">
             <div>
@@ -1643,7 +1638,7 @@ export const AgentResultsPage: React.FC<{
               </h1>
               <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-blue-500" />
+                  <div className="w-2 h-2 rounded-full bg-primary" />
                   <span className="font-mono">{agent.ip_address}</span>
                 </div>
                 <span>•</span>
@@ -1660,10 +1655,10 @@ export const AgentResultsPage: React.FC<{
         {/* Stats Cards - PHASE 3 */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 md:gap-8 mb-8">
           {(Object.values(stats).length > 0) && [
-            { icon: Activity, label: 'Total Scans', value: stats.total, color: 'text-blue-600', bg: 'bg-blue-100 dark:bg-blue-900/20' },
+            { icon: Activity, label: 'Total Scans', value: stats.total, color: 'text-primary', bg: 'bg-primary/10 dark:bg-primary/20' },
             { icon: CheckCircle, label: 'Success Rate', value: `${stats.successRate}%`, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-900/20' },
-            { icon: CheckCircle, label: 'Successful', value: stats.successful, color: 'text-green-600', bg: 'bg-green-100 dark:bg-green-900/20' },
-            { icon: AlertCircle, label: 'Failed', value: stats.failed, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/20' },
+            { icon: CheckCircle, label: 'Successful', value: stats.successful, color: 'text-success', bg: 'bg-success/10 dark:bg-success/20' },
+            { icon: AlertCircle, label: 'Failed', value: stats.failed, color: 'text-destructive', bg: 'bg-destructive/10 dark:bg-destructive/20' },
           ].map((stat, idx) => (
             <Card key={stat.label} className="shadow-sm hover:shadow-md transition-all duration-200">
               <CardContent className="p-6 flex items-center justify-between">
