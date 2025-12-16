@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye } from 'lucide-react';
+import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { UnifiedBackButton } from "@/components/ui/unified";
 import { ScanDetail, Algorithm } from './types';
@@ -155,11 +155,9 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
         {algorithms.map((algo, idx) => (
-          <div key={`${algo.name}-${idx}`} className="bg-card text-card-foreground border rounded-xl p-4 shadow-sm hover:shadow-md hover:border-blue-500/40 transition-all duration-300 backdrop-blur-sm group relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-500/5 to-transparent rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500 pointer-events-none"></div>
-            
+          <div key={`${algo.name}-${idx}`} className="bg-card text-card-foreground border rounded-xl p-6 shadow-md hover:shadow-lg hover:scale-[1.01] transition-all duration-300 cursor-pointer">
             {/* Algorithm Name and Grade */}
-            <div className="flex items-start justify-between mb-4 relative z-10">
+            <div className="flex items-start justify-between mb-4">
               <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight">
                 {algo.name}
               </div>
@@ -171,26 +169,26 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
             </div>
             
             {/* Category and Type */}
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4 font-bold relative z-10">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-4 font-bold">
               {algo.category}
             </div>
             
             {/* Security Level Badge */}
             {algo.security_level && (
-              <div className="mb-4 flex flex-wrap gap-2 relative z-10">
-                <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold shadow-md border ${
+              <div className="mb-4 flex flex-wrap gap-2">
+                <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold ${
                   algo.security_level === 'critical' 
-                    ? 'bg-destructive/5 dark:bg-destructive/40 text-destructive border-destructive/20 dark:border-destructive/90' 
+                    ? 'bg-destructive/10 text-destructive' 
                     : algo.security_level === 'high' 
-                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900'
+                    ? 'bg-success/10 text-success'
                     : algo.security_level === 'medium' 
-                    ? 'bg-warning/5 dark:bg-warning/40 text-warning border-warning/20 dark:border-warning/90'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                    ? 'bg-warning/10 text-warning'
+                    : 'bg-muted text-muted-foreground'
                 }`}>
                   {algo.security_level.toUpperCase()} SECURITY
                 </span>
                 {algo.deprecated && (
-                  <span className="inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold shadow-md border bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-900">
+                  <span className="inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-600">
                     DEPRECATED
                   </span>
                 )}
@@ -198,40 +196,28 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
             )}
             
             {/* Usage Statistics */}
-            <div className="flex gap-6 pt-5 border-t text-xs relative z-10">
-              <div title="Total occurrences in code" className="flex flex-col gap-1">
-                <span className="text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wide text-[10px]">Occurrences</span>
+            <div className="flex gap-6 pt-4 border-t mb-4">
+              <div className="bg-muted/30 rounded-lg px-3 py-2 flex-1">
+                <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">Occurrences</span>
                 <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.occurrences}</span>
               </div>
-              <div title="Number of files affected" className="flex flex-col gap-1">
-                <span className="text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wide text-[10px]">Files</span>
+              <div className="bg-muted/30 rounded-lg px-3 py-2 flex-1">
+                <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">Files</span>
                 <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.files_affected || 0}</span>
               </div>
             </div>
             
-            {/* View Occurrences Button */}
-            <div className="mt-4 pt-4 border-t">
-              <Button 
-                variant="outline"
-                className="w-full"
-                onClick={() => onViewOccurrences(algo.name)}
-              >
-                <Eye className="h-4 w-4 mr-2" />
-                View Occurrences
-              </Button>
-            </div>
-            
             {/* Quantum Safety Section */}
             {algo.quantum_safe !== undefined && (
-              <div className="mt-5 pt-5 border-t relative z-10">
+              <div className="pt-4 border-t mb-4">
                 {/* Quantum Safety Status */}
                 <div className={`flex items-center gap-2 text-sm font-bold mb-3 ${
-                  algo.quantum_safe ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                  algo.quantum_safe ? 'text-success' : 'text-destructive'
                 }`}>
                   <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
                     algo.quantum_safe 
-                      ? 'bg-emerald-100 dark:bg-emerald-900/30' 
-                      : 'bg-rose-100 dark:bg-rose-900/30'
+                      ? 'bg-success/10' 
+                      : 'bg-destructive/10'
                   }`}>
                     {algo.quantum_safe ? '✅' : '⚠️'}
                   </div>
@@ -247,15 +233,15 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
                 
                 {/* Classification Badge */}
                 {algo.quantum_resistance_type && (
-                  <div className="mt-4">
-                    <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold shadow-md border ${
+                  <div className="mt-3">
+                    <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold ${
                       algo.quantum_resistance_type === 'fully_resistant'
-                        ? 'bg-primary/5 dark:bg-primary/40 text-primary border-primary/20 dark:border-primary/90'
+                        ? 'bg-primary/10 text-primary'
                         : algo.quantum_resistance_type === 'grover_resistant'
-                        ? 'bg-primary/5 dark:bg-primary/30 text-primary border-primary/20 dark:border-primary/80'
+                        ? 'bg-primary/10 text-primary'
                         : algo.quantum_resistance_type === 'vulnerable'
-                        ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                        ? 'bg-destructive/10 text-destructive'
+                        : 'bg-muted text-muted-foreground'
                     }`}>
                       {algo.quantum_resistance_type.replace('_', ' ').toUpperCase()}
                     </span>
@@ -263,6 +249,16 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
                 )}
               </div>
             )}
+            
+            {/* View Occurrences Button */}
+            <Button 
+              variant="default"
+              className="w-full"
+              onClick={() => onViewOccurrences(algo.name)}
+            >
+              <Eye className="h-4 w-4 mr-2" />
+              View Occurrences
+            </Button>
           </div>
         ))}
       </div>
@@ -311,14 +307,10 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
       return (
         <div className="min-h-screen bg-background flex items-center justify-center">
           <div className="text-center space-y-6">
-            <div className="relative mx-auto w-16 h-16">
-              <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800"></div>
-              <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
-            </div>
-            
+            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
             <div className="space-y-2">
               <p className="text-base font-bold text-foreground">Loading scan details</p>
-              <p className="text-sm text-muted-foreground font-medium animate-pulse">Please wait...</p>
+              <p className="text-sm text-muted-foreground font-medium">Please wait...</p>
             </div>
           </div>
         </div>
@@ -346,13 +338,10 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
       return (
         <div className="min-h-screen bg-background flex items-center justify-center">
           <div className="text-center space-y-6">
-            <div className="relative mx-auto w-16 h-16">
-              <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800"></div>
-              <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
-            </div>
+            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
             <div className="space-y-2">
               <p className="text-base font-bold text-foreground">Processing scan data</p>
-              <p className="text-sm text-muted-foreground font-medium animate-pulse">Almost ready...</p>
+              <p className="text-sm text-muted-foreground font-medium">Almost ready...</p>
             </div>
           </div>
         </div>

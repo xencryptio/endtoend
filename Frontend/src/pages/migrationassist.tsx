@@ -5,6 +5,7 @@ import {
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { UnifiedBackButton } from '@/components/ui/unified'
 import { Button } from '@/components/ui/button'
 import { 
   Copy, Shield, AlertTriangle, Code, ArrowLeft, 
@@ -708,14 +709,7 @@ is_valid = dilithium_signer.verify(message, signature, pk)`}</code>
       >
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center space-x-4 mb-6">
-            <Button
-              variant="outline"
-              onClick={() => setExpandedCard(null)}
-              className="flex items-center space-x-2"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>Back</span>
-            </Button>
+            <UnifiedBackButton onClick={() => setExpandedCard(null)} label="Back" />
             <div className="flex items-center space-x-2">
               <div className={`p-2 rounded-lg text-white ${cards.find(c => c.id === expandedCard)?.color}`}>
                 {cards.find(c => c.id === expandedCard)?.icon}

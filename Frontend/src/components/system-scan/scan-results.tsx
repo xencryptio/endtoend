@@ -113,110 +113,105 @@ export const PQCResultCard: React.FC<{
   const pqcScore = result.audit_results?.pqc_score || {};
   const overallScore = pqcScore.overall_score || 0;
   const overallGrade = pqcScore.overall_grade || 'N/A';
-  const components = pqcScore.components || {};
   const hasScoring = pqcScore.overall_score !== undefined;
 
-  const componentEntries = Object.entries(components);
+  const totalScans = Object.entries(pqcScore.components || {}).reduce(
+    (sum, [, comp]: [string, any]) => sum + (comp.algorithms?.length || 0), 
+    0
+  );
+  const quantumSafeCount = Object.entries(pqcScore.components || {}).reduce(
+    (sum, [, comp]: [string, any]) => sum + (comp.quantum_safe_count || 0), 
+    0
+  );
+  const successRate = totalScans > 0 ? ((quantumSafeCount / totalScans) * 100).toFixed(0) : 0;
 
   return (
-    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
+    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200 cursor-pointer" onClick={() => onViewDetails(result)}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
         <div>
-          <CardTitle className="text-sm font-semibold text-muted-foreground">
-            Scan Result
+          <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Audit Scan
           </CardTitle>
-          <p className="text-xs text-muted-foreground mt-1 font-mono">
+          <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
             {result.task_id}
           </p>
         </div>
-        <FileText className="h-5 w-5 text-primary" />
+        <div>
+          {hasScoring ? (
+            <span className="px-2 py-1 text-xs rounded-full bg-success/10 text-success font-semibold">
+              ● Completed
+            </span>
+          ) : (
+            <span className="px-2 py-1 text-xs rounded-full bg-destructive/10 text-destructive font-semibold">
+              ● Failed
+            </span>
+          )}
+        </div>
       </CardHeader>
 
       <CardContent className="px-6 pb-6">
-        {/* Security Level Badge */}
-        {hasScoring && pqcScore.security_level && (
-          <div className="mb-4">
-            <div className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold ${pqcScore.security_level === 'high'
-              ? 'bg-success/10 text-success'
-              : pqcScore.security_level === 'medium'
-                ? 'bg-primary/10 text-primary'
-                : 'bg-destructive/10 text-destructive'
+        <div className="space-y-4">
+          {/* Security Level Badge */}
+          {hasScoring && pqcScore.security_level && (
+            <div>
+              <span className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold ${
+                pqcScore.security_level === 'high'
+                  ? 'bg-success/10 text-success'
+                  : pqcScore.security_level === 'medium'
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-destructive/10 text-destructive'
               }`}>
-              {pqcScore.security_level.toUpperCase()} SECURITY
+                {pqcScore.security_level.toUpperCase()} SECURITY
+              </span>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Stats Grid */}
-        {hasScoring && (
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            {(() => {
-              const totalScans = componentEntries.reduce((sum, [, comp]: [string, any]) =>
-                sum + (comp.algorithms?.length || 0), 0);
-              const successfulScans = componentEntries.reduce((sum, [, comp]: [string, any]) =>
-                sum + (comp.quantum_safe_count || 0), 0);
-              const successRate = totalScans > 0 ? ((successfulScans / totalScans) * 100).toFixed(0) : 0;
-              const failedScans = totalScans - successfulScans;
-
-              return (
-                <>
-                  <div className="bg-muted rounded-lg p-3">
-                    <div className="text-xs text-muted-foreground mb-1">Total Scans</div>
-                    <div className="text-2xl font-bold">{totalScans}</div>
-                  </div>
-                  <div className="bg-success/10 rounded-lg p-3">
-                    <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
-                    <div className="text-2xl font-bold text-success">{successRate}%</div>
-                  </div>
-                  <div className="bg-success/10 rounded-lg p-3">
-                    <div className="text-xs text-muted-foreground mb-1">Successful</div>
-                    <div className="text-2xl font-bold text-success">{successfulScans}</div>
-                  </div>
-                  <div className="bg-destructive/10 rounded-lg p-3">
-                    <div className="text-xs text-muted-foreground mb-1">Failed</div>
-                    <div className="text-2xl font-bold text-destructive">{failedScans}</div>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Quantum Ready Status */}
-        {hasScoring && (
-          <div className="flex gap-2 mb-4">
-            <div className={`flex-1 px-3 py-1.5 rounded-md text-center text-xs font-semibold ${pqcScore.quantum_ready
-              ? 'bg-success/10 text-success'
-              : 'bg-muted text-muted-foreground'
-              }`}>
-              {pqcScore.quantum_ready ? '✓ Quantum Ready' : '✗ Not Quantum Ready'}
-            </div>
-            {pqcScore.hybrid_ready && (
-              <div className="flex-1 px-3 py-1.5 rounded-md text-center text-xs font-semibold bg-primary/10 text-primary">
-                ✓ Hybrid Ready
+          {/* Stats Grid */}
+          {hasScoring && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-muted/30 p-3 rounded-lg text-center">
+                <div className="text-xs text-muted-foreground mb-1">Total Scans</div>
+                <div className="text-2xl font-bold">{totalScans}</div>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* No Scoring Available */}
-        {!hasScoring && (
-          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg mb-4">
-            <div className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <p className="text-sm font-semibold">PQC scoring not available</p>
+              <div className="bg-success/10 p-3 rounded-lg text-center">
+                <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
+                <div className="text-2xl font-bold text-success">{successRate}%</div>
+              </div>
+              <div className="bg-muted/30 p-3 rounded-lg text-center">
+                <div className="text-xs text-muted-foreground mb-1">Overall Score</div>
+                <div className="text-2xl font-bold">{overallScore.toFixed(1)}</div>
+              </div>
+              <div className="bg-muted/30 p-3 rounded-lg text-center">
+                <div className="text-xs text-muted-foreground mb-1">Grade</div>
+                <div className={`text-2xl font-bold ${getGradeColor(overallGrade)}`}>{overallGrade}</div>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Action Button */}
-        <Button
-          onClick={() => onViewDetails(result)}
-          className="w-full"
-        >
-          <ExternalLink size={16} className="mr-2" />
-          View Full Report
-        </Button>
+          {/* Quantum Ready Status */}
+          {hasScoring && (
+            <div className="flex gap-2">
+              <div className={`flex-1 px-3 py-2 rounded-md text-center text-xs font-semibold ${
+                pqcScore.quantum_ready
+                  ? 'bg-success/10 text-success'
+                  : 'bg-muted text-muted-foreground'
+              }`}>
+                {pqcScore.quantum_ready ? 'Quantum Ready' : 'Not Quantum Ready'}
+              </div>
+            </div>
+          )}
+
+          {/* No Scoring Available */}
+          {!hasScoring && (
+            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <p className="text-sm font-semibold">PQC scoring not available</p>
+              </div>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

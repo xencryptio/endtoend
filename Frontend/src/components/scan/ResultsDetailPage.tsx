@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Search, X, Globe, Lock, Key, Hash, Shield, Zap, Check, CheckCircle, AlertTriangle, ShieldAlert, Info, Clock } from "lucide-react";
+import { ArrowLeft, Search, X, Globe, Lock, Key, Hash, Shield, Zap, Check, CheckCircle, AlertTriangle, ShieldAlert, Info, Clock, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { UnifiedBackButton } from "@/components/ui/unified";
 import { Input } from "@/components/ui/input";
@@ -643,66 +643,63 @@ const DomainCard: React.FC<{
 
   return (
     <Card 
-      className={`cursor-pointer transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-2xl hover:-translate-y-1 border-l-4 ${
-        isSuccess ? 'border-l-emerald-500' : 
-        isHttpSkipped ? 'border-l-amber-500' : 
-        'border-l-rose-500'
-      }`}
+      className="cursor-pointer transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-2xl hover:-translate-y-1 shadow-md"
       onClick={onExpand}
     >
-      <CardContent className="p-4">
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <h5 className="font-semibold truncate text-base">{result.url}</h5>
-              <div className="text-xs text-muted-foreground mt-1">
-                {isSuccess ? (
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                      <Check className="w-3 h-3 text-emerald-600" />
-                    </div>
-                    <span>Successful</span>
-                  </div>
-                ) : isHttpSkipped ? (
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center">
-                      <AlertTriangle className="w-3 h-3 text-amber-600" />
-                    </div>
-                    <span>HTTP - Not Scannable</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center">
-                      <X className="w-3 h-3 text-rose-600" />
-                    </div>
-                    <span>Failed</span>
-                  </div>
-                )}
-              </div>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
+        <div className="flex-1 min-w-0">
+          <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+            <Shield className="h-4 w-4" />
+            Domain Scan
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1 truncate">{result.url}</p>
+        </div>
+        <div>
+          {isSuccess ? (
+            <span className="px-2 py-1 text-xs rounded-full bg-success/10 text-success font-semibold">
+              ● Completed
+            </span>
+          ) : isHttpSkipped ? (
+            <span className="px-2 py-1 text-xs rounded-full bg-amber-500/10 text-amber-600 font-semibold">
+              ● HTTP
+            </span>
+          ) : (
+            <span className="px-2 py-1 text-xs rounded-full bg-destructive/10 text-destructive font-semibold">
+              ● Failed
+            </span>
+          )}
+        </div>
+      </CardHeader>
+
+      <CardContent className="px-6 pb-6">
+        <div className="space-y-4">
+          <div>
+            <h5 className="font-semibold truncate text-base mb-1">{result.url}</h5>
+            <div className="text-xs text-muted-foreground">
+              {isSuccess ? (
+                <span className="text-success">Scan successful</span>
+              ) : isHttpSkipped ? (
+                <span className="text-amber-600">HTTP - Not scannable</span>
+              ) : (
+                <span className="text-destructive">Scan failed</span>
+              )}
             </div>
-            <div className={`w-3 h-3 rounded-full flex-shrink-0 mt-1 ${
-              isSuccess ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50 animate-pulse' : 
-              isHttpSkipped ? 'bg-amber-500 shadow-lg shadow-amber-500/50' :
-              'bg-rose-500 shadow-lg shadow-rose-500/50'
-            }`}></div>
           </div>
 
           {isSuccess && (
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div>
-                <div className="bg-muted p-2 rounded-xl">
-                  <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">PQC Score</div>
-                  <div className="font-bold text-sm">{typeof pqcScore === 'number' ? pqcScore.toFixed(1) : 'N/A'}</div>
-                </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-muted/30 p-3 rounded-lg text-center">
+                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">PQC Score</div>
+                <div className="font-bold text-sm">{typeof pqcScore === 'number' ? pqcScore.toFixed(1) : 'N/A'}</div>
               </div>
-              <div className="bg-muted p-2 rounded-xl">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Grade</div>
+              <div className="bg-muted/30 p-3 rounded-lg text-center">
+                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Grade</div>
                 <div className={`font-bold text-sm ${getGradeColor(pqcGrade as string)}`}>
                   {pqcGrade}
                 </div>
               </div>
-              <div className="bg-muted p-2 rounded-xl">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Status</div>
+              <div className="bg-muted/30 p-3 rounded-lg text-center">
+                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Status</div>
                 <div className="font-bold text-sm text-emerald-600">Ready</div>
               </div>
             </div>
@@ -761,13 +758,11 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) =
     >
       {/* Header */}
       <div className="mb-8">
-        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-          <UnifiedBackButton 
-            onClick={onBack}
-            label="Back to Scan History"
-            className="mb-4"
-          />
-        </motion.div>
+        <UnifiedBackButton 
+          onClick={onBack}
+          label="Back to Scan History"
+          className="mb-4"
+        />
         
         <div>
           <h2 className="text-3xl sm:text-4xl font-bold">
@@ -781,51 +776,47 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) =
         {/* Stats Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-              <CardTitle className="text-sm font-semibold text-muted-foreground">
-                Successful
-              </CardTitle>
-              <CheckCircle className="h-5 w-5 text-primary" />
-            </CardHeader>
-            <CardContent className="px-6 pb-6">
-              <div className="text-3xl font-bold mb-2">{stats.successful}</div>
-              <p className="text-sm font-medium text-muted-foreground">Scans completed</p>
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Successful</p>
+                <h3 className="text-2xl font-bold mt-2">{stats.successful}</h3>
+              </div>
+              <div className="p-3 rounded-full bg-success/10 dark:bg-success/20">
+                <CheckCircle className="w-6 h-6 text-success" />
+              </div>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-              <CardTitle className="text-sm font-semibold text-muted-foreground">
-                Failed
-              </CardTitle>
-              <ShieldAlert className="h-5 w-5 text-destructive" />
-            </CardHeader>
-            <CardContent className="px-6 pb-6">
-              <div className="text-3xl font-bold mb-2">{stats.failed}</div>
-              <p className="text-sm font-medium text-muted-foreground">Scans failed or skipped</p>
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Failed</p>
+                <h3 className="text-2xl font-bold mt-2">{stats.failed}</h3>
+              </div>
+              <div className="p-3 rounded-full bg-destructive/10 dark:bg-destructive/20">
+                <ShieldAlert className="w-6 h-6 text-destructive" />
+              </div>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-              <CardTitle className="text-sm font-semibold text-muted-foreground">
-                Total
-              </CardTitle>
-              <Globe className="h-5 w-5 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="px-6 pb-6">
-              <div className="text-3xl font-bold mb-2">{scan.detailedResults?.length ?? 0}</div>
-              <p className="text-sm font-medium text-muted-foreground">Total domains</p>
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total</p>
+                <h3 className="text-2xl font-bold mt-2">{scan.detailedResults?.length ?? 0}</h3>
+              </div>
+              <div className="p-3 rounded-full bg-primary/10 dark:bg-primary/20">
+                <Globe className="w-6 h-6 text-primary" />
+              </div>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-              <CardTitle className="text-sm font-semibold text-muted-foreground">
-                Duration
-              </CardTitle>
-              <Clock className="h-5 w-5 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="px-6 pb-6">
-              <div className="text-3xl font-bold mb-2">{scan.execution_time_seconds?.toFixed(2) ?? 'N/A'}s</div>
-              <p className="text-sm font-medium text-muted-foreground">Total scan time</p>
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Duration</p>
+                <h3 className="text-2xl font-bold mt-2">{scan.execution_time_seconds?.toFixed(2) ?? 'N/A'}s</h3>
+              </div>
+              <div className="p-3 rounded-full bg-muted/10 dark:bg-muted/20">
+                <Clock className="w-6 h-6 text-muted-foreground" />
+              </div>
             </CardContent>
           </Card>
         </div>

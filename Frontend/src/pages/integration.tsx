@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { UnifiedBackButton } from '@/components/ui/unified'
 import {
   ArrowLeft, Github, GitBranch, Settings, Wrench, 
   MessageSquare, Code, Play, Zap, FileText,
@@ -499,14 +500,7 @@ export default function EnhancedDashboard() {
               {/* Modal Header */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-6 border-b gap-4">
                 <div className="flex items-center gap-4">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setExpandedCard(null)}
-                    className="hover:bg-muted"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
+                  <UnifiedBackButton onClick={() => setExpandedCard(null)} label="Back" />
                   <div className="flex items-center gap-3">
                     <div className={`p-2 rounded-full text-white ${cards.find(c => c.id === expandedCard)?.color}`}>
                       {cards.find(c => c.id === expandedCard)?.icon}

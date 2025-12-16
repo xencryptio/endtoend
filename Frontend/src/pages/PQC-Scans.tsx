@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { Button } from '@/components/ui/button';
 import { AgentResultsPage } from '@/components/system-scan/scan-results';
-import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard, UnifiedRefreshButton } from '@/components/ui/unified';
+import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard, UnifiedRefreshButton, UnifiedTableRefresh, UnifiedActionLoading } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 
 
@@ -1641,24 +1641,10 @@ const CryptoAuditDashboard: React.FC = () => {
 
                   {/* Add loading overlay for smooth refresh */}
                   <div className="relative">
-                    <AnimatePresence>
-                      {loading && !isInitialLoad && (
-                        <motion.div
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-20 flex items-center justify-center"
-                        >
-                          <div className="bg-white dark:bg-slate-900 px-6 py-3 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 flex items-center gap-3">
-                            <Loader className="animate-spin text-primary" size={20} />
-                            <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                              Updating data...
-                            </span>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
+                    <UnifiedTableRefresh 
+                      isRefreshing={loading && !isInitialLoad}
+                      message="Updating data..."
+                    />
                     {isInitialLoad ? (
                       <div className="p-6">
                         {[...Array(5)].map((_, i) => (
@@ -1890,12 +1876,12 @@ const MobileAgentCard: React.FC<{
           disabled={isScanTriggered}
           className="flex-1"
         >
-          {isScanTriggered ? (
-            <Loader size={16} className="animate-spin mr-2" />
-          ) : (
-            <Play size={16} className="mr-2" />
-          )}
-          {isScanTriggered ? 'Scanning...' : 'Scan'}
+          <UnifiedActionLoading
+            isLoading={isScanTriggered}
+            loadingText="Scanning..."
+            defaultText="Scan"
+            icon={<Play size={16} className="mr-2" />}
+          />
         </Button>
         <Button
           onClick={onToggle}
@@ -2480,12 +2466,12 @@ const AgentRow: React.FC<{
               disabled={isScanning}
               size="sm"
             >
-              {isScanning ? (
-                <Loader size={14} className="animate-spin mr-2" />
-              ) : (
-                <Play size={14} className="mr-2" />
-              )}
-              {isScanning ? 'Scanning...' : 'Scan'}
+              <UnifiedActionLoading
+                isLoading={isScanning}
+                loadingText="Scanning..."
+                defaultText="Scan"
+                icon={<Play size={14} className="mr-2" />}
+              />
             </Button>
           </td>
 

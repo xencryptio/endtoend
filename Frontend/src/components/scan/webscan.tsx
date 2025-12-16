@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UnifiedBackButton, UnifiedResultCard, UnifiedCard, UnifiedFileInput } from "@/components/ui/unified";
+import { UnifiedBackButton, UnifiedResultCard, UnifiedCard, UnifiedFileInput, UnifiedActionLoading, UnifiedInlineRefresh } from "@/components/ui/unified";
 import ResultsDetailPage from "./ResultsDetailPage";
 
 // ============================================================================
@@ -187,25 +187,20 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           )}
         </div>
         {isActiveProgress && onCancel && (
-          <Button 
-            variant="destructive" 
-            size="sm"
-            onClick={onCancel}
-            disabled={isCancelling}
-          >
-            {isCancelling ? (
-              <>
-                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                Cancelling...
-              </>
-            ) : (
-              <>
-                <X className="h-4 w-4 mr-2" />
-                Cancel Scan
-              </>
-            )}
-          </Button>
-        )}
+  <Button 
+    variant="destructive" 
+    size="sm"
+    onClick={onCancel}
+    disabled={isCancelling}
+  >
+    <UnifiedActionLoading
+      isLoading={isCancelling}
+      loadingText="Cancelling..."
+      defaultText="Cancel Scan"
+      icon={<X className="h-4 w-4 mr-2" />}
+    />
+  </Button>
+)}
       </div>
       <div className="mt-4">
         {scanProgress.total > 0 && (
@@ -249,10 +244,9 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
           {/* Processing Section (Only shown during active scans) */}
           {isActiveProgress && (
             <div>
-              <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-                <RefreshCw className="h-4 w-4 text-primary animate-spin" />
-                In Progress ({Object.keys(processingDomains).length})
-              </h4>
+              <div className="font-semibold text-sm mb-2">
+                <UnifiedInlineRefresh isRefreshing={true} size="sm" label={`In Progress (${Object.keys(processingDomains).length})`} className="text-primary" />
+              </div>
               <div className="space-y-1">
                 {Object.entries(processingDomains).map(([domain, info]) => (
                   <div key={domain} className="text-sm py-1 px-2 bg-primary/10 dark:bg-primary/20 rounded-md">
@@ -1239,15 +1233,18 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
               </UnifiedCard>
             </div>
             <div className="mt-6">
-                <Button 
+                <Button
                   onClick={handleScanSubmit}
                   disabled={isScanning || (!urls && !uploadedFile)}
                   className="w-full sm:w-auto"
                 >
-                  {isScanning ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-                  {isScanning ? 'Scanning...' : 'Start Crypto Scan'}
-                </Button>
-            </div>
+                  <UnifiedActionLoading
+                    isLoading={isScanning}
+                    loadingText="Scanning..."
+                    defaultText="Start Crypto Scan"
+                    icon={<Play className="h-4 w-4 mr-2" />}
+                  />
+                </Button>            </div>
           </motion.div>
         ) : (
           <motion.div

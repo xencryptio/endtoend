@@ -4,7 +4,7 @@ import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle,
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UnifiedCard, UnifiedBadge, UnifiedBackButton, UnifiedRefreshButton } from '@/components/ui/unified';
+import { UnifiedCard, UnifiedBadge, UnifiedBackButton, UnifiedRefreshButton, UnifiedInlineRefresh, UnifiedActionLoading } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 import { Scan, StatusType } from './types';
 import ScanResultsDetail from './ScanResultsDetail';
@@ -399,12 +399,12 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
                   <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 </div>
                 
-                {isValidating && (
-                  <div className="mt-3 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Validating URL...</span>
-                  </div>
-                )}
+                <UnifiedInlineRefresh
+  isRefreshing={isValidating}
+  label="Validating URL..."
+  size="sm"
+  className="mt-3"
+/>
                 
                 {detectedPlatform && !isValidating && (
                   <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 dark:bg-primary/30 text-primary text-sm font-medium shadow-sm">
@@ -420,9 +420,12 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
                 </label>
                 
                 {isFetchingBranches ? (
-                  <div className="w-full h-10 px-4 py-2 border rounded-md bg-muted/50 flex items-center gap-2">
-                    <RefreshCw className="w-4 h-4 animate-spin text-primary" />
-                    <span className="text-sm text-muted-foreground">Fetching branches...</span>
+                  <div className="w-full h-10 px-4 py-2 border rounded-md bg-muted/50">
+                    <UnifiedInlineRefresh
+                      isRefreshing={true}
+                      label="Fetching branches..."
+                      size="md"
+                    />
                   </div>
                 ) : availableBranches.length > 0 && !showManualBranchInput ? (
                   <>
@@ -482,17 +485,12 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
                 size="lg"
                 className="w-full"
               >
-                {isScanning ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin mr-2" />
-                    <span>Submitting Scan...</span>
-                  </>
-                ) : (
-                  <>
-                    <Shield className="w-5 h-5 mr-2" />
-                    <span>Scan Repository</span>
-                  </>
-                )}
+                <UnifiedActionLoading
+                  isLoading={isScanning}
+                  loadingText="Submitting Scan..."
+                  defaultText="Scan Repository"
+                  icon={<Shield className="w-5 h-5 mr-2" />}
+                />
               </Button>
             </div>
         </UnifiedCard>
@@ -502,6 +500,11 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
             <div className="flex justify-between items-center mb-6 pb-5 border-b">
               <div>
                 <h2 className="text-2xl font-bold text-foreground tracking-tight">Scan History</h2>
+                <UnifiedInlineRefresh
+                  isRefreshing={isRefreshing && !autoRefresh}
+                  label=""
+                  size="md"
+                />
               </div>
               <UnifiedRefreshButton
                 onClick={refreshHistory}

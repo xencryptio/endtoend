@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import Applications from "@/components/profile/applications";
+import { UnifiedBackButton } from "@/components/ui/unified";
 
 // Types for API data
 interface ApiCryptoAlgorithm {
@@ -425,7 +426,7 @@ const Profile = () => {
           >
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-2xl font-bold">Cryptography Profile Management</h1>
-              <Button variant="outline" onClick={() => setView('dashboard')}><ArrowLeft className="h-4 w-4 mr-2" /> Back</Button>
+              <UnifiedBackButton onClick={() => setView('dashboard')} label="Back" />
             </div>
 
             <div className="space-y-8">
