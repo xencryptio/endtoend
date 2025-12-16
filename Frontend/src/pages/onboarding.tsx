@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { UnifiedCard, UnifiedBackButton, UnifiedFileInput } from "@/components/ui/unified";
-import { CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { UnifiedCard, UnifiedEntryCard, UnifiedBackButton, UnifiedFileInput } from "@/components/ui/unified";
 import { typography } from "@/lib/design-tokens";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -594,92 +593,35 @@ const OnboardingPage = () => {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-                        {/* TLS/SSL Scanner Card */}
-                        <UnifiedCard
-                            variant="premium"
+                        <UnifiedEntryCard
+                            icon={UploadCloud}
+                            title="TLS/SSL Scanner"
+                            subtitle="Scan domains from an Excel file"
+                            description="Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations and ensure secure connections across your infrastructure."
+                            actionLabel="Start Scan"
                             onClick={() => setView('tls')}
-                            className="h-full flex flex-col justify-between cursor-pointer group"
-                        >
-                            <CardHeader>
-                                <div className="flex items-center gap-4 mb-4">
-                                    <div className="p-3 bg-primary/10 rounded-xl">
-                                        <UploadCloud className="h-8 w-8 text-primary" />
-                                    </div>
-                                    <div>
-                                        <CardTitle className="text-2xl">TLS/SSL Scanner</CardTitle>
-                                        <CardDescription className="text-base">Scan domains from an Excel file</CardDescription>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-muted-foreground">
-                                    Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations and ensure secure connections across your infrastructure.
-                                </p>
-                            </CardContent>
-                            <div className="p-6 pt-0">
-                                <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                                </Button>
-                            </div>
-                        </UnifiedCard>
-
-                        {/* Repository Scanner Card */}
-                        <UnifiedCard
                             variant="premium"
+                        />
+
+                        <UnifiedEntryCard
+                            icon={Github}
+                            title="Repository Scanner"
+                            subtitle="Scan repos from GitHub or Excel"
+                            description="Analyze Git repositories for cryptographic algorithm usage and security best practices. Discover vulnerabilities and ensure compliance with modern standards."
+                            actionLabel="Start Scan"
                             onClick={() => setView('repo')}
-                            className="h-full flex flex-col justify-between cursor-pointer group"
-                        >
-                            <CardHeader>
-                                <div className="flex items-center gap-4 mb-4">
-                                    <div className="p-3 bg-primary/10 rounded-xl">
-                                        <Github className="h-8 w-8 text-primary" />
-                                    </div>
-                                    <div>
-                                        <CardTitle className="text-2xl">Repository Scanner</CardTitle>
-                                        <CardDescription className="text-base">Scan repos from GitHub or Excel</CardDescription>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-muted-foreground">
-                                    Analyze Git repositories for cryptographic algorithm usage and security best practices. Discover vulnerabilities and ensure compliance with modern standards.
-                                </p>
-                            </CardContent>
-                            <div className="p-6 pt-0">
-                                <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                                </Button>
-                            </div>
-                        </UnifiedCard>
-
-                        {/* System Scanner Card */}
-                        <UnifiedCard
                             variant="premium"
+                        />
+
+                        <UnifiedEntryCard
+                            icon={Download}
+                            title="System Scanner"
+                            subtitle="Download and setup agents"
+                            description="Download agents for Linux and Windows to scan system cryptographic configurations. Deploy lightweight agents to monitor and audit your infrastructure in real-time."
+                            actionLabel="Download Agents"
                             onClick={() => setView('system')}
-                            className="h-full flex flex-col justify-between cursor-pointer group"
-                        >
-                            <CardHeader>
-                                <div className="flex items-center gap-4 mb-4">
-                                    <div className="p-3 bg-primary/10 rounded-xl">
-                                        <Download className="h-8 w-8 text-primary" />
-                                    </div>
-                                    <div>
-                                        <CardTitle className="text-2xl">System Scanner</CardTitle>
-                                        <CardDescription className="text-base">Download and setup agents</CardDescription>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-muted-foreground">
-                                    Download agents for Linux and Windows to scan system cryptographic configurations. Deploy lightweight agents to monitor and audit your infrastructure in real-time.
-                                </p>
-                            </CardContent>
-                            <div className="p-6 pt-0">
-                                <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                                    Download Agents <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                                </Button>
-                            </div>
-                        </UnifiedCard>
+                            variant="premium"
+                        />
                     </div>
 
                     <UnifiedCard className="mt-12 max-w-6xl mx-auto">

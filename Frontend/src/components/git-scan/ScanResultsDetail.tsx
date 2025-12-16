@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2 } from 'lucide-react';
+import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, FileText, Hash, Zap } from 'lucide-react';
 import { Button } from "@/components/ui/button";
-import { UnifiedBackButton } from "@/components/ui/unified";
+import { UnifiedMetricCard, UnifiedBackButton } from "@/components/ui/unified";
 import { ScanDetail, Algorithm } from './types';
 
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
@@ -532,52 +532,39 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-10">
-          <div className="bg-card/80 border rounded-xl p-6 shadow-[0_3px_10px_rgba(0,0,0,0.05)] hover:shadow-[0_6px_18px_rgba(0,0,0,0.1)] transition-all duration-300 transform hover:-translate-y-0.5 backdrop-blur-sm">
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              Files Scanned
-            </div>
-            <div className="text-5xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mb-2 relative z-10">{data.total_files || 0}</div>
-          </div>
-          
-          <div className="bg-card/80 border rounded-xl p-6 shadow-[0_3px_10px_rgba(0,0,0,0.05)] hover:shadow-[0_6px_18px_rgba(0,0,0,0.1)] transition-all duration-300 transform hover:-translate-y-0.5 backdrop-blur-sm">
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              Total Algorithms
-            </div>
-            <div className="text-5xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mb-2 relative z-10">{Object.keys(algorithms).length}</div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-card to-blue-50/30 dark:from-card dark:to-blue-950/20 border-2 border-blue-500 dark:border-blue-600 rounded-xl p-6 shadow-[0_4px_12px_rgba(59,130,246,0.15)] hover:shadow-[0_8px_24px_rgba(59,130,246,0.25)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent pointer-events-none"></div>
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              🔮 True PQC
-            </div>
-            <div className="text-5xl font-bold text-primary tracking-tight mb-2 relative z-10">{truePQCCount}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 relative z-10">
-              Kyber, Dilithium, SPHINCS+
-            </div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-card to-emerald-50/30 dark:from-card dark:to-emerald-950/20 border-2 border-emerald-500 dark:border-emerald-600 rounded-xl p-6 shadow-[0_4px_12px_rgba(16,185,129,0.15)] hover:shadow-[0_8px_24px_rgba(16,185,129,0.25)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none"></div>
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              ✅ Quantum-Safe
-            </div>
-            <div className="text-5xl font-bold text-emerald-600 dark:text-emerald-400 tracking-tight mb-2 relative z-10">{quantumSafeCount}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 relative z-10">
-              AES-256, SHA-512, etc.
-            </div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-card to-rose-50/30 dark:from-card dark:to-rose-950/20 border-2 border-rose-500 dark:border-rose-600 rounded-xl p-6 shadow-[0_4px_12px_rgba(244,63,94,0.15)] hover:shadow-[0_8px_24px_rgba(244,63,94,0.25)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-rose-500/5 to-transparent pointer-events-none"></div>
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              ⚠️ Vulnerable
-            </div>
-            <div className="text-5xl font-bold text-rose-600 dark:text-rose-400 tracking-tight mb-2 relative z-10">{quantumVulnerableCount}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 relative z-10">
-              RSA, ECDSA, weak sizes
-            </div>
-          </div> 
+          <UnifiedMetricCard
+            label="Files Scanned"
+            value={data.total_files || 0}
+            icon={<FileText size={18} />}
+            iconColor="muted"
+          />
+          <UnifiedMetricCard
+            label="Total Algorithms"
+            value={Object.keys(algorithms).length}
+            icon={<Hash size={18} />}
+            iconColor="muted"
+          />
+          <UnifiedMetricCard
+            label="True PQC"
+            value={truePQCCount}
+            description="Kyber, Dilithium, SPHINCS+"
+            icon={<Zap size={18} />}
+            iconColor="primary"
+          />
+          <UnifiedMetricCard
+            label="Quantum-Safe"
+            value={quantumSafeCount}
+            description="AES-256, SHA-512, etc."
+            icon={<Shield size={18} />}
+            iconColor="success"
+          />
+          <UnifiedMetricCard
+            label="Vulnerable"
+            value={quantumVulnerableCount}
+            description="RSA, ECDSA, weak sizes"
+            icon={<AlertTriangle size={18} />}
+            iconColor="destructive"
+          />
         </div>
 
         {quantumVulnerable.length > 0 && (

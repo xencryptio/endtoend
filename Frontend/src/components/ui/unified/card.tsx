@@ -3,6 +3,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { UnifiedBadge } from "./badge";
+import { ArrowRight, LucideIcon } from "lucide-react";
 
 /* ============================================================================
  * BASE CARD
@@ -153,12 +154,13 @@ export const UnifiedMetricCard = ({
 };
 
 /* ============================================================================
- * RESULT CARD
+ * RESULT CARD - Updated with PQC-style metrics
  * ========================================================================== */
 
 interface MetricDisplay {
   label: string;
   value: string | number;
+  valueClassName?: string;
 }
 
 export interface UnifiedResultCardProps {
@@ -221,18 +223,27 @@ export const UnifiedResultCard = ({
         )}
       </div>
 
-      {/* Metrics */}
+      {/* Metrics - Updated to match PQC style */}
       {metrics.length > 0 && (
-        <div className="px-6 pb-4 grid grid-cols-2 gap-3">
+        <div className={cn(
+          "px-6 pb-4 grid gap-3",
+          metrics.length === 1 && "grid-cols-1",
+          metrics.length === 2 && "grid-cols-2",
+          metrics.length === 3 && "grid-cols-3",
+          metrics.length === 4 && "grid-cols-2 md:grid-cols-4",
+          metrics.length > 4 && "grid-cols-2 md:grid-cols-3"
+        )}>
           {metrics.map((m, i) => (
             <div
               key={i}
-              className="rounded-lg bg-muted/30 p-3 text-center"
+              className="bg-muted/30 p-3 rounded-lg text-center"
             >
-              <div className="text-xs text-muted-foreground mb-1">
+              <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">
                 {m.label}
               </div>
-              <div className="text-2xl font-bold">{m.value}</div>
+              <div className={cn("font-bold text-sm", m.valueClassName)}>
+                {m.value}
+              </div>
             </div>
           ))}
         </div>
@@ -260,6 +271,82 @@ export const UnifiedResultCard = ({
           ))}
         </div>
       )}
+    </UnifiedCard>
+  );
+};
+
+/* ============================================================================
+ * ENTRY CARD - Feature Navigation Card
+ * ========================================================================== */
+
+export interface UnifiedEntryCardProps {
+  icon: LucideIcon;
+  title: string;
+  subtitle: string;
+  description: string;
+  actionLabel?: string;
+  onClick: () => void;
+  variant?: "default" | "premium";
+  className?: string;
+}
+
+export const UnifiedEntryCard = ({
+  icon: Icon,
+  title,
+  subtitle,
+  description,
+  actionLabel = "Start",
+  onClick,
+  variant = "premium",
+  className,
+}: UnifiedEntryCardProps) => {
+  const variantStyles = {
+    default: "",
+    premium: "border-primary/20 bg-gradient-to-br from-background to-primary/5",
+  };
+
+  return (
+    <UnifiedCard
+      clickable
+      onClick={onClick}
+      className={cn(
+        "h-full flex flex-col justify-between group hover:shadow-xl hover:-translate-y-1",
+        variantStyles[variant],
+        className
+      )}
+    >
+      {/* Header */}
+      <div className="mb-4">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="p-3 bg-primary/10 rounded-lg group-hover:bg-primary/20 transition-colors">
+            <Icon className="h-8 w-8 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-2xl font-semibold">{title}</h3>
+            <p className="text-base text-muted-foreground">{subtitle}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="mb-4">
+        <p className="text-muted-foreground">{description}</p>
+      </div>
+
+      {/* Action Button */}
+      <div>
+        <Button
+          variant="outline"
+          className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick();
+          }}
+        >
+          {actionLabel}{" "}
+          <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+        </Button>
+      </div>
     </UnifiedCard>
   );
 };

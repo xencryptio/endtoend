@@ -2,6 +2,7 @@ export {
   UnifiedCard,
   UnifiedMetricCard,
   UnifiedResultCard,
+  UnifiedEntryCard,
 } from './card';
 
 export { UnifiedBackButton, UnifiedRefreshButton } from './button';

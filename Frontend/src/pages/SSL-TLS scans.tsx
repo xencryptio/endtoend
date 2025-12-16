@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Save, RotateCcw, ArrowLeft, ArrowRight, Globe, Github } from "lucide-react";
+import { Save, RotateCcw, Globe, Github } from "lucide-react";
 import { CryptoTable, CryptoAlgorithm, ColumnDef } from "@/components/profile/crypto table";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import WebScan from '@/components/scan/webscan'; // Import the autonomous WebScan component
+  UnifiedCard,
+  UnifiedEntryCard,
+  UnifiedBackButton,
+} from "@/components/ui/unified";
+import { typography } from "@/lib/design-tokens";
+import WebScan from '@/components/scan/webscan';
 import GitScan from "@/components/git-scan/git-scan";
 
 // ============================================================================
@@ -54,10 +53,10 @@ const fetchDataFromAPI = async (): Promise<ApiCryptoAlgorithm[]> => {
       throw new Error(`API Error: ${response.status} ${response.statusText}`);
     }
     const result = await response.json();
-    console.log('Γ£à API data fetched successfully');
+    console.log('✓ API data fetched successfully');
     return result.data || [];
   } catch (error) {
-    console.error('Γ¥î Failed to fetch data from API:', error);
+    console.error('✗ Failed to fetch data from API:', error);
     return [];
   }
 };
@@ -140,11 +139,6 @@ const commonColumns: ColumnDef[] = [
   { key: "notes", header: "Notes" },
 ];
 
-import { UnifiedCard, UnifiedBackButton } from "@/components/ui/unified";
-import { typography } from "@/lib/design-tokens";
-
-// ... (keep existing interfaces, types, api config, and api functions)
-
 // ============================================================================
 // MAIN SCAN COMPONENT (DASHBOARD CONTROLLER)
 // ============================================================================
@@ -197,7 +191,7 @@ const Scan = () => {
         setPqcData(initialPqc);
 
       } catch (error) {
-        console.error('Γ¥î Error initializing profile data:', error);
+        console.error('✗ Error initializing profile data:', error);
       } finally {
         setIsLoading(false);
       }
@@ -299,7 +293,7 @@ const Scan = () => {
           onBack={() => setView('dashboard')}
         />
       ) : view === 'dashboard' ? (
-        // Dashboard View - Simple Navigation
+        // Dashboard View - Simple Navigation with UnifiedEntryCard
         <motion.div
           key="dashboard"
           variants={cardVariants}
@@ -315,60 +309,24 @@ const Scan = () => {
               <p className="text-lg text-muted-foreground mt-2">Select a scan type to begin.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <UnifiedCard
-                variant="premium"
+              <UnifiedEntryCard
+                icon={Globe}
+                title="Web Scan"
+                subtitle="Scan your web assets"
+                description="Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues."
+                actionLabel="Start Scan"
                 onClick={() => setView('webscan')}
-                className="h-full flex flex-col justify-between cursor-pointer group"
-              >
-                <CardHeader>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="p-3 bg-primary/10 rounded-lg">
-                      <Globe className="h-8 w-8 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-2xl">Web Scan</CardTitle>
-                      <CardDescription className="text-base">Scan your web assets for vulnerabilities.</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-muted-foreground">
-                    Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues.
-                  </p>
-                </CardContent>
-                <div className="p-6 pt-0">
-                  <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                </div>
-              </UnifiedCard>
-              <UnifiedCard
                 variant="premium"
+              />
+              <UnifiedEntryCard
+                icon={Github}
+                title="Git Scan"
+                subtitle="Scan your repositories"
+                description="Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness."
+                actionLabel="Start Scan"
                 onClick={() => setView('gitscan')}
-                className="h-full flex flex-col justify-between cursor-pointer group"
-              >
-                <CardHeader>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="p-3 bg-primary/10 rounded-lg">
-                      <Github className="h-8 w-8 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-2xl">Git Scan</CardTitle>
-                      <CardDescription className="text-base">Scan your Git repositories for vulnerabilities.</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-muted-foreground">
-                    Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness.
-                  </p>
-                </CardContent>
-                <div className="p-6 pt-0">
-                  <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                </div>
-              </UnifiedCard>
+                variant="premium"
+              />
             </div>
           </div>
         </motion.div>

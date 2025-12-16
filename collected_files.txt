@@ -2716,16 +2716,15 @@ FILE: C:\Users\ASUS\Videos\internship-projects\endtoend\Frontend\src\pages\SSL-T
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Save, RotateCcw, ArrowLeft, ArrowRight, Globe, Github } from "lucide-react";
+import { Save, RotateCcw, Globe, Github } from "lucide-react";
 import { CryptoTable, CryptoAlgorithm, ColumnDef } from "@/components/profile/crypto table";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import WebScan from '@/components/scan/webscan'; // Import the autonomous WebScan component
+  UnifiedCard,
+  UnifiedEntryCard,
+  UnifiedBackButton,
+} from "@/components/ui/unified";
+import { typography } from "@/lib/design-tokens";
+import WebScan from '@/components/scan/webscan';
 import GitScan from "@/components/git-scan/git-scan";
 
 // ============================================================================
@@ -2769,10 +2768,10 @@ const fetchDataFromAPI = async (): Promise<ApiCryptoAlgorithm[]> => {
       throw new Error(`API Error: ${response.status} ${response.statusText}`);
     }
     const result = await response.json();
-    console.log('Γ£à API data fetched successfully');
+    console.log('✓ API data fetched successfully');
     return result.data || [];
   } catch (error) {
-    console.error('Γ¥î Failed to fetch data from API:', error);
+    console.error('✗ Failed to fetch data from API:', error);
     return [];
   }
 };
@@ -2855,11 +2854,6 @@ const commonColumns: ColumnDef[] = [
   { key: "notes", header: "Notes" },
 ];
 
-import { UnifiedCard, UnifiedBackButton } from "@/components/ui/unified";
-import { typography } from "@/lib/design-tokens";
-
-// ... (keep existing interfaces, types, api config, and api functions)
-
 // ============================================================================
 // MAIN SCAN COMPONENT (DASHBOARD CONTROLLER)
 // ============================================================================
@@ -2912,7 +2906,7 @@ const Scan = () => {
         setPqcData(initialPqc);
 
       } catch (error) {
-        console.error('Γ¥î Error initializing profile data:', error);
+        console.error('✗ Error initializing profile data:', error);
       } finally {
         setIsLoading(false);
       }
@@ -3014,7 +3008,7 @@ const Scan = () => {
           onBack={() => setView('dashboard')}
         />
       ) : view === 'dashboard' ? (
-        // Dashboard View - Simple Navigation
+        // Dashboard View - Simple Navigation with UnifiedEntryCard
         <motion.div
           key="dashboard"
           variants={cardVariants}
@@ -3030,60 +3024,24 @@ const Scan = () => {
               <p className="text-lg text-muted-foreground mt-2">Select a scan type to begin.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <UnifiedCard
-                variant="premium"
+              <UnifiedEntryCard
+                icon={Globe}
+                title="Web Scan"
+                subtitle="Scan your web assets"
+                description="Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues."
+                actionLabel="Start Scan"
                 onClick={() => setView('webscan')}
-                className="h-full flex flex-col justify-between cursor-pointer group"
-              >
-                <CardHeader>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="p-3 bg-primary/10 rounded-lg">
-                      <Globe className="h-8 w-8 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-2xl">Web Scan</CardTitle>
-                      <CardDescription className="text-base">Scan your web assets for vulnerabilities.</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-muted-foreground">
-                    Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues.
-                  </p>
-                </CardContent>
-                <div className="p-6 pt-0">
-                  <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                </div>
-              </UnifiedCard>
-              <UnifiedCard
                 variant="premium"
+              />
+              <UnifiedEntryCard
+                icon={Github}
+                title="Git Scan"
+                subtitle="Scan your repositories"
+                description="Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness."
+                actionLabel="Start Scan"
                 onClick={() => setView('gitscan')}
-                className="h-full flex flex-col justify-between cursor-pointer group"
-              >
-                <CardHeader>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="p-3 bg-primary/10 rounded-lg">
-                      <Github className="h-8 w-8 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-2xl">Git Scan</CardTitle>
-                      <CardDescription className="text-base">Scan your Git repositories for vulnerabilities.</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-muted-foreground">
-                    Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness.
-                  </p>
-                </CardContent>
-                <div className="p-6 pt-0">
-                  <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                </div>
-              </UnifiedCard>
+                variant="premium"
+              />
             </div>
           </div>
         </motion.div>
@@ -3162,6 +3120,962 @@ const Scan = () => {
 
 export default Scan;
 
+============================
+FILE: C:\Users\ASUS\Videos\internship-projects\endtoend\Frontend\src\pages\onboarding.tsx
+============================
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { UnifiedCard, UnifiedEntryCard, UnifiedBackButton, UnifiedFileInput } from "@/components/ui/unified";
+import { typography } from "@/lib/design-tokens";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowLeft, UploadCloud, FileText, Github, Loader2, Download, Trash2, RefreshCw, XCircle, Server, Terminal, BookOpen, CheckCircle, Activity, AlertCircle, ArrowRight, Globe } from "lucide-react";
+
+// ============================================================================ 
+// INTERFACES & TYPES
+// ============================================================================ 
+
+interface Job {
+    job_id: string;
+    scan_type: string;
+    status: string;
+    total_items: number;
+    completed_items: number;
+    failed_items: number;
+    started_at: string;
+}
+
+interface Repository {
+    id: number;
+    full_name: string;
+    default_branch: string;
+    clone_url?: string;
+    branches?: string[];
+    description?: string;
+}
+
+interface FileInfo {
+  name: string;
+  size: number;
+  modified: string;
+}
+
+type ViewType = 'dashboard' | 'tls' | 'repo' | 'system';
+
+// ============================================================================ 
+// CONSTANTS
+// ============================================================================ 
+
+const cardVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 },
+};
+
+// API base URLs
+const BATCH_API_BASE = 'http://localhost:8008';  // Excel Batch Scanner API
+const AGENT_API_BASE = 'http://localhost:9000';  // Crypto Audit API Server
+
+// ============================================================================ 
+// HELPER COMPONENTS
+// ============================================================================ 
+
+const ScanProgress = ({ progress, logs }) => (
+    <div className="mt-6 p-4 bg-muted/50 rounded-lg">
+        <div className="mb-4">
+            <div className="h-4 bg-background rounded-full overflow-hidden border">
+                <motion.div
+                    className="h-full bg-primary"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progress.percentage}%` }}
+                    transition={{ duration: 0.5 }}
+                />
+            </div>
+            <div className="text-center text-sm font-medium mt-2">{progress.percentage}% Complete</div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+            <div>
+                <p className="text-xs text-muted-foreground">Completed</p>
+                <p className={`${typography.h3} text-success`}>{progress.completed}</p>
+            </div>
+            <div>
+                <p className="text-xs text-muted-foreground">Failed</p>
+                <p className={`${typography.h3} text-destructive`}>{progress.failed}</p>
+            </div>
+            <div>
+                <p className="text-xs text-muted-foreground">Total</p>
+                <p className={typography.h3}>{progress.completed + progress.failed}</p>
+            </div>
+        </div>
+
+        <div className="max-h-48 overflow-y-auto bg-background rounded p-3 font-mono text-xs border">
+            {logs.map((log, idx) => (
+                <div key={idx} className={`mb-1 p-1 rounded text-xs ${log.level === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    <span className="font-semibold">[{log.timestamp}]</span> {log.message}
+                </div>
+            ))}
+        </div>
+    </div>
+);
+
+
+
+const SystemDownloadCard: React.FC<{
+    title: string;
+    folderType: string;
+    icon: React.ReactNode;
+    description: string;
+    files: FileInfo[];
+    loading: boolean;
+    formatBytes: (bytes: number) => string;
+    apiUrl: string;
+}> = ({ title, folderType, icon, description, files, loading, formatBytes, apiUrl }) => {
+    const handleDownload = async () => {
+        try {
+            const response = await fetch(`${AGENT_API_BASE}/api/v1/files/download-zip/${folderType}`);
+            if (!response.ok) {
+                throw new Error(`Download failed: ${response.statusText}`);
+            }
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${title.replace(/\s+/g, '_')}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error: any) {
+            console.error('Download error:', error);
+            alert(`Failed to download: ${error.message}`);
+        }
+    };
+
+    const colorClass = 'bg-primary/5 dark:bg-primary/20 text-primary';
+
+    return (
+        <UnifiedCard className="shadow-lg p-6 sm:p-8">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+                    <div className="flex items-center gap-4">
+                        <div className={`p-4 rounded-xl ${colorClass}`}>
+                            {icon}
+                        </div>
+                        <div>
+                            <h2 className={typography.h2}>
+                                {title}
+                            </h2>
+                            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                                {description}
+                            </p>
+                            {!loading && files.length > 0 && (
+                                <p className="text-xs text-slate-500 dark:text-slate-500 mt-2">
+                                    Size: {formatBytes(files[0].size)}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                    <Button
+                        onClick={handleDownload}
+                        size="lg"
+                        className="w-full sm:w-auto"
+                    >
+                        <Download size={20} className="mr-2" />
+                        Download {title}
+                    </Button>
+                </div>
+        </UnifiedCard>
+    );
+};
+
+// ============================================================================ 
+// INSTRUCTION CARD COMPONENTS
+// ============================================================================ 
+
+const LinuxInstructionsCard = () => (
+    <UnifiedCard padding="none">
+        <div className="p-6">
+            <div className="flex items-center gap-3">
+                <BookOpen className="text-primary" size={24} />
+                <h3 className={typography.h3}>Linux Setup Instructions</h3>
+            </div>
+        </div>
+        <div className="p-6">
+            <ol className="space-y-6">
+                {[ 
+                    { num: 1, text: 'Download the Linux Agent ZIP file', note: 'Click the download button above' },
+                    { num: 2, text: 'Extract the ZIP file', code: 'unzip Linux_Agent.zip' },
+                    { num: 3, text: 'Navigate to the extracted folder', code: 'cd "Linux Agent"' },
+                    { num: 4, text: 'Make the installer executable', code: 'chmod +x install_crypto_agent.sh' },
+                    { num: 5, text: 'Run the installer with sudo', code: 'sudo ./install_crypto_agent.sh' },
+                    { num: 6, text: 'Verify installation', note: 'The agent will automatically start and register with the server' },
+                ].map(step => (
+                    <li key={step.num} className="flex gap-4">
+                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center text-base font-bold shadow-md">{step.num}</span>
+                        <div className="flex-1">
+                            <p className="text-slate-900 dark:text-slate-100 font-medium">{step.text}</p>
+                            {step.note && <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{step.note}</p>}
+                            {step.code && <code className="block mt-3 px-4 py-3 rounded-lg text-sm bg-slate-900 dark:bg-slate-950 text-emerald-400 font-mono shadow-inner">{step.code}</code>}
+                        </div>
+                    </li>
+                ))}
+            </ol>
+        </div>
+    </UnifiedCard>
+);
+
+const WindowsInstructionsCard = () => (
+    <UnifiedCard padding="none">
+        <div className="p-6">
+            <div className="flex items-center gap-3">
+                <BookOpen className="text-primary" size={24} />
+                <h3 className={typography.h3}>Windows Setup Instructions</h3>
+            </div>
+        </div>
+        <div className="p-6">
+            <ol className="space-y-6">
+                {[ 
+                    { num: 1, text: 'Download the Windows Agent ZIP file', note: 'Click the download button above' },
+                    { num: 2, text: 'Extract the ZIP file to a directory', note: 'Example: C:\\CryptoAgent' },
+                    { num: 3, text: 'Open Command Prompt or PowerShell as Administrator', note: 'Right-click and select "Run as Administrator"' },
+                    { num: 4, text: 'Navigate to the extracted folder', code: 'cd C:\\CryptoAgent' },
+                    { num: 5, text: 'Run the installer script', code: 'python install.py' },
+                    { num: 6, text: 'Verify installation', note: 'The agent will be installed as a Windows service and start automatically' },
+                ].map(step => (
+                    <li key={step.num} className="flex gap-4">
+                        <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-scan-pqc text-white flex items-center justify-center text-base font-bold shadow-md">{step.num}</span>
+                        <div className="flex-1">
+                            <p className="text-slate-900 dark:text-slate-100 font-medium">{step.text}</p>
+                            {step.note && <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{step.note}</p>}
+                            {step.code && <code className="block mt-3 px-4 py-3 rounded-lg text-sm bg-slate-900 dark:bg-slate-950 text-emerald-400 font-mono shadow-inner">{step.code}</code>}
+                        </div>
+                    </li>
+                ))}
+            </ol>
+        </div>
+    </UnifiedCard>
+);
+
+const ConfigurationCard = () => (
+    <UnifiedCard padding="none">
+        <div className="p-6">
+            <div className="flex items-center gap-3">
+                <BookOpen className="text-primary" size={24} />
+                <h3 className={typography.h3}>Configuration</h3>
+            </div>
+            <p className="text-muted-foreground text-sm">Both agents use the same configuration file format</p>
+        </div>
+        <div className="p-6">
+            <div className="mb-6">
+                <p className="text-slate-900 dark:text-slate-100 mb-4">Edit the <code className="px-2 py-1 rounded bg-slate-200 dark:bg-slate-800 text-sm font-mono">config.json</code> file to configure:</p>
+                <div className="space-y-4">
+                    {[ 
+                        { label: 'server_url', desc: 'API server address', value: AGENT_API_BASE, required: true },
+                        { label: 'poll_interval', desc: 'How often the agent checks for tasks', value: '30 seconds (default)', required: false },
+                        { label: 'agent_id', desc: 'Unique identifier for the agent', value: 'Auto-generated on first run', required: false },
+                    ].map((item, idx) => (
+                        <div key={idx} className="flex items-start gap-3 p-4 bg-white dark:bg-slate-800 rounded-lg border border-primary/20 dark:border-primary/30">
+                            <CheckCircle size={20} className="flex-shrink-0 text-success mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <code className="text-sm font-mono font-semibold text-slate-900 dark:text-slate-100">{item.label}</code>
+                                    {item.required && <span className="text-xs px-2 py-0.5 bg-destructive/10 dark:bg-destructive/30 text-destructive rounded font-semibold">Required</span>}
+                                </div>
+                                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{item.desc}</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 font-mono">{item.value}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+            <div className="p-5 rounded-lg bg-white dark:bg-slate-800 border border-primary/20 dark:border-primary/30">
+                <p className="text-sm font-semibold mb-3 text-success">Example config.json:</p>
+                <pre className="text-sm bg-slate-900 dark:bg-slate-950 text-emerald-400 font-mono p-4 rounded-lg overflow-x-auto">{`{
+  "server_url": "${AGENT_API_BASE}",
+  "poll_interval": 30,
+  "agent_id": "auto-generated-uuid"
+}`}</pre>
+            </div>
+        </div>
+    </UnifiedCard>
+);
+
+const MonitoringCard = () => (
+    <UnifiedCard padding="none">
+        <div className="p-6">
+            <div className="flex items-center gap-3">
+                <Activity className="text-primary" size={24} />
+                <h3 className={typography.h3}>Monitoring & Management</h3>
+            </div>
+            <p className="text-muted-foreground text-sm">Understanding agent behavior and dashboard features</p>
+        </div>
+        <div className="p-6">
+            <div className="space-y-4">
+                {[ 
+                    { icon: <Activity size={20} />, text: 'Agents automatically send heartbeats every poll interval', color: 'text-primary' },
+                    { icon: <Download size={20} />, text: 'Use the "Scan" button in the dashboard to manually initiate a crypto audit', color: 'text-success' },
+                    { icon: <ArrowLeft size={20} />, text: 'View audit results by clicking the arrow next to each agent', color: 'text-scan-pqc' },
+                    { icon: <AlertCircle size={20} />, text: 'Agents are marked inactive if no heartbeat is received for 1 minute', color: 'text-destructive' },
+                    { icon: <RefreshCw size={20} />, text: 'Enable auto-refresh to automatically update the dashboard every 10 seconds', color: 'text-primary' },
+                ].map((item, idx) => (
+                    <div key={idx} className="flex items-start gap-4 p-4 bg-white dark:bg-slate-800 rounded-lg border border-primary/20 dark:border-primary/30">
+                        <div className={`flex-shrink-0 mt-0.5 ${item.color}`}>{item.icon}</div>
+                        <p className="text-slate-900 dark:text-slate-100">{item.text}</p>
+                    </div>
+                ))}
+            </div>
+        </div>
+    </UnifiedCard>
+);
+
+// ============================================================================ 
+// MAIN ONBOARDING COMPONENT
+// ============================================================================ 
+
+const OnboardingPage = () => {
+    // View State
+    const [view, setView] = useState<ViewType>('dashboard');
+
+    // Component State
+    const [tlsFile, setTlsFile] = useState<File | null>(null);
+    const [repoFile, setRepoFile] = useState<File | null>(null);
+    const [githubUrl, setGithubUrl] = useState('');
+    const [discoveredRepos, setDiscoveredRepos] = useState<Repository[]>([]);
+    const [jobs, setJobs] = useState<Job[]>([]);
+    const [selectedRepos, setSelectedRepos] = useState<Set<number>>(new Set());
+    const [repoBranches, setRepoBranches] = useState<Record<number, string>>({});
+
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
+    const [scanProgress, setScanProgress] = useState({
+        percentage: 0,
+        completed: 0,
+        failed: 0,
+        logs: [] as Array<{ timestamp: string; level: string; message: string }>
+    });
+    const [showProgress, setShowProgress] = useState(false);
+
+    // Loading and Error States
+    const [isDiscovering, setIsDiscovering] = useState(false);
+    const [githubError, setGithubError] = useState('');
+    const [linuxFiles, setLinuxFiles] = useState<FileInfo[]>([]);
+    const [windowsFiles, setWindowsFiles] = useState<FileInfo[]>([]);
+    const [systemLoading, setSystemLoading] = useState(false);
+
+    // Fetch jobs on mount and periodically
+    useEffect(() => {
+        if (view === 'dashboard') {
+            loadJobs();
+            const interval = setInterval(loadJobs, 30000);
+            return () => clearInterval(interval);
+        }
+        if (view === 'system') {
+            fetchAgentFiles();
+        }
+    }, [view]);
+
+    const fetchAgentFiles = async () => {
+        setSystemLoading(true);
+        try {
+            const [linuxResponse, windowsResponse] = await Promise.all([
+                fetch(`${AGENT_API_BASE}/api/v1/files/list/linux`),
+                fetch(`${AGENT_API_BASE}/api/v1/files/list/windows`)
+            ]);
+            const linuxData = await linuxResponse.json();
+            const windowsData = await windowsResponse.json();
+            
+            if (linuxData.success) setLinuxFiles(linuxData.files);
+            if (windowsData.success) setWindowsFiles(windowsData.files);
+        } catch (error) {
+            console.error('Error fetching files:', error);
+        } finally {
+            setSystemLoading(false);
+        }
+    };
+
+    const loadJobs = async () => {
+        try {
+            const response = await fetch(`${BATCH_API_BASE}/api/batch-jobs`);
+            if (!response.ok) throw new Error('API Error');
+            const data = await response.json();
+            setJobs(data.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()));
+        } catch (error) {
+            console.error('Error loading jobs:', error);
+            setJobs([]);
+        }
+    };
+    
+    const discoverGitHubRepos = async () => {
+        setIsDiscovering(true);
+        setGithubError('');
+        setDiscoveredRepos([]);
+        try {
+            const response = await fetch(`${BATCH_API_BASE}/api/github/discover`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ github_url: githubUrl })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || 'Failed to discover repositories.');
+            
+            // Ensure each repo has a unique id
+            const reposWithIds = data.repositories.map((repo, index) => ({
+                ...repo,
+                id: repo.id ?? index // Use repo.id if available, otherwise use index as fallback
+            }));
+            
+            console.log('📦 Discovered repos with IDs:', reposWithIds.map(r => ({ name: r.full_name, id: r.id })));
+            
+            setDiscoveredRepos(reposWithIds);
+            setSelectedRepos(new Set(reposWithIds.map(r => r.id)));
+        } catch (error: any) {
+            setGithubError(error.message || 'An unknown error occurred.');
+        } finally {
+            setIsDiscovering(false);
+        }
+    };
+
+    const connectSSE = (jobId: string) => {
+        const eventSource = new EventSource(`${BATCH_API_BASE}/api/batch-jobs/${jobId}/stream`);
+        
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'progress') {
+                setScanProgress(prev => ({
+                    percentage: Math.round(data.data.percentage || 0),
+                    completed: data.data.completed,
+                    failed: data.data.failed,
+                    logs: [...prev.logs, {
+                        timestamp: new Date().toLocaleTimeString(),
+                        level: data.data.status === 'completed' ? 'success' : 'error',
+                        message: data.data.error ? `${data.data.domain || data.data.repo_url} - Failed: ${data.data.error}` : `${data.data.domain || data.data.repo_url} - Completed`
+                    }]
+                }));
+            } else if (data.type === 'complete') {
+                setScanProgress(prev => ({ ...prev, logs: [...prev.logs, { timestamp: new Date().toLocaleTimeString(), level: 'success', message: `✅ Scan finished! Job ID: ${jobId.substring(0, 8)}...` }] }));
+                eventSource.close();
+                loadJobs();
+            }
+        };
+        
+        eventSource.onerror = () => {
+            setScanProgress(prev => ({ ...prev, logs: [...prev.logs, { timestamp: new Date().toLocaleTimeString(), level: 'error', message: 'Connection lost. Refresh jobs list for final status.' }] }));
+            eventSource.close();
+        };
+    };
+
+    const startScan = async (url: string, formData: FormData, type: 'tls' | 'repo') => {
+        try {
+            const response = await fetch(url, { method: 'POST', body: formData });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Scan request failed');
+            }
+            const result = await response.json();
+            setActiveJobId(result.job_id);
+            setShowProgress(true);
+            setScanProgress({
+                percentage: 0,
+                completed: 0,
+                failed: 0,
+                logs: [{ timestamp: new Date().toLocaleTimeString(), level: 'info', message: `Scan started with Job ID: ${result.job_id.substring(0, 8)}...` }]
+            });
+            connectSSE(result.job_id);
+            loadJobs();
+        } catch (error: any) {
+            alert(`Error starting ${type} scan: ${error.message}`);
+        }
+    };
+
+    const startTLSScan = () => {
+        if (!tlsFile) return;
+        const formData = new FormData();
+        formData.append('file', tlsFile);
+        startScan(`${BATCH_API_BASE}/api/tls-scan/batch`, formData, 'tls');
+    };
+        
+    const startRepoScan = () => {
+        if (!repoFile) return;
+        const formData = new FormData();
+        formData.append('file', repoFile);
+        startScan(`${BATCH_API_BASE}/api/repo-scan/batch`, formData, 'repo');
+    };
+        
+    const exportJob = (jobId: string) => {
+        window.open(`${BATCH_API_BASE}/api/batch-jobs/${jobId}/export`, '_blank');
+    };
+    
+    const deleteJob = async (jobId: string) => {
+        if (!confirm('Are you sure you want to delete this job?')) return;
+        await fetch(`${BATCH_API_BASE}/api/batch-jobs/${jobId}`, { method: 'DELETE' });
+        loadJobs();
+    };
+
+    const toggleRepoSelection = (repoId: number) => {
+        setSelectedRepos(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(repoId)) newSet.delete(repoId);
+            else newSet.add(repoId);
+            return newSet;
+        });
+    };
+    
+    const toggleSelectAll = () => {
+      setSelectedRepos(prev => {
+        if (prev.size === discoveredRepos.length) {
+          return new Set(); // unselect all
+        } else {
+          return new Set(discoveredRepos.map(r => r.id)); // select all
+        }
+      });
+    };
+    
+    const handleBranchChange = (repoId: number, branch: string) => {
+        setRepoBranches(prev => ({
+            ...prev,
+            [repoId]: branch,
+        }));
+    };
+    
+    const startGitHubRepoScan = async () => {
+        const selectedReposList = discoveredRepos.filter(repo => selectedRepos.has(repo.id));
+        if (selectedReposList.length === 0) return alert('Please select at least one repository to scan.');
+    
+        const reposToScan = selectedReposList.map(repo => ({
+            repo_url: repo.clone_url || `https://github.com/${repo.full_name}.git`,
+            branch_name: repoBranches[repo.id] || repo.default_branch
+        }));
+    
+        if (!confirm(`You are about to scan ${reposToScan.length} repositories. Proceed?`)) return;
+    
+        try {
+            const response = await fetch(`${BATCH_API_BASE}/api/repo-scan/batch-from-github`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repos: reposToScan })
+            });
+    
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Scan request failed');
+            }
+    
+            const result = await response.json();
+            alert(`✅ Scan started! Job ID: ${result.job_id.substring(0, 8)}...`);
+            setDiscoveredRepos([]);
+            loadJobs();
+        } catch (error: any) {
+            alert('Error starting scan: ' + error.message);
+        }
+    };
+
+    const resetScanState = () => {
+        setShowProgress(false);
+        setActiveJobId(null);
+        setScanProgress({ percentage: 0, completed: 0, failed: 0, logs: [] });
+        setTlsFile(null);
+        setRepoFile(null);
+    };
+
+    const navigateBack = () => {
+        setView('dashboard');
+        resetScanState();
+    }
+
+    const formatBytes = (bytes: number): string => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+    };
+
+    // ============================================================================ 
+    // RENDER LOGIC
+    // ============================================================================ 
+
+    return (
+        <AnimatePresence mode="wait">
+            {view === 'dashboard' && (
+                <motion.div
+                    key="dashboard"
+                    variants={cardVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className="p-4 md:p-8"
+                >
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-primary/10 rounded-lg">
+                                <UploadCloud className="h-8 w-8 text-primary" />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold">Onboarding</h1>
+                                <p className="text-muted-foreground">Get started by scanning your assets</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+                        <UnifiedEntryCard
+                            icon={UploadCloud}
+                            title="TLS/SSL Scanner"
+                            subtitle="Scan domains from an Excel file"
+                            description="Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations and ensure secure connections across your infrastructure."
+                            actionLabel="Start Scan"
+                            onClick={() => setView('tls')}
+                            variant="premium"
+                        />
+
+                        <UnifiedEntryCard
+                            icon={Github}
+                            title="Repository Scanner"
+                            subtitle="Scan repos from GitHub or Excel"
+                            description="Analyze Git repositories for cryptographic algorithm usage and security best practices. Discover vulnerabilities and ensure compliance with modern standards."
+                            actionLabel="Start Scan"
+                            onClick={() => setView('repo')}
+                            variant="premium"
+                        />
+
+                        <UnifiedEntryCard
+                            icon={Download}
+                            title="System Scanner"
+                            subtitle="Download and setup agents"
+                            description="Download agents for Linux and Windows to scan system cryptographic configurations. Deploy lightweight agents to monitor and audit your infrastructure in real-time."
+                            actionLabel="Download Agents"
+                            onClick={() => setView('system')}
+                            variant="premium"
+                        />
+                    </div>
+
+                    <UnifiedCard className="mt-12 max-w-6xl mx-auto">
+                        <div className="p-6">
+                            <div className="flex flex-row items-center justify-between">
+                                <h3 className="text-lg font-bold">Recent Batch Jobs</h3>
+                                <Button variant="outline" size="sm" onClick={loadJobs}><RefreshCw className="w-4 h-4 mr-2" /> Refresh</Button>
+                            </div>
+                        </div>
+                        <div className="p-6">
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="text-left text-muted-foreground">
+                                            <th className="p-3">Job ID</th>
+                                            <th className="p-3">Type</th>
+                                            <th className="p-3">Status</th>
+                                            <th className="p-3">Progress</th>
+                                            <th className="p-3">Started</th>
+                                            <th className="p-3">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {jobs.length > 0 ? jobs.map(job => (
+                                            <tr key={job.job_id} className="border-t">
+                                                <td className="p-3 font-mono text-sm">{job.job_id.substring(0, 8)}...</td>
+                                                <td className="p-3 uppercase">{job.scan_type}</td>
+                                                <td className="p-3"><span className={`px-2 py-1 text-xs font-bold rounded-full ${job.status === 'completed' ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'}`}>{job.status}</span></td>
+                                                <td className="p-3">{`${job.completed_items + job.failed_items} / ${job.total_items}`}</td>
+                                                <td className="p-3 text-sm">{new Date(job.started_at).toLocaleString()}</td>
+                                                <td className="p-3 space-x-2">
+                                                    {job.status.toLowerCase() === 'completed' && <Button size="sm" variant="outline" onClick={() => exportJob(job.job_id)}><Download className="w-4 h-4" /></Button>}
+                                                    <Button size="sm" variant="destructive" onClick={() => deleteJob(job.job_id)}><Trash2 className="w-4 h-4" /></Button>
+                                                </td>
+                                            </tr>
+                                        )) : (
+                                            <tr><td colSpan={6} className="text-center p-8 text-muted-foreground">No jobs found.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </UnifiedCard>
+                </motion.div>
+            )}
+
+            {[ 'tls', 'repo', 'system' ].includes(view) && (
+                 <motion.div
+                    key={view}
+                    variants={cardVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className="p-4 md:p-8 max-w-4xl mx-auto"
+                >
+                    <UnifiedBackButton onClick={navigateBack} label="Back" className="mb-6" />
+                    
+                    {/* TLS SCANNER VIEW */}
+                    {view === 'tls' && (
+                        <UnifiedCard padding="none">
+                            <div className="p-6">
+                                <h2 className={typography.h2}>TLS/SSL Scanner</h2>
+                                <p className="text-muted-foreground">Upload an Excel file with a 'domain' column.</p>
+                            </div>
+                            <div className="p-6">
+                                {!showProgress ? (
+                                    <>
+                                        <UnifiedFileInput
+                                          label="Upload Excel File"
+                                          accept=".xlsx,.xls"
+                                          helperText="Upload an Excel file with a 'domain' column."
+                                          selectedFile={tlsFile}
+                                          onFileSelect={setTlsFile}
+                                          onFileRemove={() => setTlsFile(null)}
+                                          dragAndDrop={true}
+                                        />
+                                        <Button className="w-full mt-6" disabled={!tlsFile} onClick={startTLSScan}>Start TLS Scan</Button>
+                                    </>
+                                ) : (
+                                    <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
+                                )}
+                            </div>
+                        </UnifiedCard>
+                    )}
+
+                    {/* REPO SCANNER VIEW */}
+                    {view === 'repo' && (
+                        <Tabs defaultValue="github">
+                            <TabsList className="grid w-full grid-cols-2">
+                                <TabsTrigger value="github">From GitHub</TabsTrigger>
+                                <TabsTrigger value="excel">From Excel</TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="github">
+                                <UnifiedCard padding="none">
+                                    <div className="p-6">
+                                        <h3 className="text-lg font-bold">Discover from GitHub</h3>
+                                        <p className="text-muted-foreground text-sm">
+                                            Enter a GitHub username or organization URL to find public repositories.
+                                        </p>
+                                    </div>
+
+                                    <div className="p-6">
+                                        {/* URL + Discover */}
+                                        <div className="flex gap-2">
+                                            <Input
+                                                placeholder="e.g., https://github.com/torvalds"
+                                                value={githubUrl}
+                                                onChange={(e) => setGithubUrl(e.target.value)}
+                                            />
+                                            <Button onClick={discoverGitHubRepos} disabled={isDiscovering}>
+                                                {isDiscovering ? <Loader2 className="w-4 h-4 animate-spin" /> : "Discover"}
+                                            </Button>
+                                        </div>
+
+                                        {/* Error */}
+                                        {githubError && (
+                                            <p className="text-destructive text-sm mt-2 flex items-center gap-2">
+                                                <XCircle className="w-4 h-4" />
+                                                {githubError}
+                                            </p>
+                                        )}
+
+                                        {/* Loading */}
+                                        {isDiscovering && (
+                                            <div className="text-center p-10">
+                                                <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
+                                            </div>
+                                        )}
+
+                                        {/* Repos list with branch selector */}
+                                        {!isDiscovering && discoveredRepos.length > 0 && (
+                                            <div className="mt-6">
+                                                <div className="mb-3">
+                                                    <h3 className="font-bold">{discoveredRepos.length} Repos Found</h3>
+                                                </div>
+
+                                                <div className="max-h-60 overflow-y-auto border rounded-md">
+                                                    <table className="w-full text-xs md:text-sm">
+                                                        <thead className="bg-muted sticky top-0 z-10">
+                                                            <tr className="text-left text-muted-foreground">
+                                                                <th className="p-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={discoveredRepos.length > 0 && selectedRepos.size === discoveredRepos.length}
+                                                                            onChange={toggleSelectAll}
+                                                                            className="cursor-pointer w-4 h-4 accent-primary"
+                                                                        />
+                                                                        <span className="font-semibold">Select All</span>
+                                                                    </div>
+                                                                </th>
+                                                                <th className="p-2">Repository</th>
+                                                                <th className="p-2">Branch</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {discoveredRepos.map((repo) => (
+                                                                <tr
+                                                                    key={repo.id}
+                                                                    className={`border-t last:border-b-0 transition-colors ${ 
+                                                                        selectedRepos.has(repo.id) 
+                                                                            ? 'bg-primary/5 dark:bg-primary/30 hover:bg-primary/10 dark:hover:bg-primary/50' 
+                                                                            : 'hover:bg-accent/50'
+                                                                    }`}
+                                                                >
+                                                                    <td className="p-2 align-middle">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={selectedRepos.has(repo.id)}
+                                                                            onChange={() => toggleRepoSelection(repo.id)}
+                                                                            className="cursor-pointer w-4 h-4 accent-primary"
+                                                                        />
+                                                                    </td>
+                                                                    <td className="p-2 align-middle font-medium truncate max-w-[220px]">
+                                                                        {repo.full_name.split('/')[1]}
+                                                                    </td>
+                                                                    <td className="p-2 align-middle">
+                                                                        <select
+                                                                            className="w-full min-w-[180px] max-w-full px-3 py-2 border border-border rounded-md text-sm font-medium bg-background focus:outline-none focus:ring-2 focus:ring-primary whitespace-nowrap"
+                                                                            value={repoBranches[repo.id] || repo.default_branch}
+                                                                            onChange={(e) => handleBranchChange(repo.id, e.target.value)}
+                                                                        >
+                                                                            {repo.branches && repo.branches.length > 0 ? (
+                                                                                repo.branches.map((branch) => (
+                                                                                    <option key={branch} value={branch}>
+                                                                                        {branch}
+                                                                                        {branch === repo.default_branch ? " (default)" : ""}
+                                                                                    </option>
+                                                                                ))
+                                                                            ) : (
+                                                                                <option value={repo.default_branch}>
+                                                                                    {repo.default_branch} (default)
+                                                                                </option>
+                                                                            )}
+                                                                        </select>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+
+                                                <div className="mt-4 p-4 bg-muted/50 rounded-lg">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">Total Repositories</p>
+                                                            <p className="text-2xl font-bold">{discoveredRepos.length}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">Selected</p>
+                                                            <p className="text-2xl font-bold text-primary">{selectedRepos.size}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">Not Selected</p>
+                                                            <p className="text-2xl font-bold text-muted-foreground">
+                                                                {discoveredRepos.length - selectedRepos.size}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <Button
+                                                    className="w-full mt-4"
+                                                    onClick={startGitHubRepoScan}
+                                                    disabled={selectedRepos.size === 0}
+                                                >
+                                                    Scan Selected ({selectedRepos.size})
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </UnifiedCard>
+                            </TabsContent>
+                            <TabsContent value="excel">
+                                <UnifiedCard padding="none">
+                                    <div className="p-6">
+                                        <h3 className="text-lg font-bold">Scan from Excel</h3>
+                                        <p className="text-muted-foreground text-sm">Upload an Excel file with 'repo_url' and 'branch_name' columns.</p>
+                                    </div>
+                                    <div className="p-6">
+                                        {!showProgress ? (
+                                            <>
+                                                <UnifiedFileInput
+                                                  label="Upload Excel File"
+                                                  accept=".xlsx,.xls"
+                                                  helperText="Upload an Excel file with 'repo_url' and 'branch_name' columns."
+                                                  selectedFile={repoFile}
+                                                  onFileSelect={setRepoFile}
+                                                  onFileRemove={() => setRepoFile(null)}
+                                                  dragAndDrop={true}
+                                                />
+                                                <Button className="w-full mt-6" disabled={!repoFile} onClick={startRepoScan}>Start Scan from Excel</Button>
+                                            </>
+                                        ) : (
+                                            <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
+                                        )}
+                                    </div>
+                                </UnifiedCard>
+                            </TabsContent>
+                        </Tabs>
+                    )}
+
+                    {/* SYSTEM SCANNER VIEW */}
+                    {view === 'system' && (
+                        <div className="space-y-8">
+                            <div className="max-w-6xl mx-auto">
+                                <header className="text-center mb-8">
+                                    <h1 className={typography.display}>System Agent Downloads</h1>
+                                    <p className="text-lg text-muted-foreground mt-2">
+                                        Download agents and follow setup instructions for your platform
+                                    </p>
+                                </header>
+
+                                <div className="space-y-10">
+                                    {/* Linux Section */}
+                                    <section>
+                                        <SystemDownloadCard
+                                            title="Linux Agent"
+                                            folderType="linux"
+                                            icon={<Terminal size={28} />}
+                                            description="For Ubuntu, Debian, RHEL, CentOS"
+                                            files={linuxFiles}
+                                            loading={systemLoading}
+                                            formatBytes={formatBytes}
+                                            apiUrl={AGENT_API_BASE}
+                                        />
+                                        <div className="mt-6">
+                                            <LinuxInstructionsCard />
+                                        </div>
+                                    </section>
+
+                                    {/* Windows Section */}
+                                    <section>
+                                        <SystemDownloadCard
+                                            title="Windows Agent"
+                                            folderType="windows"
+                                            icon={<Server size={28} />}
+                                            description="For Windows Server 2016+"
+                                            files={windowsFiles}
+                                            loading={systemLoading}
+                                            formatBytes={formatBytes}
+                                            apiUrl={AGENT_API_BASE}
+                                        />
+                                        <div className="mt-6">
+                                            <WindowsInstructionsCard />
+                                        </div>
+                                    </section>
+
+                                    {/* Configuration Section */}
+                                    <section>
+                                        <ConfigurationCard />
+                                    </section>
+
+                                    {/* Monitoring Section */}
+                                    <section>
+                                        <MonitoringCard />
+                                    </section>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
+};
+
+export default OnboardingPage;
 
 ============================
 FILE: C:\Users\ASUS\Videos\internship-projects\endtoend\Frontend\src\components\system-scan\scan-results.tsx
@@ -3172,7 +4086,7 @@ import { motion } from 'framer-motion';
 import {
   ChevronDown, ChevronUp, ExternalLink, X, FileText, Shield,
   Award, Target, Lock, CheckCircle, AlertTriangle,
-  ArrowLeft, Search, Activity, AlertCircle, Cpu, Database, Server
+  ArrowLeft, Search, Activity, AlertCircle, Cpu, Database, Server, Eye
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -3223,7 +4137,7 @@ interface AuditResult {
 
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { UnifiedBackButton } from "@/components/ui/unified";
+import { UnifiedResultCard, UnifiedMetricCard, UnifiedBackButton } from "@/components/ui/unified";
 
 // ... (other imports)
 
@@ -3293,96 +4207,53 @@ export const PQCResultCard: React.FC<{
     0
   );
   const successRate = totalScans > 0 ? ((quantumSafeCount / totalScans) * 100).toFixed(0) : 0;
+  
+  const securityLevel = pqcScore.security_level;
+
+  const securityLevelBadge = securityLevel ? (
+    <span className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold ${
+      securityLevel === 'high'
+        ? 'bg-success/10 text-success'
+        : securityLevel === 'medium'
+          ? 'bg-primary/10 text-primary'
+          : 'bg-destructive/10 text-destructive'
+    }`}>
+      {securityLevel.toUpperCase()} SECURITY
+    </span>
+  ) : null;
 
   return (
-    <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200 cursor-pointer" onClick={() => onViewDetails(result)}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-        <div>
-          <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            Audit Scan
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
-            {result.task_id}
-          </p>
+    <UnifiedResultCard
+      title="Audit Scan"
+      description={result.task_id}
+      status={hasScoring ? "success" : "error"}
+      statusLabel={hasScoring ? "Completed" : "Failed"}
+      icon={<FileText size={20} />}
+      metrics={hasScoring ? [
+        { label: "Total Scans", value: totalScans },
+        { label: "Overall Score", value: overallScore.toFixed(1) },
+        { label: "Grade", value: overallGrade }
+      ] : undefined}
+      actions={[
+        {
+          label: "View Details",
+          icon: <Eye size={16} />,
+          onClick: () => onViewDetails(result),
+          variant: "default"
+        }
+      ]}
+      onClick={() => onViewDetails(result)}
+    >
+      {!hasScoring && (
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <div className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <p className="text-sm font-semibold">PQC scoring not available</p>
+          </div>
         </div>
-        <div>
-          {hasScoring ? (
-            <span className="px-2 py-1 text-xs rounded-full bg-success/10 text-success font-semibold">
-              ● Completed
-            </span>
-          ) : (
-            <span className="px-2 py-1 text-xs rounded-full bg-destructive/10 text-destructive font-semibold">
-              ● Failed
-            </span>
-          )}
-        </div>
-      </CardHeader>
-
-      <CardContent className="px-6 pb-6">
-        <div className="space-y-4">
-          {/* Security Level Badge */}
-          {hasScoring && pqcScore.security_level && (
-            <div>
-              <span className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold ${
-                pqcScore.security_level === 'high'
-                  ? 'bg-success/10 text-success'
-                  : pqcScore.security_level === 'medium'
-                    ? 'bg-primary/10 text-primary'
-                    : 'bg-destructive/10 text-destructive'
-              }`}>
-                {pqcScore.security_level.toUpperCase()} SECURITY
-              </span>
-            </div>
-          )}
-
-          {/* Stats Grid */}
-          {hasScoring && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs text-muted-foreground mb-1">Total Scans</div>
-                <div className="text-2xl font-bold">{totalScans}</div>
-              </div>
-              <div className="bg-success/10 p-3 rounded-lg text-center">
-                <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
-                <div className="text-2xl font-bold text-success">{successRate}%</div>
-              </div>
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs text-muted-foreground mb-1">Overall Score</div>
-                <div className="text-2xl font-bold">{overallScore.toFixed(1)}</div>
-              </div>
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs text-muted-foreground mb-1">Grade</div>
-                <div className={`text-2xl font-bold ${getGradeColor(overallGrade)}`}>{overallGrade}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Quantum Ready Status */}
-          {hasScoring && (
-            <div className="flex gap-2">
-              <div className={`flex-1 px-3 py-2 rounded-md text-center text-xs font-semibold ${
-                pqcScore.quantum_ready
-                  ? 'bg-success/10 text-success'
-                  : 'bg-muted text-muted-foreground'
-              }`}>
-                {pqcScore.quantum_ready ? 'Quantum Ready' : 'Not Quantum Ready'}
-              </div>
-            </div>
-          )}
-
-          {/* No Scoring Available */}
-          {!hasScoring && (
-            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <p className="text-sm font-semibold">PQC scoring not available</p>
-              </div>
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+      )}
+      {hasScoring && securityLevelBadge}
+    </UnifiedResultCard>
   );
 };
 
@@ -3573,21 +4444,6 @@ export const PQCExpandedResultModal: React.FC<{
                     </CardContent>
                   </Card>
 
-                  {/* Success Rate */}
-                  <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                      <CardTitle className="text-sm font-semibold text-muted-foreground">Success Rate</CardTitle>
-                      <Activity className="h-5 w-5 text-success" />
-                    </CardHeader>
-                    <CardContent className="px-6 pb-6">
-                      <div className="text-3xl font-bold text-success mb-2">
-                        {individualScores.length > 0
-                          ? ((individualScores.filter((a: any) => a.quantum_safe).length / individualScores.length) * 100).toFixed(0)
-                          : 0}%
-                      </div>
-                      <p className="text-sm font-medium text-muted-foreground">Quantum safe rate</p>
-                    </CardContent>
-                  </Card>
 
                   {/* Successful */}
                   <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
@@ -4818,24 +5674,27 @@ export const AgentResultsPage: React.FC<{
       <div className="max-w-7xl mx-auto px-8 py-12">
         {/* Stats Cards - PHASE 3 */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 md:gap-8 mb-8">
-          {(Object.values(stats).length > 0) && [
-            { icon: Activity, label: 'Total Scans', value: stats.total, color: 'text-primary', bg: 'bg-primary/10 dark:bg-primary/20' },
-            { icon: CheckCircle, label: 'Success Rate', value: `${stats.successRate}%`, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-900/20' },
-            { icon: CheckCircle, label: 'Successful', value: stats.successful, color: 'text-success', bg: 'bg-success/10 dark:bg-success/20' },
-            { icon: AlertCircle, label: 'Failed', value: stats.failed, color: 'text-destructive', bg: 'bg-destructive/10 dark:bg-destructive/20' },
-          ].map((stat, idx) => (
-            <Card key={stat.label} className="shadow-sm hover:shadow-md transition-all duration-200">
-              <CardContent className="p-6 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
-                  <h3 className="text-2xl font-bold mt-2">{stat.value}</h3>
-                </div>
-                <div className={`p-3 rounded-full ${stat.bg}`}>
-                  <stat.icon className={`w-6 h-6 ${stat.color}`} />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          <UnifiedMetricCard
+            label="Total Scans"
+            value={stats.total}
+            description="All scan attempts"
+            icon={<Activity size={18} />}
+            iconColor="primary"
+          />
+          <UnifiedMetricCard
+            label="Successful"
+            value={stats.successful}
+            description="Completed successfully"
+            icon={<CheckCircle size={18} />}
+            iconColor="success"
+          />
+          <UnifiedMetricCard
+            label="Failed"
+            value={stats.failed}
+            description="Completed with errors"
+            icon={<AlertCircle size={18} />}
+            iconColor="destructive"
+          />
         </div>
 
         {/* Search Bar - PHASE 14 */}
@@ -4919,9 +5778,9 @@ FILE: C:\Users\ASUS\Videos\internship-projects\endtoend\Frontend\src\components\
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Search, X, Globe, Lock, Key, Hash, Shield, Zap, Check, CheckCircle, AlertTriangle, ShieldAlert, Info, Clock, ExternalLink } from "lucide-react";
+import { ArrowLeft, Search, X, Globe, Lock, Key, Hash, Shield, Zap, Check, CheckCircle, AlertTriangle, ShieldAlert, Info, Clock, ExternalLink, Eye } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { UnifiedBackButton } from "@/components/ui/unified";
+import { UnifiedResultCard, UnifiedBackButton } from "@/components/ui/unified";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
  
@@ -5558,79 +6417,43 @@ const DomainCard: React.FC<{
   const isHttpSkipped = result.scan_status === 'http_skipped';
   const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? 'N/A';
   const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? 'N/A';
+  const canView = true;
 
   return (
-    <Card 
-      className="cursor-pointer transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-2xl hover:-translate-y-1 shadow-md"
-      onClick={onExpand}
+    <UnifiedResultCard
+      title={result.url}
+      description={new Date(result.requested_at).toLocaleString()}
+      status={isSuccess ? "success" : isHttpSkipped ? "warning" : "error"}
+      statusLabel={
+        isSuccess ? "Completed" : 
+        isHttpSkipped ? "HTTP - Not scannable" : 
+        "Failed"
+      }
+      icon={<Shield size={20} />}
+      metrics={isSuccess ? [
+        { label: "PQC Score", value: typeof pqcScore === 'number' ? pqcScore.toFixed(1) : 'N/A' },
+        { label: "Grade", value: pqcGrade as string },
+        { label: "Status", value: "Ready" }
+      ] : undefined}
+      actions={[
+        {
+          label: "View Details",
+          icon: <Eye size={16} />,
+          onClick: () => onExpand(),
+          variant: "default",
+          disabled: !canView
+        }
+      ]}
+      onClick={canView ? onExpand : undefined}
     >
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-        <div className="flex-1 min-w-0">
-          <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-            <Shield className="h-4 w-4" />
-            Domain Scan
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-1 truncate">{result.url}</p>
+      {isHttpSkipped && (
+        <div className="bg-warning/10 p-3 rounded-lg text-xs">
+          <p className="font-medium text-warning">
+            Cannot analyze HTTP domains. HTTPS required.
+          </p>
         </div>
-        <div>
-          {isSuccess ? (
-            <span className="px-2 py-1 text-xs rounded-full bg-success/10 text-success font-semibold">
-              ● Completed
-            </span>
-          ) : isHttpSkipped ? (
-            <span className="px-2 py-1 text-xs rounded-full bg-amber-500/10 text-amber-600 font-semibold">
-              ● HTTP
-            </span>
-          ) : (
-            <span className="px-2 py-1 text-xs rounded-full bg-destructive/10 text-destructive font-semibold">
-              ● Failed
-            </span>
-          )}
-        </div>
-      </CardHeader>
-
-      <CardContent className="px-6 pb-6">
-        <div className="space-y-4">
-          <div>
-            <h5 className="font-semibold truncate text-base mb-1">{result.url}</h5>
-            <div className="text-xs text-muted-foreground">
-              {isSuccess ? (
-                <span className="text-success">Scan successful</span>
-              ) : isHttpSkipped ? (
-                <span className="text-amber-600">HTTP - Not scannable</span>
-              ) : (
-                <span className="text-destructive">Scan failed</span>
-              )}
-            </div>
-          </div>
-
-          {isSuccess && (
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">PQC Score</div>
-                <div className="font-bold text-sm">{typeof pqcScore === 'number' ? pqcScore.toFixed(1) : 'N/A'}</div>
-              </div>
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Grade</div>
-                <div className={`font-bold text-sm ${getGradeColor(pqcGrade as string)}`}>
-                  {pqcGrade}
-                </div>
-              </div>
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Status</div>
-                <div className="font-bold text-sm text-emerald-600">Ready</div>
-              </div>
-            </div>
-          )}
-          
-          {isHttpSkipped && (
-            <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg text-xs text-amber-800 dark:text-amber-200">
-              <p className="font-medium">Cannot analyze HTTP domains. We requires HTTPS.</p>
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+      )}
+    </UnifiedResultCard>
   );
 };
 
@@ -5810,7 +6633,7 @@ FILE: C:\Users\ASUS\Videos\internship-projects\endtoend\Frontend\src\components\
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle,ArrowLeft, ArrowRight, Globe, RefreshCw, Play, Edit, Save, RotateCcw, Plus, Check, X, Shield, Lock, Hash, Key, Zap, Trash2 } from "lucide-react";
+import { AlertTriangle,ArrowLeft, ArrowRight, Globe, RefreshCw, Play, Edit, Save, RotateCcw, Plus, Check, X, Shield, Lock, Hash, Key, Zap, Trash2, Activity, FileText, Eye } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 import {
@@ -7097,157 +7920,83 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
               </UnifiedCard>
             ) : (
               <div className="space-y-4">
-                {scanHistory.map((scan) => (
-                  <Card key={scan.request_id} className="transition-all hover:shadow-md">
-                    <CardContent className="p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3 flex-1">
-                          {getStatusIcon(scan.status)}
-                          <div>
-                            <h4 className="font-semibold">Request ID: {scan.request_id}</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {new Date(scan.requested_at).toLocaleString()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            scan.status === 'completed' ? 'bg-success/10 text-success dark:bg-success/20' :
-                            scan.status === 'failed' || scan.error_message ? 'bg-destructive/10 text-destructive dark:bg-destructive/20' :
-                            scan.status === 'processing' ? 'bg-primary/10 text-primary dark:bg-primary/20' :
-                            'bg-warning/10 text-warning dark:bg-warning/20'
-                          }`}>
-                            {scan.status.toUpperCase()}
-                          </span>
-                          
-                          {/* DELETE BUTTON FOR INDIVIDUAL BATCH */}
-                          <motion.button
-                            whileHover={{ scale: 1.1 }}
-                            whileTap={{ scale: 0.9 }}
-                            onClick={async () => {
-                              const batchId = scan.batch_id || scan.request_id;
-                              showMessage('Deleting scan batch...', 'info');
-                              
-                              const success = await deleteScanBatch(apiBaseUrl, batchId);
-                              
-                              if (success) {
-                                setScanHistory(prev => 
-                                  prev.filter(s => s.request_id !== scan.request_id)
-                                );
-                                showMessage('Scan batch deleted successfully', 'success');
-                              } else {
-                                showMessage('Failed to delete scan batch', 'error');
-                              }
-                            }}
-                            className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-                            title="Delete this scan batch"
-                            disabled={false}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </motion.button>
-                        </div>
-                      </div>
+                {scanHistory.map((scan) => {
+                  const executionTime = (() => {
+                    if (scan.detailedResults && scan.detailedResults.length > 0) {
+                      const totalTime = scan.detailedResults.reduce((sum, result) => {
+                        return sum + (result.execution_time_seconds || 0);
+                      }, 0);
+              
+                      return totalTime > 0 
+                        ? `${totalTime.toFixed(2)}s`
+                        : 'N/A';
+                    }
+              
+                    return scan.execution_time_seconds !== undefined
+                      ? `${scan.execution_time_seconds.toFixed(2)}s`
+                      : 'N/A';
+                  })();
 
-                      <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">URLs:</span> {scan.total_urls}
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Execution Time:</span>{' '}
-                          {(() => {
-                            // ✅ FIX: Calculate total execution time from detailed results if available
-                            if (scan.detailedResults && scan.detailedResults.length > 0) {
-                              const totalTime = scan.detailedResults.reduce((sum, result) => {
-                                return sum + (result.execution_time_seconds || 0);
-                              }, 0);
-                      
-                              return totalTime > 0 
-                                ? `${totalTime.toFixed(2)}s`
-                                : 'N/A';
-                            }
-                      
-                            // Fallback: use scan-level execution time if details not loaded
-                            return scan.execution_time_seconds !== undefined
-                              ? `${scan.execution_time_seconds.toFixed(2)}s`
-                              : 'N/A';
-                          })()}
-                        </div>
-                      </div>
+                  const deleteLogic = async () => {
+                    const batchId = scan.batch_id || scan.request_id;
+                    showMessage('Deleting scan batch...', 'info');
+                    
+                    const success = await deleteScanBatch(apiBaseUrl, batchId);
+                    
+                    if (success) {
+                      setScanHistory(prev => 
+                        prev.filter(s => s.request_id !== scan.request_id)
+                      );
+                      showMessage('Scan batch deleted successfully', 'success');
+                    } else {
+                      showMessage('Failed to delete scan batch', 'error');
+                    }
+                  };
 
-                      {/* BUTTONS SECTION */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Show progress button only for processing scans */}
-                        {scan.status === 'processing' && (
-                          <Button
-                            variant="outline"
-                            onClick={() => toggleProgress(scan.request_id)}
-                            size="sm"
-                          >
-                            {expandedProgress.has(scan.request_id) ? 'Hide' : 'View'} Progress
-                          </Button>
-                        )}
-
-                        {/* Show summary button when scan has completed and has domain progress data */}
-                        {(scan.status === 'completed' || scan.status === 'failed') && scan.finalDomainProgress && (
-                          <Button
-                            variant="outline"
-                            onClick={() => toggleSummary(scan.request_id)}
-                            size="sm"
-                          >
-                            {expandedSummary.has(scan.request_id) ? 'Hide' : 'View'} Summary
-                          </Button>
-                        )}
-
-                        {(scan.status === 'completed' || (scan.status === 'failed' && scan.detailedResults && scan.detailedResults.length > 0)) && (
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              handleLoadBatchDetails(scan.request_id);
-                            }}
-                            size="sm"
-                          >
-                            View Results
-                            {scan.detailedResults && (
-                              (() => {
-                                const uniqueDomains: {[key: string]: ScanResult} = {};
-                                scan.detailedResults.forEach(result => {
-                                  uniqueDomains[result.url] = result;
-                                });
-                                const uniqueResults = Object.values(uniqueDomains); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-                                
-                                // ✅ FIX: Handle both 'success' and 'completed' statuses with case insensitivity
-                                const successCount = uniqueResults.filter(r => {
-                                  const status = r.scan_status?.toLowerCase();
-                                  return status === 'completed' || status === 'success';
-                                }).length;
-                                
-                                const failCount = uniqueResults.filter(r => {
-                                  const status = r.scan_status?.toLowerCase();
-                                  return status !== 'completed' && status !== 'success';
-                                }).length;
-
-                                return (
-                                  <span className="ml-2 text-xs text-muted-foreground">
-                                    (
-                                      <span className="text-success">{successCount}</span>
-                                      /
-                                      <span className="text-destructive">{failCount}</span>
-                                    )
-                                  </span>
-                                );
-                              })()
-                            )}
-                          </Button>
-                        )}
-                      </div>
-
+                  return (
+                    <UnifiedResultCard
+                      key={scan.request_id}
+                      title={`Request ID: ${scan.request_id}`}
+                      description={new Date(scan.requested_at).toLocaleString()}
+                      status={
+                        scan.status === 'completed' ? 'success' :
+                        scan.status === 'failed' || scan.error_message ? 'error' :
+                        scan.status === 'processing' ? 'info' : 'warning'
+                      }
+                      statusLabel={scan.status.toUpperCase()}
+                      icon={getStatusIcon(scan.status)}
+                      metrics={[
+                        { label: "URLs", value: scan.total_urls },
+                        { label: "Execution Time", value: executionTime }
+                      ]}
+                      actions={[
+                        ...(scan.status === 'processing' ? [{
+                          label: expandedProgress.has(scan.request_id) ? 'Hide Progress' : 'View Progress',
+                          icon: <Activity size={16} />,
+                          onClick: () => toggleProgress(scan.request_id),
+                          variant: "outline" as const
+                        }] : []),
+                        ...((scan.status === 'completed' || (scan.status === 'failed' && scan.detailedResults && scan.detailedResults.length > 0)) ? [{
+                          label: "View Results",
+                          icon: <Eye size={16} />,
+                          onClick: () => handleLoadBatchDetails(scan.request_id),
+                          variant: "outline" as const
+                        }] : []),
+                        {
+                          label: "Delete",
+                          icon: <Trash2 size={16} />,
+                          onClick: deleteLogic,
+                          variant: "destructive" as const
+                        }
+                      ]}
+                    >
                       {/* PROGRESS DISPLAY */}
                       {scan.status === 'processing' && expandedProgress.has(scan.request_id) && (
                         <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mt-4 col-span-full"
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mt-4 col-span-full"
                         >
                           <ProgressDisplay 
                             scanProgress={scanProgress} 
@@ -7271,50 +8020,44 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
                             exit={{ opacity: 0, height: 0 }}
                             className="mt-4 col-span-full border-t pt-4"
                           >
-                            {/* Use ProgressDisplay with properly categorized data */}
                             <ProgressDisplay 
-                              scanProgress={{ 
+                                scanProgress={{ 
                                 total: scan.total_urls, 
                                 completed: scan.total_urls 
-                              }}
-                              domainProgress={(() => {
-                                // Build proper domain progress from detailedResults
+                                }}
+                                domainProgress={(() => {
                                 const progress: {[key: string]: DomainProgressInfo} = {};
                                 
                                 scan.detailedResults?.forEach((result) => {
-                                  const domain = result.url;
-                                  
-                                  // Determine correct status
-                                  const scanStatus = result.scan_status?.toLowerCase();
-                                  let status = 'failed';
-                                  if (scanStatus === 'success' || scanStatus === 'completed') {
+                                    const domain = result.url;
+                                    
+                                    const scanStatus = result.scan_status?.toLowerCase();
+                                    let status = 'failed';
+                                    if (scanStatus === 'success' || scanStatus === 'completed') {
                                     status = 'completed';
-                                  } else if (scanStatus === 'http_skipped') {
+                                    } else if (scanStatus === 'http_skipped') {
                                     status = 'http_skipped';
-                                  }
-                                  
-                                  progress[domain] = {
+                                    }
+                                    
+                                    progress[domain] = {
                                     status: status,
                                     duration: result.execution_time_seconds,
                                     error: result.error_message,
                                     round: (result as any).round || 1
-                                  };
+                                    };
                                 });
                                 
                                 return progress;
-                              })()}
-                              processingDomains={{}}
-                              roundHistory={[]}
-                              isActiveProgress={false}
+                                })()}
+                                processingDomains={{}}
+                                roundHistory={[]}
+                                isActiveProgress={false}
                             />
-
-                            {/* Rest of your summary display code... */}
                           </motion.div>
                         )}
-
-                    </CardContent>
-                  </Card>
-                ))}
+                    </UnifiedResultCard>
+                  )
+                })}
               </div>
             )}
           </motion.div>
@@ -8211,9 +8954,9 @@ FILE: C:\Users\ASUS\Videos\internship-projects\endtoend\Frontend\src\components\
 ============================
 
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2 } from 'lucide-react';
+import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, FileText, Hash, Zap } from 'lucide-react';
 import { Button } from "@/components/ui/button";
-import { UnifiedBackButton } from "@/components/ui/unified";
+import { UnifiedMetricCard, UnifiedBackButton } from "@/components/ui/unified";
 import { ScanDetail, Algorithm } from './types';
 
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
@@ -8744,52 +9487,39 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-10">
-          <div className="bg-card/80 border rounded-xl p-6 shadow-[0_3px_10px_rgba(0,0,0,0.05)] hover:shadow-[0_6px_18px_rgba(0,0,0,0.1)] transition-all duration-300 transform hover:-translate-y-0.5 backdrop-blur-sm">
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              Files Scanned
-            </div>
-            <div className="text-5xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mb-2 relative z-10">{data.total_files || 0}</div>
-          </div>
-          
-          <div className="bg-card/80 border rounded-xl p-6 shadow-[0_3px_10px_rgba(0,0,0,0.05)] hover:shadow-[0_6px_18px_rgba(0,0,0,0.1)] transition-all duration-300 transform hover:-translate-y-0.5 backdrop-blur-sm">
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              Total Algorithms
-            </div>
-            <div className="text-5xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mb-2 relative z-10">{Object.keys(algorithms).length}</div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-card to-blue-50/30 dark:from-card dark:to-blue-950/20 border-2 border-blue-500 dark:border-blue-600 rounded-xl p-6 shadow-[0_4px_12px_rgba(59,130,246,0.15)] hover:shadow-[0_8px_24px_rgba(59,130,246,0.25)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent pointer-events-none"></div>
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              🔮 True PQC
-            </div>
-            <div className="text-5xl font-bold text-primary tracking-tight mb-2 relative z-10">{truePQCCount}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 relative z-10">
-              Kyber, Dilithium, SPHINCS+
-            </div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-card to-emerald-50/30 dark:from-card dark:to-emerald-950/20 border-2 border-emerald-500 dark:border-emerald-600 rounded-xl p-6 shadow-[0_4px_12px_rgba(16,185,129,0.15)] hover:shadow-[0_8px_24px_rgba(16,185,129,0.25)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none"></div>
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              ✅ Quantum-Safe
-            </div>
-            <div className="text-5xl font-bold text-emerald-600 dark:text-emerald-400 tracking-tight mb-2 relative z-10">{quantumSafeCount}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 relative z-10">
-              AES-256, SHA-512, etc.
-            </div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-card to-rose-50/30 dark:from-card dark:to-rose-950/20 border-2 border-rose-500 dark:border-rose-600 rounded-xl p-6 shadow-[0_4px_12px_rgba(244,63,94,0.15)] hover:shadow-[0_8px_24px_rgba(244,63,94,0.25)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-rose-500/5 to-transparent pointer-events-none"></div>
-            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 relative z-10">
-              ⚠️ Vulnerable
-            </div>
-            <div className="text-5xl font-bold text-rose-600 dark:text-rose-400 tracking-tight mb-2 relative z-10">{quantumVulnerableCount}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 relative z-10">
-              RSA, ECDSA, weak sizes
-            </div>
-          </div> 
+          <UnifiedMetricCard
+            label="Files Scanned"
+            value={data.total_files || 0}
+            icon={<FileText size={18} />}
+            iconColor="muted"
+          />
+          <UnifiedMetricCard
+            label="Total Algorithms"
+            value={Object.keys(algorithms).length}
+            icon={<Hash size={18} />}
+            iconColor="muted"
+          />
+          <UnifiedMetricCard
+            label="True PQC"
+            value={truePQCCount}
+            description="Kyber, Dilithium, SPHINCS+"
+            icon={<Zap size={18} />}
+            iconColor="primary"
+          />
+          <UnifiedMetricCard
+            label="Quantum-Safe"
+            value={quantumSafeCount}
+            description="AES-256, SHA-512, etc."
+            icon={<Shield size={18} />}
+            iconColor="success"
+          />
+          <UnifiedMetricCard
+            label="Vulnerable"
+            value={quantumVulnerableCount}
+            description="RSA, ECDSA, weak sizes"
+            icon={<AlertTriangle size={18} />}
+            iconColor="destructive"
+          />
         </div>
 
         {quantumVulnerable.length > 0 && (
