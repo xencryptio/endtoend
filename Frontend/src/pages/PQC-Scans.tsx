@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { Button } from '@/components/ui/button';
 import { AgentResultsPage } from '@/components/system-scan/scan-results';
-import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard } from '@/components/ui/unified';
+import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard, UnifiedRefreshButton } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 
 
@@ -1575,13 +1575,11 @@ const CryptoAuditDashboard: React.FC = () => {
 
                 <UnifiedCard padding="default">
                   <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-                    <Button
+                    <UnifiedRefreshButton
                       onClick={refreshAll}
-                      disabled={loading}
-                    >
-                      <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                      {loading ? 'Refreshing...' : 'Refresh'}
-                    </Button>
+                      isRefreshing={loading}
+                      autoRefresh={autoRefresh}
+                    />
                     <Button
                       onClick={() => setAutoRefresh(!autoRefresh)}
                       variant={autoRefresh ? 'default' : 'secondary'}

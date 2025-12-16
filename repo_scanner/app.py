@@ -740,8 +740,8 @@ class Database:
                 'scan_status': 'cached',
                 'total_files': repo.total_files,
                 'total_algorithms': repo.total_algorithms,
-                'pqc_safe_count': repo.pqc_safe_count,
-                'pqc_vulnerable_count': repo.pqc_vulnerable_count,
+                'quantum_safe_count': repo.quantum_safe_count,
+                'quantum_vulnerable_count': repo.quantum_vulnerable_count,
                 'current_status': 'Using cached results',
                 'total_files_to_scan': repo.total_files_to_scan,
                 'cached': True

@@ -136,8 +136,8 @@ app.add_middleware(
 # Configuration
 AGENT_TIMEOUT_MINUTES = 5
 AGENT_FOLDERS = {
-    "linux": "Linux Agent",
-    "windows": "Windows Agent"
+    "linux": "agents/linux",
+    "windows": "agents/windows"
 }
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scanuser:scanpass@localhost:5432/system_scanner_db")
 
@@ -484,7 +484,10 @@ async def download_folder_as_zip(folder_type: str):
     folder_name = AGENT_FOLDERS[folder_type]
     folder_path = Path(folder_name)
     if not folder_path.exists() or not folder_path.is_dir():
-        raise HTTPException(status_code=404, detail="Folder not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Folder not found at {folder_path}"
+        )
     
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:

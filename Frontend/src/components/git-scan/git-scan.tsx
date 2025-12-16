@@ -4,7 +4,7 @@ import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle,
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UnifiedCard, UnifiedBadge, UnifiedBackButton } from '@/components/ui/unified';
+import { UnifiedCard, UnifiedBadge, UnifiedBackButton, UnifiedRefreshButton } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 import { Scan, StatusType } from './types';
 import ScanResultsDetail from './ScanResultsDetail';
@@ -503,15 +503,11 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack }) => {
               <div>
                 <h2 className="text-2xl font-bold text-foreground tracking-tight">Scan History</h2>
               </div>
-              <Button
+              <UnifiedRefreshButton
                 onClick={refreshHistory}
-                disabled={isRefreshing}
-                variant={autoRefresh ? 'default' : 'outline'}
-                className={autoRefresh ? 'bg-success hover:bg-success/90' : ''}
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing || autoRefresh ? 'animate-spin' : ''}`} />
-                {autoRefresh ? 'Auto-refreshing...' : 'Refresh'}
-              </Button>
+                isRefreshing={isRefreshing}
+                autoRefresh={autoRefresh}
+              />
             </div>
 
             <div className="overflow-x-auto rounded-xl border">

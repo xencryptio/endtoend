@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { UnifiedCard, UnifiedBackButton, UnifiedFileInput } from "@/components/ui/unified";
+import { CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { typography } from "@/lib/design-tokens";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, UploadCloud, FileText, Github, Loader2, Download, Trash2, RefreshCw, XCircle, Server, Terminal, BookOpen, CheckCircle, Activity, AlertCircle } from "lucide-react";
+import { ArrowLeft, UploadCloud, FileText, Github, Loader2, Download, Trash2, RefreshCw, XCircle, Server, Terminal, BookOpen, CheckCircle, Activity, AlertCircle, ArrowRight, Globe } from "lucide-react";
 
 // ============================================================================ 
 // INTERFACES & TYPES
@@ -128,9 +129,7 @@ const SystemDownloadCard: React.FC<{
         }
     };
 
-    const colorClass = folderType === 'linux'
-        ? 'bg-primary/5 dark:bg-primary/20 text-primary'
-        : 'bg-scan-pqc/5 dark:bg-scan-pqc/20 text-scan-pqc dark:text-scan-pqc/70';
+    const colorClass = 'bg-primary/5 dark:bg-primary/20 text-primary';
 
     return (
         <UnifiedCard className="shadow-lg p-6 sm:p-8">
@@ -206,7 +205,7 @@ const WindowsInstructionsCard = () => (
     <UnifiedCard padding="none">
         <div className="p-6">
             <div className="flex items-center gap-3">
-                <BookOpen className="text-scan-pqc" size={24} />
+                <BookOpen className="text-primary" size={24} />
                 <h3 className={typography.h3}>Windows Setup Instructions</h3>
             </div>
         </div>
@@ -238,7 +237,7 @@ const ConfigurationCard = () => (
     <UnifiedCard padding="none">
         <div className="p-6">
             <div className="flex items-center gap-3">
-                <BookOpen className="text-success" size={24} />
+                <BookOpen className="text-primary" size={24} />
                 <h3 className={typography.h3}>Configuration</h3>
             </div>
             <p className="text-muted-foreground text-sm">Both agents use the same configuration file format</p>
@@ -252,7 +251,7 @@ const ConfigurationCard = () => (
                         { label: 'poll_interval', desc: 'How often the agent checks for tasks', value: '30 seconds (default)', required: false },
                         { label: 'agent_id', desc: 'Unique identifier for the agent', value: 'Auto-generated on first run', required: false },
                     ].map((item, idx) => (
-                        <div key={idx} className="flex items-start gap-3 p-4 bg-white dark:bg-slate-800 rounded-lg border border-green-200 dark:border-green-800">
+                        <div key={idx} className="flex items-start gap-3 p-4 bg-white dark:bg-slate-800 rounded-lg border border-primary/20 dark:border-primary/30">
                             <CheckCircle size={20} className="flex-shrink-0 text-success mt-0.5" />
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -266,7 +265,7 @@ const ConfigurationCard = () => (
                     ))}
                 </div>
             </div>
-            <div className="p-5 rounded-lg bg-white dark:bg-slate-800 border border-green-200 dark:border-green-800">
+            <div className="p-5 rounded-lg bg-white dark:bg-slate-800 border border-primary/20 dark:border-primary/30">
                 <p className="text-sm font-semibold mb-3 text-success">Example config.json:</p>
                 <pre className="text-sm bg-slate-900 dark:bg-slate-950 text-emerald-400 font-mono p-4 rounded-lg overflow-x-auto">{`{
   "server_url": "${AGENT_API_BASE}",
@@ -282,7 +281,7 @@ const MonitoringCard = () => (
     <UnifiedCard padding="none">
         <div className="p-6">
             <div className="flex items-center gap-3">
-                <Activity className="text-warning" size={24} />
+                <Activity className="text-primary" size={24} />
                 <h3 className={typography.h3}>Monitoring & Management</h3>
             </div>
             <p className="text-muted-foreground text-sm">Understanding agent behavior and dashboard features</p>
@@ -296,7 +295,7 @@ const MonitoringCard = () => (
                     { icon: <AlertCircle size={20} />, text: 'Agents are marked inactive if no heartbeat is received for 1 minute', color: 'text-destructive' },
                     { icon: <RefreshCw size={20} />, text: 'Enable auto-refresh to automatically update the dashboard every 10 seconds', color: 'text-primary' },
                 ].map((item, idx) => (
-                    <div key={idx} className="flex items-start gap-4 p-4 bg-white dark:bg-slate-800 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <div key={idx} className="flex items-start gap-4 p-4 bg-white dark:bg-slate-800 rounded-lg border border-primary/20 dark:border-primary/30">
                         <div className={`flex-shrink-0 mt-0.5 ${item.color}`}>{item.icon}</div>
                         <p className="text-slate-900 dark:text-slate-100">{item.text}</p>
                     </div>
@@ -595,56 +594,90 @@ const OnboardingPage = () => {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+                        {/* TLS/SSL Scanner Card */}
                         <UnifiedCard
                             variant="premium"
                             onClick={() => setView('tls')}
                             className="h-full flex flex-col justify-between cursor-pointer group"
                         >
-                            <div className="p-6">
-                                <div className="flex items-center gap-4">
-                                    <div className="p-3 bg-primary/10 rounded-lg">
+                            <CardHeader>
+                                <div className="flex items-center gap-4 mb-4">
+                                    <div className="p-3 bg-primary/10 rounded-xl">
                                         <UploadCloud className="h-8 w-8 text-primary" />
                                     </div>
                                     <div>
-                                        <h2 className={typography.h2}>TLS/SSL Scanner</h2>
-                                        <p className="text-muted-foreground">Scan domains from an Excel file.</p>
+                                        <CardTitle className="text-2xl">TLS/SSL Scanner</CardTitle>
+                                        <CardDescription className="text-base">Scan domains from an Excel file</CardDescription>
                                     </div>
                                 </div>
-                                <p className="text-muted-foreground mt-4">Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations.</p>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-muted-foreground">
+                                    Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations and ensure secure connections across your infrastructure.
+                                </p>
+                            </CardContent>
+                            <div className="p-6 pt-0">
+                                <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                                </Button>
                             </div>
                         </UnifiedCard>
+
+                        {/* Repository Scanner Card */}
                         <UnifiedCard
                             variant="premium"
                             onClick={() => setView('repo')}
                             className="h-full flex flex-col justify-between cursor-pointer group"
                         >
-                            <div className="p-6">
-                                <div className="flex items-center gap-4">
-                                    <div className="p-3 bg-scan-pqc/10 dark:bg-scan-pqc/30 rounded-lg"><Github className="h-8 w-8 text-scan-pqc" /></div>
+                            <CardHeader>
+                                <div className="flex items-center gap-4 mb-4">
+                                    <div className="p-3 bg-primary/10 rounded-xl">
+                                        <Github className="h-8 w-8 text-primary" />
+                                    </div>
                                     <div>
-                                        <h2 className={typography.h2}>Repository Scanner</h2>
-                                        <p className="text-muted-foreground">Scan repos from GitHub or Excel.</p>
+                                        <CardTitle className="text-2xl">Repository Scanner</CardTitle>
+                                        <CardDescription className="text-base">Scan repos from GitHub or Excel</CardDescription>
                                     </div>
                                 </div>
-                                <p className="text-muted-foreground mt-4">Analyze Git repositories for cryptographic algorithm usage and security best practices.</p>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-muted-foreground">
+                                    Analyze Git repositories for cryptographic algorithm usage and security best practices. Discover vulnerabilities and ensure compliance with modern standards.
+                                </p>
+                            </CardContent>
+                            <div className="p-6 pt-0">
+                                <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                                    Start Scan <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                                </Button>
                             </div>
                         </UnifiedCard>
+
+                        {/* System Scanner Card */}
                         <UnifiedCard
                             variant="premium"
                             onClick={() => setView('system')}
                             className="h-full flex flex-col justify-between cursor-pointer group"
                         >
-                            <div className="p-6">
-                                <div className="flex items-center gap-4">
-                                    <div className="p-3 bg-success/10 dark:bg-success/30 rounded-lg">
-                                        <Download className="h-8 w-8 text-success" />
+                            <CardHeader>
+                                <div className="flex items-center gap-4 mb-4">
+                                    <div className="p-3 bg-primary/10 rounded-xl">
+                                        <Download className="h-8 w-8 text-primary" />
                                     </div>
                                     <div>
-                                        <h2 className={typography.h2}>System Scanner</h2>
-                                        <p className="text-muted-foreground">Download and setup agents.</p>
+                                        <CardTitle className="text-2xl">System Scanner</CardTitle>
+                                        <CardDescription className="text-base">Download and setup agents</CardDescription>
                                     </div>
                                 </div>
-                                <p className="text-muted-foreground mt-4">Download agents for Linux and Windows to scan system cryptographic configurations.</p>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-muted-foreground">
+                                    Download agents for Linux and Windows to scan system cryptographic configurations. Deploy lightweight agents to monitor and audit your infrastructure in real-time.
+                                </p>
+                            </CardContent>
+                            <div className="p-6 pt-0">
+                                <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                                    Download Agents <ArrowRight className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                                </Button>
                             </div>
                         </UnifiedCard>
                     </div>

@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import {
   Sidebar,
   SidebarContent,
@@ -137,6 +137,10 @@ export function AppSidebar({
         side="left"
         className="w-72 p-0 border-0 shadow-none lg:hidden" // Hide on large screens
       >
+        <SheetTitle className="sr-only">Main Navigation</SheetTitle>
+        <SheetDescription className="sr-only">
+          Mobile navigation menu for the application
+        </SheetDescription>
         <SidebarHeader className="border-b border-border px-5 py-5">
           <span className="text-base font-medium text-foreground">Menu</span>
         </SidebarHeader>
