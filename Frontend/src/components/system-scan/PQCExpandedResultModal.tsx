@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import {
   ChevronDown, ChevronUp, ExternalLink, X, FileText, Shield,
   Award, Target, Lock, CheckCircle, AlertTriangle,
-  ArrowLeft, Search, Activity, AlertCircle, Cpu, Database, Server, Eye
+  ArrowLeft, Search, Activity, AlertCircle, Cpu, Database, Server, Eye, Key, Hash, Zap, Globe
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
+import { Input } from "@/components/ui/input";
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -56,6 +57,22 @@ const formatDate = (dateStr: string) => {
       return dateStr;
     }
   };
+
+  const getSectionIcon = (section: string) => {
+    const icons: Record<string, React.ReactNode> = {
+      "Symmetric Algorithms": <Lock className="w-5 h-5" />,
+      "Asymmetric Algorithms": <Key className="w-5 h-5" />,
+      "Hash Functions": <Hash className="w-5 h-5" />,
+      "MACs & KDFs": <Shield className="w-5 h-5" />,
+      "Post-Quantum Cryptography": <Zap className="w-5 h-5" />,
+      "kex": <Key className="w-5 h-5" />,
+      "signature": <Shield className="w-5 h-5" />,
+      "symmetric": <Lock className="w-5 h-5" />,
+      "certificate": <Shield className="w-5 h-5" />,
+      "protocol": <Globe className="w-5 h-5" />
+    };
+    return icons[section] || <Shield className="w-5 h-5" />;
+  };
   
 
 // ============================================================================
@@ -67,6 +84,7 @@ export const PQCExpandedResultModal: React.FC<{
   onClose: () => void;
 }> = ({ result, onClose }) => {
   const [activeTab, setActiveTab] = useState('overview');
+  const [algorithmSearch, setAlgorithmSearch] = useState('');
   const auditData = result.audit_results || {};
 
   // ✅ Add OS detection helper
@@ -90,6 +108,10 @@ export const PQCExpandedResultModal: React.FC<{
   const securityFeatures = pqcScore.security_features || {};
   const complianceStatus = pqcScore.compliance_status || {};
   const individualScores = pqcScore.individual_scores || [];
+
+  const filteredAlgorithmScores = individualScores.filter((algo: any) =>
+    algorithmSearch ? algo.algorithm.toLowerCase().includes(algorithmSearch.toLowerCase()) : true
+  );
 
   // ✅ Use conditional data extraction
   let systemContext: any, opensslCrypto: any, sshCrypto: any, certificates: any, hardwareCrypto: any, systemSecurity: any, cryptoApiInfo: any, schannelInfo: any;
@@ -133,7 +155,7 @@ export const PQCExpandedResultModal: React.FC<{
     rounded-xl 
     shadow-2xl
     border-2 border-border
-    max-w-7xl w-full max-h-[90vh] 
+    max-w-7xl w-full h-[90vh]
     overflow-hidden flex flex-col
   "
       >
@@ -153,27 +175,60 @@ export const PQCExpandedResultModal: React.FC<{
         </CardHeader>
 
         {/* Overall Score Section - Simplified */}
-        <div className="px-6 py-6 border-b bg-muted/50">
-          <div className="grid grid-cols-4 gap-6">
-            {[
-              { label: 'Overall Score', value: pqcScore.overall_score?.toFixed(1) || 'N/A', size: 'text-4xl' },
-              { label: 'Grade', value: pqcScore.overall_grade || 'N/A', size: 'text-4xl' },
-              { label: 'Quantum Ready', value: pqcScore.quantum_ready ? '✓' : '✗', size: 'text-4xl' },
-              { label: 'Security Level', value: pqcScore.security_level || 'N/A', size: 'text-xl', isBadge: true }
-            ].map(stat => (
-              <div key={stat.label} className="text-center">
-                <div className={`${stat.size} font-bold mb-1 tracking-tight ${stat.isBadge ? 'bg-primary/10 text-primary py-1 px-3 rounded-full inline-block' : ''}`}>{stat.value}</div>
-                <div className="text-xs uppercase tracking-wider font-medium text-muted-foreground">{stat.label}</div>
+        <div className="px-8 py-6 border-b bg-muted/30">
+          <div className="grid grid-cols-3 gap-8 max-w-2xl mx-auto">
+            {/* Overall Score */}
+            <div className="text-center">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                Overall Score
+              </p>
+              <div className="text-4xl font-bold tracking-tight">
+                {pqcScore.overall_score?.toFixed(1) || 'N/A'}
               </div>
-            ))}
+              <p className="text-xs text-muted-foreground mt-1">out of 100</p>
+            </div>
+
+            {/* Grade */}
+            <div className="text-center">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                Grade
+              </p>
+              <div className={`text-4xl font-bold tracking-tight ${getGradeColor(pqcScore.overall_grade || 'N/A')}`}>
+                {pqcScore.overall_grade || 'N/A'}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{pqcScore.security_level || 'Unknown'} security</p>
+            </div>
+
+            {/* Quantum Ready Status */}
+            <div className="text-center">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                Quantum Ready
+              </p>
+              <div className="flex items-center justify-center gap-2 mt-1">
+                {pqcScore.quantum_ready ? (
+                  <>
+                    <div className="w-6 h-6 rounded-full bg-success/20 flex items-center justify-center">
+                      <CheckCircle className="w-4 h-4 text-success" />
+                    </div>
+                    <span className="text-lg font-semibold text-success">Yes</span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-6 h-6 rounded-full bg-destructive/20 flex items-center justify-center">
+                      <X className="w-4 h-4 text-destructive" />
+                    </div>
+                    <span className="text-lg font-semibold text-destructive">No</span>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Tabs */}
         <div className="flex-shrink-0 border-b border-border px-6">
           <div className="flex gap-4 overflow-x-auto">
-            {
-              (osType === 'windows'
+            {(osType === 'windows'
                 ? ['overview', 'components', 'algorithms', 'compliance', 'protocols', 'certificates', 'schannel', 'cryptoapi', 'system', 'raw']
                 : ['overview', 'components', 'algorithms', 'compliance', 'protocols', 'certificates', 'system', 'openssl', 'ssh', 'hardware', 'security', 'raw']
               ).map((tab) => {
@@ -193,26 +248,51 @@ export const PQCExpandedResultModal: React.FC<{
                   cryptoapi: <Cpu size={14} />,
                   schannel: <Shield size={14} />,
                 };
+                
+                // Get count for each tab
+                const getCounts = (tabName: string) => {
+                  switch(tabName) {
+                    case 'algorithms':
+                      return individualScores.length;
+                    case 'components':
+                      return Object.keys(components).length;
+                    case 'protocols':
+                      return protocolAnalysis.supported_versions?.length || 0;
+                    case 'certificates':
+                      if (osType === 'linux') return certificates.certificates?.length || 0;
+                      if (osType === 'windows') return Object.keys(certificates).length || 0;
+                      return 0;
+                    default:
+                      return null;
+                  }
+                };
+
+                const count = getCounts(tab);
 
                 return (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
                     className={`
-    px-6 py-4 
-    font-bold text-sm capitalize 
-    transition-all duration-300
-                    border-b-2
-    whitespace-nowrap 
-    flex items-center gap-3
-    ${activeTab === tab
+                      px-6 py-3 
+                      font-semibold text-sm capitalize 
+                      transition-all duration-200
+                      border-b-2
+                      whitespace-nowrap 
+                      flex items-center gap-2
+                      ${activeTab === tab
                         ? 'border-primary text-primary bg-primary/5'
-                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
                       }
-                  }`}
+                    `}
                   >
                     {tabIcons[tab]}
                     {tab}
+                    {count !== null && (
+                      <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-current/10">
+                        {count}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -220,7 +300,7 @@ export const PQCExpandedResultModal: React.FC<{
         </div>
 
         {/* Content */}
-        <div className="p-8 overflow-y-auto flex-1">
+        <div className="p-8 overflow-y-auto flex-1 min-h-0">
           {!hasData ? (
             <div className="p-8 text-center">
               <AlertCircle className="w-16 text-muted-foreground mb-4" />
@@ -232,87 +312,103 @@ export const PQCExpandedResultModal: React.FC<{
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                   {/* Total Scans */}
                   <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                      <CardTitle className="text-sm font-semibold text-muted-foreground">Total Scans</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-muted-foreground">Algorithms Analyzed</CardTitle>
                       <div className="p-3 rounded-full bg-primary/10">
                         <FileText className="h-5 w-5 text-primary" />
                       </div>
                     </CardHeader>
                     <CardContent className="px-6 pb-6">
-                      <div className="text-3xl font-bold mb-2">{individualScores.length}</div>
-                      <p className="text-sm font-medium text-muted-foreground">Algorithms analyzed</p>
+                      <div className="text-3xl font-bold mb-1">{individualScores.length}</div>
+                      <p className="text-xs text-muted-foreground">Cryptographic algorithms</p>
                     </CardContent>
                   </Card>
 
-
-                  {/* Successful */}
+                  {/* Quantum Safe */}
                   <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                      <CardTitle className="text-sm font-semibold text-muted-foreground">Successful</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-muted-foreground">Quantum Safe</CardTitle>
                       <div className="p-3 rounded-full bg-success/10">
                         <CheckCircle className="h-5 w-5 text-success" />
                       </div>
                     </CardHeader>
                     <CardContent className="px-6 pb-6">
-                      <div className="text-3xl font-bold text-success mb-2">
+                      <div className="text-3xl font-bold text-success mb-1">
                         {individualScores.filter((a: any) => a.quantum_safe).length}
                       </div>
-                      <p className="text-sm font-medium text-muted-foreground">Quantum ready</p>
+                      <p className="text-xs text-muted-foreground">
+                        {((individualScores.filter((a: any) => a.quantum_safe).length / individualScores.length) * 100).toFixed(0)}% of total
+                      </p>
                     </CardContent>
                   </Card>
 
-                  {/* Failed */}
+                  {/* Vulnerable */}
                   <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-                      <CardTitle className="text-sm font-semibold text-muted-foreground">Failed</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-muted-foreground">Vulnerable</CardTitle>
                       <div className="p-3 rounded-full bg-destructive/10">
                         <AlertTriangle className="h-5 w-5 text-destructive" />
                       </div>
                     </CardHeader>
                     <CardContent className="px-6 pb-6">
-                      <div className="text-3xl font-bold text-destructive mb-2">
+                      <div className="text-3xl font-bold text-destructive mb-1">
                         {individualScores.length - individualScores.filter((a: any) => a.quantum_safe).length}
                       </div>
-                      <p className="text-sm font-medium text-muted-foreground">Non-compliant</p>
+                      <p className="text-xs text-muted-foreground">
+                        Require attention
+                      </p>
                     </CardContent>
                   </Card>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-muted/30">
-                      <CardTitle className="text-xl font-bold tracking-tight">Component Scores</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3 p-6">
+                  <div className="border rounded-lg overflow-hidden">
+                    {/* Header */}
+                    <div className="px-6 py-4 bg-muted/30 border-b">
+                      <h3 className="text-base font-semibold">Component Analysis</h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {Object.keys(components).length} cryptographic components evaluated
+                      </p>
+                    </div>
+
+                    {/* Component List */}
+                    <div className="divide-y divide-border">
                       {Object.entries(components).map(([key, comp]: [string, any]) => (
-                        <div key={key}>
-                          <div className="flex justify-between text-sm mb-2">
-                            <span className="font-semibold uppercase tracking-wide">{key.replace('_', ' ')}</span>
-                            <span className={`font-bold ${getScoreColor(comp.weighted_average)}`}>
-                              {comp.weighted_average?.toFixed(1)} ({comp.grade})
-                            </span>
-                          </div>
-                          <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner">
-                            <div
-                              className={`
-                                h-full 
-                                ${getScoreBgColor(comp.weighted_average || 0)}
-                                rounded-full
-                                shadow-lg
-                                relative
-                                overflow-hidden
-                              `}
-                              style={{ width: `${comp.weighted_average || 0}%` }}
-                            >
-                              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                        <div key={key} className="px-6 py-4 hover:bg-muted/30 transition-colors">
+                          {/* Top Row: Name + Metadata + Grade */}
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              {getSectionIcon(key)}
+                              <div>
+                                <h4 className="font-semibold capitalize text-sm">{key.replace('_', ' ')}</h4>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {comp.pqc_percentage?.toFixed(0)}% PQC • {comp.quantum_safe_count} quantum-safe
+                                </p>
+                              </div>
                             </div>
+                            <div className="text-right">
+                              <div className={`text-2xl font-bold ${getGradeColor(comp.grade)}`}>
+                                {comp.grade}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {comp.weighted_average?.toFixed(1)}/100
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Progress Bar */}
+                          <div className="h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-500 ${getScoreBgColor(comp.weighted_average || 0)}`}
+                              style={{ width: `${comp.weighted_average || 0}%` }}
+                            />
                           </div>
                         </div>
                       ))}
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </div>
                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
                     <CardHeader className="bg-muted/30">
                       <CardTitle className="text-xl font-bold tracking-tight">Security Features</CardTitle>
@@ -340,62 +436,103 @@ export const PQCExpandedResultModal: React.FC<{
 
             {/* COMPONENTS TAB */}
             {activeTab === 'components' && (
-              <div className="space-y-6">
+              <div className="space-y-3">
                 {Object.entries(components).map(([key, comp]: [string, any]) => (
-                  <Card key={key} className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
-                      <CardTitle className="text-xl font-bold tracking-tight uppercase flex items-center justify-between">
-                        <span>{key.replace('_', ' ')}</span>
-                        <span className={`text-2xl ${getScoreColor(comp.weighted_average)}`}>{comp.weighted_average?.toFixed(1)} ({comp.grade})</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                        <div className="text-sm"><span className="text-muted-foreground">Average Score:</span><span className="ml-2 font-semibold">{comp.average_score?.toFixed(1)}</span></div>
-                        <div className="text-sm"><span className="text-muted-foreground">Weight:</span><span className="ml-2 font-semibold">{(comp.weight_in_final * 100).toFixed(0)}%</span></div>
-                        <div className="text-sm"><span className="text-muted-foreground">PQC %:</span><span className="ml-2 font-semibold">{comp.pqc_percentage?.toFixed(1)}%</span></div>
-                        <div className="text-sm"><span className="text-muted-foreground">Quantum Safe:</span><span className="ml-2 font-semibold">{comp.quantum_safe_count}</span></div>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Hybrid %:</span>
-                          <span className="ml-2 font-semibold">{comp.hybrid_percentage?.toFixed(1)}%</span>
-                        </div>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Deprecated:</span>
-                          <span className="ml-2 font-semibold text-destructive">{comp.deprecated_count}</span>
-                        </div>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">PFS Enabled:</span>
-                          <span className={`ml-2 font-semibold ${comp.pfs_enabled ? 'text-success' : 'text-muted-foreground'}`}>
-                            {comp.pfs_enabled ? '✓' : '✗'}
-                          </span>
+                  <details key={key} className="group border rounded-lg overflow-hidden">
+                    {/* Summary Header */}
+                    <summary className="flex items-center justify-between px-6 py-4 bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors">
+                      <div className="flex items-center gap-3 flex-1">
+                        {getSectionIcon(key)}
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-base capitalize">{key.replace('_', ' ')}</h4>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {comp.algorithms?.length || 0} algorithms • {comp.pqc_percentage?.toFixed(0)}% PQC
+                          </p>
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                        <div className="text-sm"><span className="text-muted-foreground">Best:</span><span className="ml-2 font-mono text-xs">{comp.best_algorithm}</span></div>
-                        <div className="text-sm"><span className="text-muted-foreground">Worst:</span><span className="ml-2 font-mono text-xs">{comp.worst_algorithm}</span></div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <div className={`text-2xl font-bold ${getGradeColor(comp.grade)}`}>
+                            {comp.grade}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {comp.weighted_average?.toFixed(1)}/100
+                          </div>
+                        </div>
+                        <ChevronDown className="h-5 w-5 text-muted-foreground group-open:rotate-180 transition-transform" />
                       </div>
-                      <div className="text-xs text-muted-foreground">{comp.algorithms?.length || 0} algorithms analyzed</div>
+                    </summary>
+
+                    {/* Expanded Content */}
+                    <div className="px-6 py-6 bg-card border-t">
+                      {/* Stats Grid */}
+                      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                            Average Score
+                          </dt>
+                          <dd className="text-lg font-bold">
+                            {comp.average_score?.toFixed(1)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                            Weight
+                          </dt>
+                          <dd className="text-lg font-bold">
+                            {(comp.weight_in_final * 100).toFixed(0)}%
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                            Hybrid Coverage
+                          </dt>
+                          <dd className="text-lg font-bold">
+                            {comp.hybrid_percentage?.toFixed(1)}%
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                            Deprecated
+                          </dt>
+                          <dd className="text-lg font-bold text-destructive">
+                            {comp.deprecated_count}
+                          </dd>
+                        </div>
+                      </dl>
+
+                      {/* Best/Worst */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 p-4 bg-muted/30 rounded-lg">
+                        <div>
+                          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Best Algorithm</span>
+                          <p className="font-mono text-sm mt-1">{comp.best_algorithm || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Worst Algorithm</span>
+                          <p className="font-mono text-sm mt-1">{comp.worst_algorithm || 'N/A'}</p>
+                        </div>
+                      </div>
+
+                      {/* Algorithm List (if needed) */}
                       {comp.algorithms && comp.algorithms.length > 0 && (
-                        <details className="mt-4">
-                          <summary className="cursor-pointer text-sm font-semibold text-primary hover:text-primary/90">
-                            View All {comp.algorithms.length} Algorithms in this Component
+                        <details className="mt-4 border-t pt-4">
+                          <summary className="cursor-pointer text-sm font-semibold text-primary hover:underline">
+                            View All {comp.algorithms.length} Algorithms
                           </summary>
-                          <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
+                          <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
                             {comp.algorithms.map((algo: any, idx: number) => (
-                              <div key={idx} className="p-2 bg-muted/50 rounded text-xs">
-                                <div className="flex items-center justify-between">
-                                  <span className="font-mono font-semibold">{algo.algorithm}</span>
-                                  <span className={`font-bold ${getScoreColor(algo.final_score)}`}>
-                                    {algo.final_score?.toFixed(1)}
-                                  </span>
-                                </div>
+                              <div key={idx} className="p-3 bg-muted/50 rounded-lg flex items-center justify-between hover:bg-muted/70 transition-colors">
+                                <span className="font-mono text-sm font-semibold">{algo.algorithm}</span>
+                                <span className={`text-sm font-bold ${getScoreColor(algo.final_score)}`}>
+                                  {algo.final_score?.toFixed(1)}
+                                </span>
                               </div>
                             ))}
                           </div>
                         </details>
                       )}
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </details>
                 ))}
               </div>
             )}
@@ -403,97 +540,152 @@ export const PQCExpandedResultModal: React.FC<{
             {/* ALGORITHMS TAB */}
             {activeTab === 'algorithms' && (
               <div className="space-y-4">
-                <div className="text-sm text-muted-foreground mb-4">Showing {individualScores.length} individual algorithm scores</div>
-                <motion.div>
-                  {individualScores.slice(0, 50).map((algo: any, idx: number) => (
-                    <motion.div
-                      key={idx}
-                      className="mb-4"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: idx * 0.05 }}
-                    >
-                      <Card key={idx} className="border-l-4 border-primary/20 shadow-sm hover:shadow-md transition-shadow">
-                        <CardContent className="p-4 bg-card">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex-1">
-                              <div className="font-mono text-sm font-bold text-foreground">{algo.algorithm}</div>
-                              <div className="text-xs text-muted-foreground capitalize">{algo.algorithm_type} • Position: {algo.position}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className={`text-2xl font-bold ${getScoreColor(algo.final_score)}`}>{algo.final_score?.toFixed(1)}</div>
-                              <div className={`text-sm font-bold ${getGradeColor(algo.grade)}`}>{algo.grade}</div>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3">
-                            <div><span className="text-muted-foreground">Base:</span><span className="ml-1 font-semibold">{algo.base_score}</span></div>
-                            <div><span className="text-muted-foreground">Key Size:</span><span className="ml-1 font-semibold">{algo.key_size} bits</span></div>
-                            <div><span className="text-muted-foreground">Curve:</span><span className="ml-1 font-semibold">{algo.curve_strength?.toFixed(1) || 'N/A'}</span></div>
-                            <div><span className="text-muted-foreground">Weighted:</span><span className="ml-1 font-semibold">{algo.weighted_score?.toFixed(1)}</span></div>
-                            <div>
-                              <span className="text-muted-foreground">Key Size Score:</span>
-                              <span className="ml-1 font-semibold">{algo.key_size_score}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Security Level:</span>
-                              <span className={`ml-1 font-semibold capitalize ${algo.security_level === 'high' ? 'text-success' :
-                                algo.security_level === 'medium' ? 'text-primary' :
-                                  algo.security_level === 'low' ? 'text-warning' :
-                                    'text-destructive'
-                                }`}>
-                                {algo.security_level}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex gap-2 mt-3">
-                            {algo.is_pqc && (
-                              <span className="px-3 py-1.5 bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-purple-500/30 border-2 border-purple-400/20">
-                                PQC
-                              </span>
-                            )}
-                            {algo.is_hybrid && <span className="px-3 py-1.5 bg-primary/10 text-primary text-xs rounded-full font-semibold">Hybrid</span>}
-                            {algo.quantum_safe && (
-                              <span className="px-3 py-1.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-green-500/30 border-2 border-green-400/20">
-                                Quantum Safe
-                              </span>
-                            )}
-                            {algo.deprecated && (
-                              <span className="px-3 py-1.5 bg-gradient-to-r from-red-600 to-rose-700 text-white text-xs font-bold uppercase tracking-wide rounded-full shadow-lg shadow-red-500/30 border-2 border-red-400/20 animate-pulse">
-                                Deprecated
-                              </span>
-                            )}
-                          </div>
-                          {algo.vulnerabilities && algo.vulnerabilities.length > 0 && (
-                            <div className="
-  mt-3 p-6 
-  bg-destructive/10
-  border-2 border-destructive/20
-  rounded-2xl
-  shadow-lg shadow-red-500/10
-">
-                              <p className="
-    text-base font-bold text-destructive 
-    mb-3 
-    flex items-center gap-2
-  ">
-                                <AlertTriangle size={20} />
-                                ⚠️ Vulnerabilities:
-                              </p>
-                              <div className="space-y-2">
-                                {algo.vulnerabilities.map((vuln: string, i: number) => (
-                                  <p key={i} className="text-sm text-foreground flex items-start gap-2">
-                                    <span className="text-destructive mt-0.5">•</span>
-                                    {vuln}
-                                  </p>
-                                ))}
+                  <div className="mb-4 relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search algorithms..."
+                      value={algorithmSearch}
+                      onChange={(e) => setAlgorithmSearch(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                {/* Summary */}
+                <div className="flex items-center justify-between px-1">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {Math.min(50, filteredAlgorithmScores.length)} of {filteredAlgorithmScores.length} algorithms
+                  </p>
+                  {filteredAlgorithmScores.length > 50 && (
+                    <Button variant="outline" size="sm">
+                      View All Algorithms
+                    </Button>
+                  )}
+                </div>
+
+                {/* Table */}
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-muted/30 border-b">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Algorithm
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Type
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Key Size
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Score
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Grade
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border bg-card">
+                      {filteredAlgorithmScores.slice(0, 50).map((algo: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-muted/50 transition-colors">
+                          {/* Algorithm Name */}
+                          <td className="px-4 py-3">
+                            <div className="font-mono text-sm font-semibold">{algo.algorithm}</div>
+                            {algo.vulnerabilities && algo.vulnerabilities.length > 0 && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <AlertTriangle className="h-3 w-3 text-destructive" />
+                                <span className="text-xs text-destructive">{algo.vulnerabilities.length} vulnerabilities</span>
                               </div>
+                            )}
+                          </td>
+
+                          {/* Type */}
+                          <td className="px-4 py-3">
+                            <span className="text-sm text-muted-foreground capitalize">
+                              {algo.algorithm_type}
+                            </span>
+                          </td>
+
+                          {/* Key Size */}
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-sm font-mono">
+                              {algo.key_size} bits
+                            </span>
+                          </td>
+
+                          {/* Score */}
+                          <td className="px-4 py-3 text-right">
+                            <span className={`text-lg font-bold ${getScoreColor(algo.final_score)}`}>
+                              {algo.final_score?.toFixed(1)}
+                            </span>
+                          </td>
+
+                          {/* Grade */}
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(algo.grade)} bg-current/10`}>
+                              {algo.grade}
+                            </span>
+                          </td>
+
+                          {/* Status Badges */}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {algo.is_pqc && (
+                                <span className="px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded">
+                                  PQC
+                                </span>
+                              )}
+                              {algo.is_hybrid && (
+                                <span className="px-2 py-0.5 text-xs bg-primary/10 text-primary rounded">
+                                  Hybrid
+                                </span>
+                              )}
+                              {algo.quantum_safe && (
+                                <CheckCircle className="h-4 w-4 text-success" />
+                              )}
+                              {algo.deprecated && (
+                                <span className="px-2 py-0.5 text-xs bg-destructive/10 text-destructive rounded">
+                                  Deprecated
+                                </span>
+                              )}
                             </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </motion.div>
-                  ))}
-                </motion.div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Expandable Details (Optional) */}
+                {filteredAlgorithmScores.slice(0, 50).some((algo: any) => algo.vulnerabilities?.length > 0) && (
+                  <details className="border rounded-lg overflow-hidden">
+                    <summary className="px-4 py-3 bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors text-sm font-semibold flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-destructive" />
+                        View Vulnerability Details
+                      </span>
+                      <ChevronDown className="h-4 w-4" />
+                    </summary>
+                    <div className="p-6 space-y-4 bg-card border-t">
+                      {filteredAlgorithmScores
+                        .filter((algo: any) => algo.vulnerabilities?.length > 0)
+                        .map((algo: any, idx: number) => (
+                          <div key={idx} className="p-4 bg-destructive/5 border-l-4 border-destructive rounded">
+                            <h5 className="font-mono text-sm font-semibold mb-2">{algo.algorithm}</h5>
+                            <ul className="space-y-1">
+                              {algo.vulnerabilities.map((vuln: string, i: number) => (
+                                <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                                  <span className="text-destructive mt-0.5">•</span>
+                                  {vuln}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                    </div>
+                  </details>
+                )}
               </div>
             )}
 
@@ -502,7 +694,7 @@ export const PQCExpandedResultModal: React.FC<{
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(complianceStatus).map(([standard, compliant]: [string, any]) => (
                   <Card key={standard} className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                    <CardHeader className="bg-muted/30 border-b">
                       <CardTitle>{standard}</CardTitle>
                     </CardHeader>
                     <CardContent className="p-6 flex items-center justify-between">
@@ -516,272 +708,245 @@ export const PQCExpandedResultModal: React.FC<{
             {/* PROTOCOLS TAB - ENHANCED */}
             {activeTab === 'protocols' && (
               <div className="space-y-4">
-                {/* ADD NEW: Protocol Version Scores */}
-                <Card>
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
-                    <CardTitle>Protocol Version Scores</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {Object.entries(protocolAnalysis.version_scores || {}).map(([version, score]: [string, any]) => (
-                        <div key={version}>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className="font-semibold">{version}</span>
-                            <span className={`font-bold ${getScoreColor(score)}`}>{score}</span>
-                          </div>
-                          <div className="bg-muted rounded-full overflow-hidden">
-                            <div
-                              className={`h-full ${getScoreBgColor(score)}`}
-                              style={{ width: `${score}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+                {/* NEW: Protocol Version Distribution */}
+                <div className="mb-6">
+                  <h3 className="text-base font-semibold mb-4">Protocol Version Analysis</h3>
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-muted/30 border-b">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            Version
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            Score
+                          </th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            Status
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border bg-card">
+                        {Object.entries(protocolAnalysis.version_scores || {}).map(([version, score]: [string, any]) => {
+                          const isDeprecated = protocolAnalysis.deprecated_versions?.includes(version);
+                          return (
+                            <tr key={version} className="hover:bg-muted/50 transition-colors">
+                              <td className="px-4 py-3">
+                                <span className="font-semibold">{version}</span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className={`text-lg font-bold ${getScoreColor(score)}`}>
+                                  {score}/100
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {isDeprecated ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-destructive/10 text-destructive">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Deprecated
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-success/10 text-success">
+                                    <CheckCircle className="h-3 w-3" />
+                                    Supported
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                {/* Supported Versions - SIMPLIFIED */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  {/* Supported Protocols */}
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 bg-muted/30 border-b">
+                      <h4 className="font-semibold text-sm">Supported Protocols</h4>
                     </div>
-                  </CardContent>
-                </Card>
-
-                {/* Existing supported/deprecated versions cards... */}
-                <Card>
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
-                    <CardTitle>Supported Protocols</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      {protocolAnalysis.supported_versions?.map((v: string) => (
-                        <div key={v} className={`px-3 py-2 rounded-full text-sm font-semibold border-2 shadow-sm ${
-                          protocolAnalysis.deprecated_versions?.includes(v)
-                            ? 'bg-destructive/10 text-destructive border-destructive/20'
-                            : 'bg-primary/10 text-primary border-primary/20'
-                          }`}>
-                          {v}
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {protocolAnalysis.deprecated_versions?.length > 0 && (
-                  <Card>
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
-                      <CardTitle className="text-destructive flex items-center gap-2">
-                        <AlertTriangle size={18} />
-                        Deprecated Protocols
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
+                    <div className="p-4">
                       <div className="flex flex-wrap gap-2">
-                        {protocolAnalysis.deprecated_versions.map((v: string) => (
-                          <div key={v} className="px-3 py-2 rounded-full text-sm font-semibold border-2 shadow-sm bg-destructive/10 text-destructive border-destructive/20">
+                        {protocolAnalysis.supported_versions?.map((v: string) => (
+                          <span
+                            key={v}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold border-2 ${
+                              protocolAnalysis.deprecated_versions?.includes(v)
+                                ? 'bg-destructive/10 text-destructive border-destructive/20'
+                                : 'bg-success/10 text-success border-success/20'
+                            }`}
+                          >
                             {v}
-                          </div>
+                          </span>
                         ))}
                       </div>
-                    </CardContent>
-                  </Card>
-                )}
+                    </div>
+                  </div>
 
-                {/* ADD NEW: Protocol Features Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card>
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
-                    <CardTitle className="text-base">Protocol Features</CardTitle>
-                  </CardHeader>
-                    <CardContent className="space-y-2">
-                      {[
-                        ['Compression', protocolAnalysis.compression_enabled],
-                        ['Secure Renegotiation', protocolAnalysis.renegotiation_secure],
-                        ['Heartbeat', protocolAnalysis.heartbeat_enabled],
-                        ['Downgrade Protection', protocolAnalysis.downgrade_protection]
-                      ].map(([label, value]) => (
-                        <div key={String(label)} className="flex justify-between text-sm">
-                          <span>{label}</span>
-                          <span className={value ? 'text-success' : 'text-destructive'}>
-                            {value ? '✓' : '✗'}
-                          </span>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
-                    <CardTitle className="text-base">Session Management</CardTitle>
-                  </CardHeader>
-                    <CardContent>
-                      <div className="text-center py-4 text-muted-foreground">
-                        <p className="text-sm text-slate-500 mb-2">Session Resumption</p>
-                        <p className="text-2xl font-bold capitalize">
-                          {protocolAnalysis.session_resumption || 'Unknown'}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {/* Protocol Features */}
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 bg-muted/30 border-b">
+                      <h4 className="font-semibold text-sm">Security Features</h4>
+                    </div>
+                    <div className="p-4">
+                      <dl className="space-y-2">
+                        {[
+                          ['Compression', protocolAnalysis.compression_enabled],
+                          ['Secure Renegotiation', protocolAnalysis.renegotiation_secure],
+                          ['Heartbeat', protocolAnalysis.heartbeat_enabled],
+                          ['Downgrade Protection', protocolAnalysis.downgrade_protection]
+                        ].map(([label, value]) => (
+                          <div key={String(label)} className="flex items-center justify-between py-1">
+                            <dt className="text-sm text-muted-foreground">{label}</dt>
+                            <dd>
+                              {value ? (
+                                <CheckCircle className="h-4 w-4 text-success" />
+                              ) : (
+                                <X className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
             {/* CERTIFICATES TAB - ENHANCED */}
             {activeTab === 'certificates' && (
-              <div className="space-y-6">
-                {/* Certificate Statistics */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-muted/30">
-                      <CardTitle>Certificate Statistics</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 p-6">
-                      <div className="flex justify-between text-sm p-3 bg-muted/30 rounded-lg">
-                        <span className="text-muted-foreground">Total Certificates</span>
-                        <span className="font-semibold">{certificateAnalysis.total_certificates || 0}</span>
-                      </div>
-                      <div className="flex justify-between text-sm p-3 bg-muted/30 rounded-lg">
-                        <span className="text-muted-foreground">Strong Signatures</span>
-                        <span className="font-semibold text-success">{certificateAnalysis.strong_signatures || 0}</span>
-                      </div>
-                      <div className="flex justify-between text-sm p-3 bg-muted/30 rounded-lg">
-                        <span className="text-muted-foreground">Weak Signatures</span>
-                        <span className="font-semibold text-destructive">{certificateAnalysis.weak_signatures || 0}</span>
-                      </div>
-                      <div className="flex justify-between text-sm p-3 bg-muted/30 rounded-lg">
-                        <span className="text-muted-foreground">Validity Period</span>
-                        <span className="font-semibold">{certificateAnalysis.validity_period_days || 0} days</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-muted/30">
-                      <CardTitle>Certificate Features</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 p-6">
-                      {[
-                        ['Certificate Transparency', certificateAnalysis.cert_transparency],
-                        ['OCSP Stapling', certificateAnalysis.ocsp_stapling],
-                        ['Key Pinning', certificateAnalysis.key_pinning],
-                        ['Chain Consistent', certificateAnalysis.chain_consistent]
-                      ].map(([label, value]) => (
-                        <div key={String(label)} className="flex justify-between text-sm p-3 bg-muted/30 rounded-lg">
-                          <span className="text-muted-foreground">{label}</span>
-                          <span className={value ? 'text-success' : 'text-destructive'}>{value ? '✓' : '✗'}</span>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Detailed Certificate List */}
-                {/* ✅ OS-SPECIFIC CERTIFICATE RENDERING */}
-                {osType === 'linux' && certificates.certificates?.map((cert: any, i: number) => (
-                  <div key={i} className="p-4 border border-border rounded-lg">
-                    <p className="font-mono text-sm font-semibold break-all mb-3">{cert.path}</p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                      <div><p className="font-semibold">{cert.crypto_information?.key_algorithm}</p></div>
-                      <div><p className="font-semibold">{cert.crypto_information?.key_size} bits</p></div>
-                      <div><p className="font-semibold text-xs">{cert.crypto_information?.signature_algorithm}</p></div>
-                      {/* ... characteristics ... */}
-                    </div>
-                  </div>
-                ))}
-
-                {osType === 'windows' && Object.entries(certificates).map(([storeName, store]: [string, any]) => (
-                  <Card key={storeName}>
-                    <CardHeader><CardTitle>{store.store_name || storeName}</CardTitle></CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-muted-foreground mb-3">
-                        {store.certificate_count || 0} certificates
-                      </p>
-                      <div className="space-y-2">
-                        {store.certificates?.slice(0, 5).map((cert: any, i: number) => (
-                          <div key={i} className="p-3 bg-muted/50 rounded">
-                            <div className="font-mono text-xs mb-2 truncate">{cert.subject}</div>
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div>Algo: {cert.signature_algorithm}</div>
-                              <div>Size: {cert.public_key_size} bits</div>
+              <div className="space-y-4">
+                {/* Certificate List - OS Specific */}
+                {certificates && (
+                  <div className="space-y-4">
+                    <h3 className="text-base font-semibold mb-3">Certificate Details</h3>
+                    
+                    {/* LINUX */}
+                    {osType === 'linux' && certificates.certificates && (
+                      <div className="space-y-3">
+                        {certificates.certificates.map((cert: any, i: number) => (
+                          <details key={i} className="group border rounded-lg overflow-hidden">
+                            <summary className="flex items-center justify-between px-4 py-3 bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors">
+                              <div className="flex-1 min-w-0">
+                                <p className="font-mono text-sm font-semibold truncate">{cert.path}</p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {cert.crypto_information?.key_algorithm} • {cert.crypto_information?.key_size} bits
+                                </p>
+                              </div>
+                              <ChevronDown className="h-4 w-4 text-muted-foreground group-open:rotate-180 transition-transform ml-4 flex-shrink-0" />
+                            </summary>
+                            <div className="px-4 py-4 bg-card border-t">
+                              <dl className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                                    Signature Algorithm
+                                  </dt>
+                                  <dd className="font-mono text-sm">
+                                    {cert.crypto_information?.signature_algorithm}
+                                  </dd>
+                                </div>
+                                {/* Add other cert details as needed */}
+                              </dl>
                             </div>
-                          </div>
+                          </details>
                         ))}
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                    )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card>
-                    <CardHeader><CardTitle className="text-base">Signature Algorithms</CardTitle></CardHeader>
-                    <CardContent>
-                      <div className="space-y-1">
-                        {certificateAnalysis.signature_algorithms?.map((algo: string, i: number) => (
-                          <div key={i} className="px-2 py-1 bg-accent/50 text-accent-foreground rounded text-xs font-mono">
-                            {algo}
+                    {/* WINDOWS */}
+                    {osType === 'windows' && Object.entries(certificates).map(([storeName, store]: [string, any]) => (
+                      <details key={storeName} className="group border rounded-lg overflow-hidden">
+                        <summary className="flex items-center justify-between px-4 py-3 bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors">
+                          <div>
+                            <h4 className="font-semibold text-sm">{store.store_name || storeName}</h4>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {store.certificate_count || 0} certificates
+                            </p>
                           </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader><CardTitle className="text-base">Hash Algorithms</CardTitle></CardHeader>
-                    <CardContent>
-                      <div className="space-y-1">
-                        {certificateAnalysis.hash_algorithms?.map((algo: string, i: number) => (
-                          <div key={i} className={`px-2 py-1 rounded text-xs font-mono ${algo === 'SHA1'
-                            ? 'bg-destructive/10 text-destructive'
-                            : 'bg-success/10 text-success'
-                            }`}>
-                            {algo}
+                          <ChevronDown className="h-4 w-4 text-muted-foreground group-open:rotate-180 transition-transform" />
+                        </summary>
+                        <div className="px-4 py-4 bg-card border-t">
+                          <div className="space-y-2">
+                            {store.certificates?.slice(0, 10).map((cert: any, i: number) => (
+                              <div key={i} className="p-3 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors">
+                                <div className="font-mono text-xs mb-2 truncate">{cert.subject}</div>
+                                <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                                  <div>Algorithm: {cert.signature_algorithm}</div>
+                                  <div>Key Size: {cert.public_key_size} bits</div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
+                          {store.certificates?.length > 10 && (
+                            <p className="text-xs text-muted-foreground mt-3">
+                              + {store.certificates.length - 10} more certificates
+                            </p>
+                          )}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {/* SYSTEM TAB */}
             {activeTab === 'system' && (
               <div className="space-y-6">
-                {/* OS Information Card */}
-                <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
-                    <CardTitle className="flex items-center gap-2">
-                      <Activity size={18} />
-                      System Information
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-sm text-muted-foreground">Operating System</span>
-                        <pre className="mt-1 p-2 bg-muted/50 rounded text-xs">
-                          {systemContext.os_info || 'N/A'}
-                        </pre>
-                      </div>
-                      <div>
-                        <span className="text-sm text-muted-foreground">Kernel Version</span>
-                        <p className="mt-1 font-mono text-sm">{systemContext.kernel_version || 'N/A'}</p>
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* OS Information */}
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 bg-muted/30 border-b">
+                      <h4 className="font-semibold text-sm flex items-center gap-2">
+                        <Server className="h-4 w-4" />
+                        Operating System
+                      </h4>
                     </div>
+                    <div className="p-4">
+                      <pre className="p-3 bg-muted/50 rounded text-xs overflow-x-auto">
+                        {systemContext.os_info || 'N/A'}
+                      </pre>
+                    </div>
+                  </div>
 
-                    {/* Crypto Modules */}
-                    <div>
-                      <span className="text-sm text-muted-foreground">Loaded Crypto Modules</span>
-                      {systemContext.crypto_modules?.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {systemContext.crypto_modules.map((mod: any, i: number) => (
-                            <span key={i} className="px-2 py-1 bg-primary/10 text-primary rounded text-xs font-mono">
-                              {mod}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-1 text-sm text-slate-400">No modules loaded</p>
-                      )}
+                  {/* Kernel Version */}
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 bg-muted/30 border-b">
+                      <h4 className="font-semibold text-sm flex items-center gap-2">
+                        <Cpu className="h-4 w-4" />
+                        Kernel Version
+                      </h4>
                     </div>
-                  </CardContent>
-                </Card>
+                    <div className="p-4">
+                      <p className="font-mono text-sm">{systemContext.kernel_version || 'N/A'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Crypto Modules */}
+                <div className="mt-6 border rounded-lg overflow-hidden">
+                  <div className="px-4 py-3 bg-muted/30 border-b">
+                    <h4 className="font-semibold text-sm">Loaded Crypto Modules</h4>
+                  </div>
+                  <div className="p-4">
+                    {systemContext.crypto_modules?.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {systemContext.crypto_modules.map((mod: any, i: number) => (
+                          <span key={i} className="px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-mono">
+                            {mod}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No modules loaded</p>
+                    )}
+                  </div>
+                </div>
 
                 {/* Metadata Card */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Scan Metadata</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm p-6">
@@ -814,7 +979,7 @@ export const PQCExpandedResultModal: React.FC<{
               <div className="space-y-6">
                 {/* Version Info */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>OpenSSL Version</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -832,7 +997,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Available Algorithms */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Available Hash Algorithms</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -861,7 +1026,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Cipher Distribution */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Cipher Suite Distribution ({opensslCrypto.cipher_information?.total_ciphers || 0} total)</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -898,7 +1063,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Protocol Support */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Protocol Support Details</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -929,7 +1094,7 @@ export const PQCExpandedResultModal: React.FC<{
               <div className="space-y-6">
                 {/* SSH Version */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>SSH Configuration</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -949,7 +1114,7 @@ export const PQCExpandedResultModal: React.FC<{
                 {/* Configured Ciphers */}
                 {sshCrypto.configuration?.configured_ciphers && (
                                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                                    <CardHeader className="bg-muted/30 border-b">
                                       <CardTitle>Configured Ciphers ({sshCrypto.configuration.configured_ciphers.count})</CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6">
@@ -975,7 +1140,7 @@ export const PQCExpandedResultModal: React.FC<{
                 {/* MACs */}
                 {sshCrypto.configuration?.configured_macs && (
                                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                                    <CardHeader className="bg-muted/30 border-b">
                                       <CardTitle>Message Authentication Codes ({sshCrypto.configuration.configured_macs.count})</CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6">
@@ -1001,7 +1166,7 @@ export const PQCExpandedResultModal: React.FC<{
                 {/* Key Exchange Algorithms */}
                 {sshCrypto.configuration?.configured_kex && (
                                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                                    <CardHeader className="bg-muted/30 border-b">
                                       <CardTitle>Key Exchange Algorithms ({sshCrypto.configuration.configured_kex.count})</CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6">
@@ -1018,7 +1183,7 @@ export const PQCExpandedResultModal: React.FC<{
                 {/* Host Key Algorithms */}
                 {sshCrypto.configuration?.host_key_algorithms && (
                                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                                    <CardHeader className="bg-muted/30 border-b">
                                       <CardTitle>Host Key Algorithms ({sshCrypto.configuration.host_key_algorithms.count})</CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6">
@@ -1038,7 +1203,7 @@ export const PQCExpandedResultModal: React.FC<{
               <div className="space-y-6">
                 {/* CPU Information */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>CPU Information</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -1050,7 +1215,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* CPU Crypto Features */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>CPU Cryptographic Features ({hardwareCrypto.crypto_feature_count || 0} features)</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -1078,7 +1243,7 @@ export const PQCExpandedResultModal: React.FC<{
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {/* TPM Devices */}
                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                    <CardHeader className="bg-muted/30 border-b">
                       <CardTitle className="text-base">TPM Devices</CardTitle>
                     </CardHeader>
                     <CardContent className="p-6">
@@ -1098,7 +1263,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                   {/* Random Devices */}
                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                    <CardHeader className="bg-muted/30 border-b">
                       <CardTitle className="text-base">Random Devices</CardTitle>
                     </CardHeader>
                     <CardContent className="p-6">
@@ -1118,7 +1283,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                   {/* Crypto Devices */}
                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                    <CardHeader className="bg-muted/30 border-b">
                       <CardTitle className="text-base">Crypto Devices</CardTitle>
                     </CardHeader>
                     <CardContent className="p-6">
@@ -1144,7 +1309,7 @@ export const PQCExpandedResultModal: React.FC<{
               <div className="space-y-6">
                 {/* CryptoAPI Providers */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>CryptoAPI Providers</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -1170,7 +1335,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* FIPS Mode Status */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Security Configuration</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-6">
@@ -1190,7 +1355,7 @@ export const PQCExpandedResultModal: React.FC<{
                 {/* Registered OID Algorithms */}
                 {cryptoApiInfo?.registered_oid_algorithms?.algorithms && (
                                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                                    <CardHeader className="bg-muted/30 border-b">
                                       <CardTitle>Registered OID Algorithms ({cryptoApiInfo.registered_oid_algorithms.count})</CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6">
@@ -1214,7 +1379,7 @@ export const PQCExpandedResultModal: React.FC<{
               <div className="space-y-6">
                 {/* Protocol Configurations */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Schannel Protocol Configuration</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -1248,7 +1413,7 @@ export const PQCExpandedResultModal: React.FC<{
                 {/* Cipher Suites */}
                 {schannelInfo?.cipher_suites?.cipher_details && (
                                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                                    <CardHeader className="bg-muted/30 border-b">
                                       <CardTitle>Windows Cipher Suites ({schannelInfo.cipher_suites.cipher_details.length})</CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6">
@@ -1270,7 +1435,7 @@ export const PQCExpandedResultModal: React.FC<{
                 {/* Cipher Suite Order (if cipher_details failed) */}
                 {schannelInfo?.cipher_suite_order?.order && (
                                   <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                                    <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                                    <CardHeader className="bg-muted/30 border-b">
                                       <CardTitle>Cipher Suite Order ({schannelInfo.cipher_suite_order.count})</CardTitle>
                                     </CardHeader>
                                     <CardContent className="p-6">
@@ -1290,7 +1455,7 @@ export const PQCExpandedResultModal: React.FC<{
               <div className="space-y-6">
                 {/* System Security Status */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>System Security Configuration</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 p-6">
@@ -1309,7 +1474,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Crypto Libraries */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Cryptographic Libraries</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -1329,7 +1494,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Kernel Crypto Algorithms */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Kernel Cryptographic Algorithms ({systemSecurity.kernel_crypto_algorithms?.length || 0})</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
@@ -1347,7 +1512,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Extended Protocol Analysis */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Advanced Protocol Features</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-6">
@@ -1373,7 +1538,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Extended Security Features */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle>Extended Security Features</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-6">
@@ -1414,7 +1579,7 @@ export const PQCExpandedResultModal: React.FC<{
 
                 {/* Critical Vulnerabilities */}
                 <Card className="shadow-md hover:shadow-lg transition-shadow duration-200">
-                  <CardHeader className="bg-gradient-to-r from-muted/50 to-muted/30 border-b">
+                  <CardHeader className="bg-muted/30 border-b">
                     <CardTitle className="flex items-center gap-2">
                       <AlertTriangle className="text-destructive" size={18} />
                       Critical Vulnerabilities
