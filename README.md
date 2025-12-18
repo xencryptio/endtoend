@@ -1,8 +1,34 @@
 # Microservices Security Scanner Architecture
 
-## Quick Start Commands
+## 1. INTRODUCTION & QUICK START
 
-### Local Development
+### 1.1 System Purpose & Overview
+
+This is a **microservices-based security scanning platform** that performs various security assessments including repository scanning, TLS/SSL analysis, and system vulnerability detection. The architecture follows modern cloud-native principles with containerization and service isolation.
+
+#### 1.1.1 Core Problems Solved
+
+- **Manual Audit Elimination**: Replaces time-consuming manual cryptographic audits with automated, scalable scanning
+- **Quantum Threat Assessment**: Identifies algorithms vulnerable to quantum computing attacks
+- **Compliance Tracking**: Provides quantitative metrics (PQC Readiness Score) for security posture
+- **Risk Prioritization**: Delivers detailed reports showing which assets needs immediate remediation
+
+#### 1.1.2 Primary Outputs
+
+1. **PQC Readiness Score**: Quantitative metric (0-100) representing quantum resistance
+2. **Detailed Scan Reports**: Algorithm-level findings with security ratings
+3. **Actionable Intelligence**: Specific remediation guidance for technical teams
+
+#### 1.1.3 System Actors
+
+- **End Users**: Security analysts, developers, administrators accessing via web interface
+- **Scanning Agents**: Automated clients deployed to target environments
+- **Backend Services**: Microservices handling orchestration, scanning, scoring, and storage
+- **External Systems**: Target websites, Git repositories, and infrastructure being audited
+
+### 1.2 Quick Start Commands
+
+#### 1.2.1 Local Development
 
 ```bash
 # Build all containers
@@ -33,7 +59,7 @@ docker compose down -v
 docker compose ps
 ```
 
-### Cloud Platform Deployment
+#### 1.2.2 Cloud Deployment
 
 ```bash
 # Make auto-config script executable
@@ -52,87 +78,77 @@ docker compose up
 docker compose up -d
 ```
 
-### Accessing Services
+#### 1.2.3 Service Access URLs
 
 | Service | URL | Purpose |
 |---------|-----|---------|
 | **Frontend** | http://localhost:3000 | Main application UI |
 | **Adminer** | http://localhost:8080 | Database management GUI |
-| **DB Service API** | http://localhost:8002 | Database API endpoints |
+| **DB Service API** | http://localhost:8001 | Database API endpoints |
 | **Repo Scanner API** | http://localhost:8003 | Repository scanning API |
-| **Crypto Scanner API** | http://localhost:8001 | TLS/SSL scanning API |
+| **Crypto Scanner API** | http://localhost:8000 | TLS/SSL scanning API |
+| **Onboarding API** | http://localhost:8008 | Batch onboarding API |
+| **Universal-Scoring API** | http://localhost:9500 | Scoring engine API |
 | **System Scanner API** | http://localhost:9000 | System vulnerability API |
 
----
-
-## Table of Contents
-1. [System Overview](#system-overview)
-2. [Technology Stack](#technology-stack)
-3. [Architecture Components](#architecture-components)
-4. [Service Details](#service-details)
-5. [Understanding Docker Environment](#understanding-docker-environment)
-6. [Container Networking](#container-networking)
-7. [Database Migration Strategy](#database-migration-strategy)
-8. [Database Migration Workflow](#database-migration-workflow)
-9. [Development Workflow](#development-workflow)
-10. [Debugging and Troubleshooting](#debugging-and-troubleshooting)
-11. [Data Model Considerations](#data-model-considerations)
-
----
-
-## System Overview
-
-This is a **microservices-based security scanning platform** that performs various security assessments including repository scanning, TLS/SSL analysis, and system vulnerability detection. The architecture follows modern cloud-native principles with containerization and service isolation.
-
-### Core Architecture Pattern
+### 1.3 Architecture at a Glance
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    User's Browser                           │
-│              ┌─────────────────────┐                        │
-│              │  React Frontend UI  │                        │
-│              └──────────┬──────────┘                        │
-└─────────────────────────┼────────────────────────────────────┘
-                          │ HTTP/REST API
-┌─────────────────────────┼────────────────────────────────────┐
-│              Docker Environment                              │
-│                         │                                    │
-│    ┌────────────────────┼─────────────────────────┐         │
-│    │     Service Layer                            │         │
-│    │                    ▼                         │         │
-│    │  ┌──────────────────────────────────────┐   │         │
-│    │  │   API Gateway / Load Balancer        │   │         │
-│    │  └────┬─────────┬──────────┬────────────┘   │         │
-│    │       │         │          │                 │         │
-│    │       ▼         ▼          ▼                 │         │
-│    │  ┌─────────┐ ┌──────┐ ┌──────────┐          │         │
-│    │  │Repo     │ │DB    │ │System    │          │         │
-│    │  │Scanner  │ │Service│ │Scanner   │          │         │
-│    │  │:8003    │ │:8002 │ │:9000     │          │         │
-│    │  └────┬────┘ └───┬──┘ └────┬─────┘          │         │
-│    │       │          │         │                 │         │
-│    │       │    ┌─────┴────┐    │                 │         │
-│    │       │    │ Crypto   │    │                 │         │
-│    │       │    │ Scanner  │    │                 │         │
-│    │       │    │ :8001    │    │                 │         │
-│    │       │    └─────┬────┘    │                 │         │
-│    └───────┼──────────┼─────────┼─────────────────┘         │
-│            │          │         │                           │
-│            ▼          ▼         ▼                           │
-│    ┌──────────────────────────────────┐                    │
-│    │   PostgreSQL Database :5432      │                    │
-│    │  ┌────────────────────────────┐  │                    │
-│    │  │ • repo_scanner_db          │  │                    │
-│    │  │ • scan_results_db          │  │                    │
-│    │  │ • system_scanner_db        │  │                    │
-│    │  └────────────────────────────┘  │                    │
-│    └──────────────────────────────────┘                    │
-│                                                             │
-│    External Agents (Linux/Windows) ──────► System Scanner  │
+│                       USER LAYER                             │
+│  ┌──────────────┐                    ┌──────────────┐       │
+│  │   Browser    │                    │  Scanning    │       │
+│  │  (React UI)  │                    │   Agents     │       │
+│  └──────────────┘                    └──────────────┘       │
+└─────────────────────────────────────────────────────────────┘
+         │                                        │
+         ▼                                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  ORCHESTRATION LAYER                         │
+│  ┌──────────────┐         ┌──────────────┐                  │
+│  │   Frontend   │         │  Onboarding  │                  │
+│  │   (React)    │         │  (Batch Hub) │                  │
+│  └──────────────┘         └──────────────┘                  │
+└─────────────────────────────────────────────────────────────┘
+         │                         │
+         └────────┬────────────────┘
+                  │
+    ┌─────────────┼─────┬─────┬─────┐
+    ▼             ▼     ▼     ▼     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  SCANNING LAYER (3 Scanners)                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │Crypto-Scanner│  │ Repo-Scanner │  │System-Scanner (`system-scan`)│      │
+│  │  (TLS/SSL)   │  │(Git Repos)   │  │(Infra+Agents)│      │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘      │
+│         │                  │                  │              │
+│         └──────────────────┼──────────────────┘              │
+│                            ▼                                 │
+│                   ┌──────────────┐                           │
+│                   │  Universal   │                           │
+│                   │   Scoring    │                           │
+│                   └──────┬───────┘                           │
+└──────────────────────────┼──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   DATA ACCESS LAYER                          │
+│                  ┌──────────────┐                            │
+│                  │  DB Service  │                            │
+│                  │   (API)      │                            │
+│                  └──────┬───────┘                            │
+└─────────────────────────┼──────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   PERSISTENCE LAYER                          │
+│                  ┌──────────────┐                            │
+│                  │  PostgreSQL  │                            │
+│                  └──────────────┘                            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Architecture Characteristics
+#### 1.3.1 Architectural Characteristics
 
 - **Pattern**: Microservices Architecture
 - **Orchestration**: Docker Compose
@@ -140,89 +156,140 @@ This is a **microservices-based security scanning platform** that performs vario
 - **Communication**: RESTful HTTP APIs
 - **Isolation**: Container-based service isolation
 
----
+## 2. TECHNOLOGY STACK
 
-## Technology Stack
+### Frontend Technologies
 
-### Frontend Stack
+| Component | Technology | Purpose | Why Chosen | Used By |
+|---|---|---|---|---|
+| **Framework** | React | UI framework | Component-based architecture, large ecosystem | `frontend` |
+| **Language** | TypeScript | Type-safe JavaScript | Type safety, better IDE support, fewer runtime errors | `frontend` |
+| **Build Tool** | Vite | Fast development server and bundler | Fast HMR, optimized builds, modern developer experience | `frontend` |
+| **Styling** | Tailwind CSS | Utility-first CSS framework | Utility-first approach, rapid development, consistency | `frontend` |
+| **UI Components** | shadcn/ui + Radix UI | Pre-built accessible components | (not specified) | `frontend` |
+| **State Management** | TanStack Query | Server state synchronization | (not specified) | `frontend` |
+| **Routing** | React Router | Client-side routing | (not specified) | `frontend` |
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Framework** | React | UI component library |
-| **Language** | TypeScript | Type-safe JavaScript |
-| **Build Tool** | Vite | Fast development server and bundler |
-| **Styling** | Tailwind CSS | Utility-first CSS framework |
-| **UI Components** | shadcn/ui + Radix UI | Pre-built accessible components |
-| **State Management** | TanStack Query (React Query) | Server state synchronization |
-| **Routing** | React Router | Client-side routing |
+### Backend Technologies
 
-### Backend Stack
+| Component | Technology | Purpose | Why Chosen | Used By |
+|---|---|---|---|---|
+| **Language** | Python 3 | Primary backend language | Rich ecosystem, for data processing and API development | All backend services |
+| **Framework** | FastAPI | Web framework for APIs | High performance, automatic validation, async support, OpenAPI docs | All backend services |
+| **Server** | Uvicorn | ASGI server | Production-grade server for FastAPI applications | All backend services |
+| **ORM** | SQLAlchemy | Database abstraction layer | Robust database abstraction, transaction management | `db-service`, `repo-scanner`, `system-scan` |
+| **Migrations** | Alembic | Database schema version control | Version control for database schema changes | `db-service`, `repo-scanner`, `system-scan` |
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Framework** | FastAPI | High-performance Python web framework |
-| **Language** | Python | Primary backend language |
-| **ORM** | SQLAlchemy | Database abstraction layer |
-| **Migrations** | Alembic | Database schema version control |
-| **Database** | PostgreSQL | Relational database |
-| **Containerization** | Docker | Service isolation and deployment |
+### Infrastructure & Tools
 
----
-
-## Architecture Components
-
-### 1. Frontend Service (`frontend/`)
-
-**Purpose**: Provides the user interface for interacting with all backend services.
-
-**Configuration**:
-- Internal Port: 3000
-- External Port: 3000
-- Access URL: `http://localhost:3000`
-
-**Dependencies**:
-- Calls `db-service` on port 8002
-- Calls `repo-scanner` on port 8003
-- Calls `system-scanner` on port 9000
-
-**Key Features**:
-- Real-time scan status updates
-- Dashboard for viewing scan results
-- Interactive repository and system configuration
+| Component | Technology | Purpose | Why Chosen | Used By |
+|---|---|---|---|---|
+| **Database** | PostgreSQL | Relational database | ACID compliance, JSON support, reliability | All backend services (directly or indirectly) |
+| **Containerization** | Docker | Service isolation and deployment | Consistent environments, easy deployment | All services |
+| **Orchestration** | Docker Compose | Multi-container orchestration | Simplified local development and deployment | All services |
 
 ---
 
-### 2. PostgreSQL Database (`postgres`)
+## 3. SYSTEM ARCHITECTURE
 
-**Purpose**: Centralized data persistence layer for all services.
+### 3.1 Architectural Pattern (Microservices)
+This platform uses a Microservices Architecture.
 
-**Configuration**:
-- Internal Port: 5432
-- External Port: 5432
-- Connection String Format: `postgresql://scanuser:scanpass@postgres:5432/{database_name}`
+### 3.2 System Boundaries
 
-**Database Schemas**:
+#### 3.2.1 Inside the System
+- Frontend React application
+- All backend microservices
+- Scanning agents (Windows/Linux)
+- PostgreSQL database
+- Docker container network
+
+#### 3.2.2 Outside the System
+- User's web browser
+- Target systems being scanned
+- External websites/servers for TLS scans
+- Git repositories (GitHub, GitLab, etc.)
+- Human users
+
+### 3.3 Complete Architecture Diagram
+Refer to [Section 1.3 Architecture at a Glance](#13-architecture-at-a-glance) for the complete system architecture diagram.
+
+### 3.4 Core Components Overview
+Brief introduction to each layer: User, Orchestration, Workers, Data Access, Persistence.
+
+## 4. MICROSERVICES DEEP DIVE
+
+### 4.1 Frontend Service
+
+#### Architecture Diagram
 
 ```
-PostgreSQL Instance (:5432)
-├── repo_scanner_db
-│   └── Tables for repository scan results
-├── scan_results_db
-│   └── Tables for TLS/SSL scan results
-└── system_scanner_db
-    └── Tables for system vulnerability data
+┌─────────────────────────────────────────────────────────────┐
+│                    FRONTEND SERVICE                          │
+│                                                              │
+│  Entry Point                                                 │
+│  ┌──────────────┐                                           │
+│  │  main.tsx    │──────▶ Renders root component             │
+│  └──────────────┘                                           │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌──────────────┐                                           │
+│  │   App.tsx    │──────▶ Root component, routing            │
+│  └──────────────┘                                           │
+│         │                                                    │
+│         ├─────────────┬─────────────┬─────────────┐         │
+│         ▼             ▼             ▼             ▼         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │   Pages  │  │Components│  │  Hooks   │  │  Utils   │   │
+│  │ (Routes) │  │ (UI Lib) │  │ (Logic)  │  │ (Helpers)│   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│                                                              │
+│  Communication                                               │
+│  └──────▶ REST API calls to backend services                │
+│  └──────▶ SSE streams for real-time updates                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Accessed By**:
-- `repo-scanner` → `repo_scanner_db`
-- `db-service` → `scan_results_db`
-- `system-scanner` → `system_scanner_db`
+#### Component Structure
 
----
+```
+src/
+├── main.tsx              # Application entry point
+├── App.tsx               # Root component with routing
+├── pages/                # Route-level components
+│   ├── Dashboard.tsx
+│   ├── ScanResults.tsx
+│   └── Settings.tsx
+├── components/           # Reusable UI components
+│   ├── ui/              # Basic UI elements
+│   ├── dashboard/       # Dashboard widgets
+│   ├── applications/    # App-specific components
+│   └── vulnerabilities/ # Vulnerability displays
+├── hooks/               # Custom React hooks
+│   └── use-mobile.tsx
+├── utils/               # Helper functions
+├── types/               # TypeScript definitions
+├── lib/                 # Third-party integrations
+└── image/               # Static assets
+```
 
-## Service Details
+#### Key Responsibilities
 
-### Service 1: DB Service (`db-service`)
+- **User Interface**: Renders all visual elements and handles user interactions
+- **State Management**: Manages application state using React hooks and Context
+- **API Communication**: Makes HTTP requests to backend services
+- **Real-time Updates**: Consumes SSE streams for live scan progress
+- **Data Visualization**: Displays charts, tables, and reports
+- **Form Handling**: Manages user input and validation
+
+#### Technology Justification
+
+- **React + TypeScript**: Type-safe component development with excellent tooling
+- **Vite**: Lightning-fast development with HMR
+- **Tailwind CSS**: Rapid UI development with consistent styling
+- **Component Architecture**: Highly maintainable and testable codebase
+
+### 4.2 DB Service (`db-service`)
 
 **Purpose**: Central API gateway for database operations, primarily for crypto/TLS scanning results.
 
@@ -232,8 +299,8 @@ Framework:     FastAPI
 Language:      Python
 ORM:           SQLAlchemy
 Migrations:    Alembic
-Internal Port: 8002
-External Port: 8002
+Internal Port: 8001
+External Port: 8001
 Database:      scan_results_db
 ```
 
@@ -252,48 +319,16 @@ Frontend ──HTTP─► DB Service ──SQLAlchemy─► PostgreSQL
               Crypto Scanner
 ```
 
+**Data Flow Example**: See **Section 6.2 — Save Scan Result (DB Service)** for a step-by-step diagram that illustrates how scan results are validated, persisted, and acknowledged.
+
 **Container Startup Sequence**:
 ```bash
-alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8002
+alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
 ---
 
-### Service 2: Repo Scanner (`repo-scanner`)
-
-**Purpose**: Scans code repositories for security vulnerabilities and coding standards violations.
-
-**Technical Specifications**:
-```
-Framework:     FastAPI
-Language:      Python
-ORM:           SQLAlchemy
-Migrations:    Alembic
-Internal Port: 8003
-External Port: 8003
-Database:      repo_scanner_db
-```
-
-**Scan Capabilities**:
-- Static code analysis
-- Dependency vulnerability detection
-- Secret detection (API keys, passwords)
-- Code quality metrics
-
-**Communication Pattern**:
-```
-Frontend ──HTTP─► Repo Scanner ──SQLAlchemy─► PostgreSQL
-                                              (repo_scanner_db)
-```
-
-**Container Startup Sequence**:
-```bash
-alembic upgrade head && uvicorn app:app --host 0.0.0.0 --port 8003
-```
-
----
-
-### Service 3: Crypto Scanner (`crypto-scanner`)
+### 4.3 Crypto-Scanner Service (`crypto-scanner`)
 
 **Purpose**: Performs TLS/SSL security assessments using the ssllabs-scan CLI tool.
 
@@ -302,8 +337,8 @@ alembic upgrade head && uvicorn app:app --host 0.0.0.0 --port 8003
 Framework:     FastAPI
 Language:      Python
 Tool:          ssllabs-scan (command-line)
-Internal Port: 8001
-External Port: 8001
+Internal Port: 8000
+External Port: 8000
 Database:      None (uses db-service API)
 ```
 
@@ -323,14 +358,14 @@ Crypto Scanner ──HTTP─► DB Service ──SQLAlchemy─► PostgreSQL
 
 **Container Startup Sequence**:
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 8001
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-### Service 4: System Scanner (`system-scanner`)
+### 4.4 Repo-Scanner Service (`repo-scanner`)
 
-**Purpose**: Central server that receives vulnerability data from distributed agents running on monitored systems.
+**Purpose**: Scans code repositories for security vulnerabilities and coding standards violations.
 
 **Technical Specifications**:
 ```
@@ -338,63 +373,439 @@ Framework:     FastAPI
 Language:      Python
 ORM:           SQLAlchemy
 Migrations:    Alembic
-Internal Port: 9000
-External Port: 9000
-Database:      system_scanner_db
+Internal Port: 8001
+External Port: 8003
+Database:      repo_scanner_db
 ```
 
-**Architecture Components**:
-
-1. **API Server** (`api_server.py`):
-   - Receives data from agents
-   - Stores system vulnerability information
-   - Provides query endpoints for frontend
-
-2. **Agents** (Linux/Windows):
-   - Lightweight Python scripts
-   - Deployed on target systems
-   - Collect system information:
-     - Installed packages
-     - Security patches
-     - Configuration vulnerabilities
-     - Running services
+**Scan Capabilities**:
+- Static code analysis
+- Dependency vulnerability detection
+- Secret detection (API keys, passwords)
+- Code quality metrics
 
 **Communication Pattern**:
 ```
-┌──────────────────┐
-│  Remote Systems  │
-│                  │
-│  ┌────────────┐  │
-│  │ Linux      │  │
-│  │ Agent      ├──┼──┐
-│  └────────────┘  │  │
-│                  │  │ HTTP
-│  ┌────────────┐  │  │ POST
-│  │ Windows    │  │  │
-│  │ Agent      ├──┼──┤
-│  └────────────┘  │  │
-└──────────────────┘  │
-                      ▼
-              ┌───────────────┐
-              │ System Scanner│
-              │ API (:9000)   │
-              └───────┬───────┘
-                      │ SQLAlchemy
-                      ▼
-              ┌───────────────┐
-              │  PostgreSQL   │
-              │ (system_      │
-              │  scanner_db)  │
-              └───────────────┘
+Frontend ──HTTP─► Repo Scanner ──SQLAlchemy─► PostgreSQL
+                                              (repo_scanner_db)
 ```
 
 **Container Startup Sequence**:
 ```bash
-/usr/local/bin/wait-for-db.sh db-service && \
-alembic upgrade head && \
-python api_server.py
+alembic upgrade head && uvicorn app:app --host 0.0.0.0 --port 8001
 ```
 
+---
+
+### 4.5 System-Scanner Service (`system-scan`) (Infrastructure Scanning) 
+
+#### Purpose
+Collects infrastructure and system-level security information using lightweight agents deployed on target systems (Windows/Linux servers).
+
+#### Architecture Diagram
+
+┌─────────────────────────────────────────────────────────────┐
+│              SYSTEM-SCANNER SERVICE (`system-scan`)                          │
+│                                                              │
+│  API Layer (FastAPI)                                         │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ /register_agent    - Agent registration              │   │
+│  │ /fetch_action      - Agent polls for tasks           │   │
+│  │ /receive_audit     - Agent submits results           │   │
+│  │ /health            - Health check                    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │   Agent Manager                        │                 │
+│  │   - Track registered agents            │                 │
+│  │   - Monitor agent status               │                 │
+│  │   - Assign scan tasks                  │                 │
+│  └────────────────────────────────────────┘                 │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │   Result Processor                     │                 │
+│  │   - Validate agent data                │                 │
+│  │   - Extract system info                │                 │
+│  │   - Send to Universal-Scoring          │                 │
+│  └────────────────────────────────────────┘                 │
+│         │                    │                               │
+│         ▼                    ▼                               │
+│  Universal-Scoring      DB Service                           │
+│     (Scoring)           (Storage)                            │
+└─────────────────────────────────────────────────────────────┘
+         ▲
+         │
+   ┌─────┴─────┐
+   │  Remote   │
+   │  Agents   │
+   │(Win/Linux)│
+   └───────────┘
+
+#### Key Responsibilities
+- **Agent Management:** Register and track deployed agents
+- **Task Distribution:** Send scan instructions to agents
+- **Data Collection:** Receive system audit results
+- **Result Processing:** Extract cryptographic info from system data
+- **Scoring Integration:** Send findings to Universal-Scoring
+
+#### Unique Characteristics
+- **Distributed Model:** Unlike other scanners, uses remote agents
+- **Pull-based:** Agents poll for tasks (firewall-friendly)
+- **System-level:** Scans OS packages, configs, running services
+
+
+
+### 4.6 Universal-Scoring Service
+
+#### Purpose & Responsibilities
+The Universal-Scoring Service is a stateless scoring engine that evaluates cryptographic algorithms and calculates Post-Quantum Cryptography (PQC) readiness scores. It receives algorithm data from all three scanner services and returns quantitative security assessments.
+
+#### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              UNIVERSAL-SCORING SERVICE                       │
+│                    (Business Logic Engine)                   │
+│                                                              │
+│  API Layer (FastAPI)                                         │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ /api/v1/score/agent-scan  - Score agent data        │   │
+│  │ /api/v1/score/tls-scan    - Score TLS data          │   │
+│  │ /api/v1/score/repository  - Score repo data         │   │
+│  │ /api/v1/score/algorithms  - List all algorithms     │   │
+│  │ /health                   - Health check            │   │
+│  └──────────────────────────────────────────────────────┘   │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │         UniversalPQCScorer Class                       │ │
+│  │  ┌──────────────────────────────────────────────────┐ │ │
+│  │  │  PQ_RESISTANCE_TABLE (In-Memory)                 │ │ │
+│  │  │  - Algorithm name → Security properties          │ │ │
+│  │  │  - Base score, PQC status, key size requirements │ │ │
+│  │  └──────────────────────────────────────────────────┘ │ │
+│  │                                                        │ │
+│  │  ┌──────────────────────────────────────────────────┐ │ │
+│  │  │  Scoring Logic (core/algorithms.py)              │ │ │
+│  │  │  1. Look up algorithm in resistance table        │ │ │
+│  │  │  2. Calculate base score                         │ │ │
+│  │  │  3. Apply key size penalties                     │ │ │
+│  │  │  4. Apply context modifiers (TLS curves, etc.)   │ │ │
+│  │  │  5. Return final_score (0-100)                   │ │ │
+│  │  └──────────────────────────────────────────────────┘ │ │
+│  │                                                        │ │
+│  │  ┌──────────────────────────────────────────────────┐ │ │
+│  │  │  Aggregation Logic                               │ │ │
+│  │  │  1. Group by component (kex, sig, sym, hash)     │ │ │
+│  │  │  2. Calculate component scores                   │ │ │
+│  │  │  3. Apply weights                                │ │ │
+│  │  │  4. Calculate overall_score                      │ │ │
+│  │  │  5. Determine quantum_ready status               │ │ │
+│  │  └──────────────────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────────────────┘ │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │  Response (JSON)                       │                 │
+│  │  - overall_score: 75.3                 │                 │
+│  │  - overall_grade: "B"                  │                 │
+│  │  - quantum_ready: false                │                 │
+│  │  - component_scores: {...}             │                 │
+│  │  - algorithm_details: [...]            │                 │
+│  └────────────────────────────────────────┘                 │
+│                                                              │
+│  NO EXTERNAL DEPENDENCIES - Fully Self-Contained            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Technical Specifications
+```
+Framework:     FastAPI
+Language:      Python
+Internal Port: 9500
+External Port: 9500
+Database:      None (stateless)
+Dependencies:  None (standalone service)
+```
+
+#### Scoring Algorithm Flow
+
+```
+Input: List of Cryptographic Algorithms
+
+For each algorithm:
+  ┌────────────────────────────────────────┐
+  │ 1. Algorithm Lookup                    │
+  │    - Search PQ_RESISTANCE_TABLE        │
+  │    - Get base properties               │
+  └────────────────────────────────────────┘
+                │
+                ▼
+  ┌────────────────────────────────────────┐
+  │ 2. Base Score Assignment               │
+  │    - Modern (PQC): 100                 │
+  │    - Modern: 90                        │
+  │    - Legacy: 50                        │
+  │    - Deprecated: 0                     │
+  └────────────────────────────────────────┘
+                │
+                ▼
+  ┌────────────────────────────────────────┐
+  │ 3. Key Size Evaluation                 │
+  │    - Check against minimum requirements│
+  │    - Apply penalties for weak keys     │
+  │    - RSA < 2048: -40 points            │
+  │    - ECC < 256: -30 points             │
+  └────────────────────────────────────────┘
+                │
+                ▼
+  ┌────────────────────────────────────────┐
+  │ 4. Context Modifiers                   │
+  │    - TLS curve strength                │
+  │    - Usage patterns                    │
+  │    - Implementation details            │
+  └────────────────────────────────────────┘
+                │
+                ▼
+  ┌────────────────────────────────────────┐
+  │ 5. Final Score (0-100)                 │
+  └────────────────────────────────────────┘
+
+Aggregate all algorithms:
+  ┌────────────────────────────────────────┐
+  │ 6. Component Grouping                  │
+  │    - Key Exchange algorithms           │
+  │    - Signature algorithms              │
+  │    - Symmetric algorithms              │
+  │    - Hash algorithms                   │
+  └────────────────────────────────────────┘
+                │
+                ▼
+  ┌────────────────────────────────────────┐
+  │ 7. Component Score Calculation         │
+  │    - Average or weighted average       │
+  │    - Per component                     │
+  └────────────────────────────────────────┘
+                │
+                ▼
+  ┌────────────────────────────────────────┐
+  │ 8. Overall Score                       │
+  │    - Weighted combination:             │
+  │      - Key Exchange: 40%               │
+  │      - Signatures: 30%                 │
+  │      - Symmetric: 20%                  │
+  │      - Hash: 10%                       │
+  └────────────────────────────────────────┘
+                │
+                ▼
+  ┌────────────────────────────────────────┐
+  │ 9. Grade Assignment                    │
+  │    - A: 90-100 (Excellent)             │
+  │    - B: 75-89  (Good)                  │
+  │    - C: 50-74  (Fair)                  │
+  │    - D: 25-49  (Poor)                  │
+  │    - F: 0-24   (Critical)              │
+  └────────────────────────────────────────┘
+
+Output: Comprehensive Score Report
+```
+
+#### Communication Pattern
+
+```
+Scanners ──HTTP POST─► Universal-Scoring ──Response─► Scanners
+(Crypto/Repo/System)      (Stateless)                (Continue workflow)
+```
+
+#### Key Responsibilities
+- **Algorithm Analysis**: Evaluates cryptographic strength
+- **PQC Assessment**: Determines quantum resistance
+- **Score Calculation**: Produces quantitative metrics (0-100)
+- **Knowledge Base**: Maintains in-memory cryptographic algorithm database
+- **Stateless Processing**: No database dependencies, purely computational
+
+#### Why Stateless?
+- **High Performance**: No database I/O overhead
+- **Easy Scaling**: Can spin up multiple instances instantly
+- **Simple Deployment**: No migration dependencies
+- **Consistent Results**: Same input always produces same output
+
+---
+
+### 4.7 Onboarding Service 
+
+#### Purpose
+Handles bulk scanning operations by processing Excel file uploads and orchestrating batch scans across the three scanner services.
+
+#### Architecture Diagram
+
+┌─────────────────────────────────────────────────────────────┐
+│                  ONBOARDING SERVICE                          │
+│                 (Batch Orchestrator)                         │
+│                                                              │
+│  API Layer (FastAPI)                                         │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ /api/tls-scan/batch   - Batch TLS scanning          │   │
+│  │ /api/repo-scan/batch  - Batch repo scanning         │   │
+│  │ /api/github/discover  - GitHub repo discovery       │   │
+│  │ /api/batch-jobs/{id}  - SSE progress stream         │   │
+│  └──────────────────────────────────────────────────────┘   │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │   Excel File Processor                 │                 │
+│  │   - Parse .xlsx/.xls                   │                 │
+│  │   - Extract domains/repo URLs          │                 │
+│  │   - Validate entries                   │                 │
+│  └────────────────────────────────────────┘                 │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │   Batch Job Manager                    │                 │
+│  │   - Create job queue (in-memory)       │                 │
+│  │   - Manage concurrency                 │                 │
+│  │   - Track progress                     │                 │
+│  └────────────────────────────────────────┘                 │
+│         │                                                    │
+│         ├──────────────────┬────────────────────┐           │
+│         ▼                  ▼                    ▼           │
+│  Crypto-Scanner       Repo-Scanner       System-Scanner (`system-scan`)     │
+│  (Dispatch TLS)       (Dispatch Repo)    (Dispatch Infra)   │
+└─────────────────────────────────────────────────────────────┘
+
+#### Key Responsibilities
+- **Bulk Operations:** Process large lists of assets
+- **File Handling:** Parse Excel files for batch input
+- **Orchestration:** Dispatch work to appropriate scanner
+- **Progress Tracking:** SSE streams for real-time updates
+- **GitHub Integration:** Discover repositories for users/orgs
+
+#### Workflow
+1. User uploads Excel file with domains/repos
+2. Parse file and extract entries
+3. Create batch job with unique ID
+4. For each entry:
+   - Dispatch to appropriate scanner (crypto/repo/system)
+   - Collect results
+   - Stream progress via SSE
+5. Return completed batch report
+
+---
+
+### 4.8 PostgreSQL Database
+
+#### Purpose
+Central persistent datastore for all scan results, job queues, and metadata. Provides ACID-compliant storage with multi-schema isolation for different services.
+
+#### Architecture Diagram
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  POSTGRESQL DATABASE                         │
+│                                                              │
+│  Database Instance (:5432)                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Database: scan_results_db                           │   │
+│  │  ├─ Tables: scan_results, algorithms, scan_batches   │   │
+│  │  └─ Used by: DB Service, Crypto-Scanner (indirect)   │   │
+│  └──────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Database: repo_scanner_db                           │   │
+│  │  ├─ Tables: repositories, scan_jobs, algorithms      │   │
+│  │  └─ Used by: Repo-Scanner (direct)                   │   │
+│  └──────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Database: system_scanner_db                         │   │
+│  │  ├─ Tables: agents, vulnerabilities, system_scans    │   │
+│  │  └─ Used by: System-Scanner (`system-scan`)                          │   │
+│  └──────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Alembic Version Tables (per database)               │   │
+│  │  - alembic_version (tracks migrations)               │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Technical Specifications
+```
+Database:      PostgreSQL 14+
+Port:          5432
+Admin User:    postgres
+Service User:  scanuser
+Persistence:   Docker volume (postgres-data)
+Backup:        Volume snapshots
+```
+
+#### Database Schemas
+
+| Database Name | Purpose | Primary Service | Tables |
+|--------------|---------|----------------|--------|
+| scan_results_db | TLS/SSL scan storage | DB Service | scan_results, algorithms, scan_batches |
+| repo_scanner_db | Repository scan storage | Repo-Scanner | repositories, scan_jobs, file_algorithms |
+| system_scanner_db | Infrastructure scan storage | System-Scanner (`system-scan`) | agents, system_scans, vulnerabilities |
+
+#### Connection Strings
+
+**From Services:**
+```python
+# DB Service
+DATABASE_URL = "postgresql://scanuser:scanpass@postgres:5432/scan_results_db"
+
+# Repo-Scanner
+DATABASE_URL = "postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db"
+
+# System-Scanner (`system-scan`)
+DATABASE_URL = "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db"
+```
+
+**From Host (for admin tasks):**
+```
+# Recommended: use docker-compose exec (no host port published by default)
+docker-compose exec postgres psql -U scanuser -d scan_results_db
+
+# Optional: to connect from host, publish port 5432 in docker-compose.yml and then:
+# psql -h localhost -p 5432 -U scanuser -d scan_results_db
+```
+
+#### Key Features
+- **ACID Compliance**: Ensures data integrity across all operations
+- **JSON Support**: Stores complex scan results as JSONB columns
+- **Full-Text Search**: Enables searching across scan results
+- **Concurrent Access**: Handles multiple services simultaneously
+- **Transaction Support**: Atomic operations for complex updates
+
+#### Maintenance Operations
+
+**Backup:**
+```bash
+# Backup specific database
+docker-compose exec postgres pg_dump -U scanuser scan_results_db > backup.sql
+
+# Restore
+docker-compose exec -T postgres psql -U scanuser scan_results_db < backup.sql
+```
+
+**Check Database Size:**
+```bash
+docker-compose exec postgres psql -U scanuser -d scan_results_db -c "
+SELECT pg_size_pretty(pg_database_size('scan_results_db')) AS size;
+"
+```
+
+**Vacuum and Analyze:**
+```bash
+docker-compose exec postgres psql -U scanuser -d scan_results_db -c "VACUUM ANALYZE;"
+```
+
+#### Schema Isolation Strategy
+
+**Why Multiple Databases?**
+- **Clear Ownership**: Each service owns its database
+- **Independent Migrations**: Services can evolve schemas independently
+- **Backup Granularity**: Backup/restore individual databases
+- **Access Control**: Fine-grained permissions per database
+- **Failure Isolation**: Schema corruption doesn't affect other services
 ---
 
 ## Understanding Docker Environment
@@ -477,14 +888,14 @@ When you run `docker-compose up`, Docker creates a private virtual network that 
 │                                                             │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐ │
 │  │  frontend    │    │ repo-scanner │    │  db-service  │ │
-│  │  :3000       │    │  :8003       │    │  :8002       │ │
+│  │  :3000       │    │  :8003       │    │  :8001       │ │
 │  └───────┬──────┘    └───────┬──────┘    └───────┬──────┘ │
 │          │                   │                    │         │
 │          └───────────────────┼────────────────────┘         │
 │                              │                              │
 │  ┌──────────────┐    ┌───────┴──────┐    ┌──────────────┐ │
-│  │crypto-scanner│    │  postgres    │    │system-scanner│ │
-│  │  :8001       │    │  :5432       │    │  :9000       │ │
+│  │crypto-scanner│    │  postgres    │    │system-scan│ │
+│  │  :8000       │    │  :5432       │    │  :9000       │ │
 │  └──────────────┘    └──────────────┘    └──────────────┘ │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -495,9 +906,11 @@ When you run `docker-compose up`, Docker creates a private virtual network that 
 │                    Host Machine (localhost)                 │
 │                                                             │
 │  Port 3000 ──► Frontend                                    │
-│  Port 8001 ──► Crypto Scanner                              │
-│  Port 8002 ──► DB Service                                  │
+│  Port 8000 ──► Crypto Scanner                              │
+│  Port 8001 ──► DB Service                                  │
 │  Port 8003 ──► Repo Scanner                                │
+│  Port 8008 ──► Onboarding                                  │
+│  Port 9500 ──► Universal-Scoring                           │
 │  Port 9000 ──► System Scanner                              │
 │  Port 5432 ──► PostgreSQL                                  │
 └─────────────────────────────────────────────────────────────┘
@@ -524,7 +937,7 @@ DATABASE_URL = "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db"
 **Example HTTP Service Calls**:
 ```python
 # Crypto Scanner calling DB Service
-response = requests.post("http://db-service:8002/api/scan-results", json=data)
+response = requests.post("http://db-service:8001/api/scan-results", json=data)
 #                                ^^^^^^^^^^
 #                         Service name auto-resolves to container IP
 ```
@@ -537,7 +950,7 @@ The `ports` section in `docker-compose.yml` creates port forwarding rules:
 services:
   db-service:
     ports:
-      - "8002:8002"
+      - "8001:8001"
     #    ▲    ▲
     #    │    └─ Internal container port
     #    └────── External host port
@@ -547,12 +960,12 @@ services:
 
 1. **Browser to Service** (External):
    ```
-   Browser ──► http://localhost:3000 ──► Host Port 3000 ──► Container Port 3000
+   Browser ──► http://localhost:3000 ──► Host Port 3000 ──► Container Port 8080
    ```
 
 2. **Container to Container** (Internal):
    ```
-   Frontend ──► http://repo-scanner:8003 ──► Direct container network
+   Frontend ──► http://repo-scanner:8001 ──► Direct container network
    ```
 
 ---
@@ -604,7 +1017,7 @@ Base.metadata.create_all(bind=engine)
 
 #### What Was Changed
 
-**For Each Service** (`repo-scanner`, `db-service`, `system-scanner`):
+**For Each Service** (`repo-scanner`, `db-service`, `system-scan`):
 
 1. **Added Alembic Configuration** (`alembic.ini`):
    ```ini
@@ -721,7 +1134,7 @@ The service you specify depends on which models you changed:
 |---------------|---------------|
 | `repo_scanner/models.py` | `repo-scanner` |
 | `db-service/models.py` | `db-service` |
-| `system-scanner/models.py` | `system-scanner` |
+| `system-scaner/models.py` | `system-scan` |
 
 **Generate migrations one service at a time!**
 
@@ -864,7 +1277,7 @@ db-service/
 ├── models.py
 └── main.py
 
-system-scanner/
+system-scaner/
 ├── alembic/
 │   ├── versions/
 │   │   ├── 001_create_vulnerability_tables.py
@@ -876,6 +1289,160 @@ system-scanner/
 ```
 
 ---
+
+## 9. OBSERVABILITY & LOGGING
+
+This section explains how logs are generated, where they are stored, and how developers and operators can view and analyze them across all microservices.
+
+### 9.1 Logging Overview
+
+The system uses a centralized, structured logging strategy across all services.
+
+#### Key Characteristics
+
+**Service-prefixed logs**
+Each log line identifies the service that generated it (e.g., SCAN-SERVICE, DB-SERVICE).
+
+**Correlation ID–based tracing**
+Every incoming request is assigned a Correlation ID, which is propagated across all downstream services.
+
+**Structured and consistent format**
+Logs follow a predictable structure for easy searching and debugging.
+
+**Docker-managed log rotation**
+Prevents disk space exhaustion in long-running environments.
+
+### 9.2 Correlation ID Tracing
+
+#### What is a Correlation ID?
+
+A Correlation ID is a unique identifier attached to a request when it enters the system.
+The same ID appears in logs across all services involved in processing that request.
+
+#### Example Log Trace
+[Corr-ID: abc123] [FRONTEND] User initiated scan
+[Corr-ID: abc123] [SCAN-SERVICE] Processing domain: example.com
+[Corr-ID: abc123] [DB-SERVICE] Saving scan result
+[Corr-ID: abc123] [SCAN-SERVICE] Scan completed
+[Corr-ID: abc123] [FRONTEND] Response sent
+
+#### Why This Matters
+
+Enables end-to-end request tracing
+
+Makes debugging distributed systems practical
+
+Eliminates guesswork when errors occur across services
+
+### 9.3 Log Storage & Rotation
+
+#### Docker Environment
+
+Logs are managed by Docker using the json-file logging driver.
+
+```
+/var/lib/docker/containers/
+└── <container-id>/
+    ├── <container-id>-json.log
+    ├── <container-id>-json.log.1
+    ├── <container-id>-json.log.2
+    ├── <container-id>-json.log.3
+    ├── <container-id>-json.log.4
+    └── <container-id>-json.log.5
+```
+
+#### Log Rotation Policy
+
+Configured in docker-compose.yml:
+
+```yaml
+logging:
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+```
+
+Maximum 10MB per log file
+
+Keeps last 5 rotated files
+
+Prevents disk and memory exhaustion
+
+### 9.4 Viewing Logs
+
+#### 9.4.1 Single Service Logs
+```bash
+docker-compose logs scan-service
+```
+
+#### 9.4.2 Live Streaming
+```bash
+docker-compose logs -f scan-service
+```
+
+#### 9.4.3 Logs with Timestamps
+```bash
+docker-compose logs -f --timestamps scan-service
+```
+
+#### 9.4.4 Multiple Services
+```bash
+docker-compose logs -f scan-service db-service
+```
+
+#### 9.4.5 Last N Lines
+```bash
+docker-compose logs --tail=100 scan-service
+```
+
+### 9.5 Searching & Filtering
+
+#### 9.5.1 Find All Errors
+```bash
+docker-compose logs | grep ERROR
+```
+
+#### 9.5.2 Search by Correlation ID
+```bash
+docker-compose logs | grep "abc123"
+```
+
+#### 9.5.3 Search by Domain or Input
+```bash
+docker-compose logs scan-service | grep "example.com"
+```
+
+#### 9.5.4 Count Errors
+```bash
+docker-compose logs scan-service | grep -c ERROR
+```
+
+### 9.6 Debugging Failed Requests
+
+This section will be integrated with "Debugging & Troubleshooting" (Section 11) later.
+
+### 9.7 Log Levels Reference
+
+| Level | Usage |
+|---|---|
+| DEBUG | Internal state, detailed diagnostics |
+| INFO | Normal application flow |
+| WARNING | Recoverable issues |
+| ERROR | Failed operations |
+| CRITICAL | Service-breaking failures |
+
+### 9.8 Why This Logging Strategy Is Important
+
+- Production-ready observability
+
+- Fast root-cause analysis
+
+- Clear audit trail for security scans
+
+- Scales well with microservice growth
+
+- No external log tools required initially
 
 ## Development Workflow
 
@@ -1021,13 +1588,16 @@ docker-compose ps
 
 **Expected Output**:
 ```
-NAME                    STATUS              PORTS
-postgres               Up 5 minutes        0.0.0.0:5432->5432/tcp
-db-service             Up 5 minutes        0.0.0.0:8002->8002/tcp
-repo-scanner           Up 5 minutes        0.0.0.0:8003->8003/tcp
-crypto-scanner         Up 5 minutes        0.0.0.0:8001->8001/tcp
-system-scanner         Up 5 minutes        0.0.0.0:9000->9000/tcp
-frontend               Up 5 minutes        0.0.0.0:3000->3000/tcp
+NAME                             STATUS              PORTS
+postgres                         Up 5 minutes        (no published ports)
+db-service-1                     Up 5 minutes        0.0.0.0:8001->8001/tcp
+repo-scanner                     Up 5 minutes        0.0.0.0:8003->8001/tcp
+crypto-scanner                   Up 5 minutes        0.0.0.0:8000->8000/tcp
+system-scan                      Up 5 minutes        0.0.0.0:9000->9000/tcp
+universal-scoring-service        Up 5 minutes        0.0.0.0:9500->9500/tcp
+frontend                         Up 5 minutes        0.0.0.0:3000->8080/tcp
+onboarding                       Up 5 minutes        0.0.0.0:8008->8008/tcp
+adminer                          Up 5 minutes        0.0.0.0:8080->8080/tcp
 ```
 
 **Check Container Resource Usage**:
@@ -1249,7 +1819,7 @@ curl -v http://localhost:8003/api/repositories
 docker-compose exec frontend sh
 
 # Test connection to backend
-wget -O- http://repo-scanner:8003/api/health
+wget -O- http://repo-scanner:8001/api/health
 ```
 
 #### Accessing Container Interactive Shell
@@ -1472,50 +2042,36 @@ GROUP BY algorithm_name;
 
 ---
 
-## Port Reference Table
 
-| Service | Internal Port | External Port | Access URL |
-|---------|--------------|---------------|------------|
-| **Frontend** | 3000 | 3000 | http://localhost:3000 |
-| **PostgreSQL** | 5432 | 5432 | postgresql://localhost:5432 |
-| **DB Service** | 8002 | 8002 | http://localhost:8002 |
-| **Repo Scanner** | 8003 | 8003 | http://localhost:8003 |
-| **Crypto Scanner** | 8001 | 8001 | http://localhost:8001 |
-| **System Scanner** | 9000 | 9000 | http://localhost:9000 |
-| **Adminer** | 8080 | 8080 | http://localhost:8080 |
-| **Agents** | N/A | N/A | Client-only (no server port) |
-
----
 
 ## System Startup Sequence
 
-```
-1. docker-compose up
+1. PostgreSQL
+   └─► Database ready
+
+2. DB Service
+   ├─► Wait for PostgreSQL
+   ├─► Run migrations
+   └─► Start API server
+
+3. Universal-Scoring
+   └─► Start (no dependencies)
+
+4. THREE SCANNERS (parallel):
+   ├─► Crypto-Scanner
+   │   └─► Depends on: Universal-Scoring, DB Service
    │
-   ├─► Start PostgreSQL container
-   │   └─► Wait for database ready
+   ├─► Repo-Scanner
+   │   └─► Depends on: PostgreSQL, Universal-Scoring
    │
-   ├─► Start DB Service
-   │   ├─► Wait for PostgreSQL
-   │   ├─► Run: alembic upgrade head
-   │   └─► Start FastAPI server
-   │
-   ├─► Start Repo Scanner
-   │   ├─► Wait for PostgreSQL
-   │   ├─► Run: alembic upgrade head
-   │   └─► Start FastAPI server
-   │
-   ├─► Start System Scanner
-   │   ├─► Wait for DB Service
-   │   ├─► Run: alembic upgrade head
-   │   └─► Start FastAPI server
-   │
-   ├─► Start Crypto Scanner
-   │   └─► Start FastAPI server (no DB migration)
-   │
-   └─► Start Frontend
-       └─► Start Vite dev server (port 3000)
-```
+   └─► System-Scanner (`system-scan`) 
+       └─► Depends on: Universal-Scoring, DB Service
+
+5. Onboarding
+   └─► Depends on: All three scanners
+
+6. Frontend
+   └─► Depends on: Onboarding, All scanners (can call directly)
 
 ---
 
@@ -1556,33 +2112,60 @@ GROUP BY algorithm_name;
 - **Integrated Networking**: Automatic service discovery and DNS
 - **Development/Production Parity**: Similar architecture in all environments
 
+### 12.6 Why Separate Onboarding Service?
+
+**Decision:** Create dedicated orchestrator for batch operations
+
+**Rationale:**
+- **Separation of Concerns:** Individual scanners focus on scanning, not batch management
+- **Concurrency Control:** Centralized control over parallel scans prevents overload
+- **Progress Tracking:** Single source of truth for batch job status
+- **File Handling:** Excel parsing isolated from scanning logic
+- **SSE Streaming:** Dedicated service for real-time progress updates
+
+**Benefits:**
+- Scanners remain stateless and simple
+- Easy to add new batch sources (CSV, API imports)
+- Can implement advanced queue management
+- Better error handling for bulk operations
+
 ---
 
-## Quick Reference: Essential Commands
+## 13.4 Essential Commands Quick Reference
 
-### Daily Development Commands
+### Docker Management
 
 ```bash
-# Start everything
+# Start all services in detached mode
 docker-compose up -d
 
-# Rebuild after code changes
+# Rebuild images and restart services (USE THIS AFTER CODE CHANGES)
 docker-compose up -d --build
 
-# View all logs
-docker-compose logs -f
-
-# View specific service logs
-docker-compose logs -f repo-scanner
-
-# Stop everything
+# Stop all services
 docker-compose down
 
-# Fresh start (deletes data!)
+# Stop all services and remove volumes (fresh start - DELETES ALL DATA)
 docker-compose down -v && docker-compose up -d --build
+
+# See which containers are running
+docker-compose ps
+
+# Check container resource usage
+docker stats
 ```
 
-### Migration Commands
+### Log Viewing
+
+```bash
+# View all logs in real-time
+docker-compose logs -f
+
+# View logs for a specific service in real-time
+docker-compose logs -f <service-name>
+```
+
+### Migration Operations
 
 ```bash
 # Generate migration (after model changes)
@@ -1601,38 +2184,32 @@ docker-compose exec <service> alembic history
 docker-compose exec <service> alembic downgrade -1
 ```
 
-### Database Commands
+### Database Access
 
 ```bash
-# Connect to PostgreSQL
+# Connect to PostgreSQL CLI
 docker-compose exec postgres psql -U scanuser -d <database_name>
 
-# List databases
+# List all databases
 docker-compose exec postgres psql -U scanuser -l
 
-# Run quick query
+# Run a quick SQL query (example)
 docker-compose exec postgres psql -U scanuser -d repo_scanner_db -c "SELECT COUNT(*) FROM repositories;"
 
-# Describe table
+# Describe a table structure (example)
 docker-compose exec postgres psql -U scanuser -d repo_scanner_db -c "\d repositories"
 ```
 
-### Debugging Commands
+### Debugging
 
 ```bash
-# Check container status
-docker-compose ps
-
-# Check resource usage
-docker stats
-
-# Access container shell
+# Access container shell for interactive debugging
 docker-compose exec <service> bash
 
-# Test API endpoint
+# Test an API endpoint (example)
 curl http://localhost:8003/api/health
 
-# Check environment variables
+# Check environment variables inside a container
 docker-compose exec <service> env
 ```
 
@@ -1767,3 +2344,850 @@ The combination of Docker, FastAPI, React, PostgreSQL, and Alembic creates a mod
 8. **Try Interactive Shell**: `docker-compose exec repo-scanner bash`
 
 **Welcome to the team! 🚀**
+
+
+
+
+
+
+
+
+
+
+
+#### Key Responsibilities
+
+- **Data Abstraction**: Hides database complexity from other services
+- **CRUD Operations**: Provides standard create/read/update/delete
+- **Schema Validation**: Ensures data integrity via Pydantic
+- **Query Interface**: Offers search and filtering capabilities
+- **Connection Management**: Handles database connection pooling
+- **Transaction Control**: Manages atomicity and rollbacks
+
+---
+
+## Communication Patterns
+
+### Service Communication Overview
+
+┌──────────────┐
+│   Frontend   │
+└──────┬───────┘
+       │
+       ├─────────────────┐
+       │                 │
+       ▼                 ▼
+┌──────────────┐  ┌──────────────┐
+│  Onboarding  │  │   Scanners   │
+│   (Batch)    │  │  (Direct)    │
+└──────┬───────┘  └──────┬───────┘
+       │                 │
+       └────────┬────────┘
+                │
+    ┌───────────┼──────────┬──────────┐
+    ▼           ▼          ▼          ▼
+Crypto-     Repo-      System-    Universal-
+Scanner     Scanner    Scanner     Scoring
+    │           │          │          │
+    └───────────┴──────────┴──────────┘
+                │
+                ▼
+           DB Service
+                │
+                ▼
+           PostgreSQL
+
+**Key Points:**
+- Frontend can call scanners directly OR via Onboarding (bulk)
+- All three scanners use Universal-Scoring for score calculation
+- All three scanners use DB Service for result storage
+- Onboarding orchestrates batch operations across scanners
+
+
+### 1. Synchronous REST API
+
+**Pattern**: Request-Response
+
+```
+Service A                    Service B
+    │                            │
+    │  HTTP POST /endpoint       │
+    │───────────────────────────▶│
+    │                            │
+    │                            │ Process
+    │                            │────────┐
+    │                            │        │
+    │                            │◀───────┘
+    │                            │
+    │  HTTP 200 + JSON Response  │
+    │◀───────────────────────────│
+    │                            │
+```
+
+**Used For**:
+- System-Scanner (`system-scan`) ↔ Universal-Scoring
+- System-Scanner (`system-scan`) ↔ DB Service
+- Crypto-Scanner ↔ Universal-Scoring
+- Crypto-Scanner ↔ DB Service
+- Onboarding ↔ Scanner Services
+
+**Advantages**:
+- Simple, well-understood
+- Immediate response
+- Easy error handling
+
+**Disadvantages**:
+- Blocking
+- Service coupling
+- Timeout concerns
+
+---
+
+### 2. Server-Sent Events (SSE)
+
+**Pattern**: Long-lived HTTP connection with streaming updates
+
+```
+Client                       Service
+  │                             │
+  │  GET /scan-with-progress    │
+  │────────────────────────────▶│
+  │                             │
+  │  HTTP 200 (keep-alive)      │
+  │◀────────────────────────────│
+  │                             │
+  │  Event: domain_processing   │
+  │◀────────────────────────────│
+  │                             │
+  │  Event: domain_complete     │
+  │◀────────────────────────────│
+  │                             │
+  │  Event: complete            │
+  │◀────────────────────────────│
+  │                             │
+  │  Connection closed          │
+  │◀────────────────────────────│
+```
+
+**Used For**:
+- Crypto-Scanner progress updates
+- Onboarding batch job progress
+- Real-time scan feedback to frontend
+
+**Advantages**:
+- Real-time updates
+- Single connection
+- Automatic reconnection (browser)
+
+**Disadvantages**:
+- One-way communication
+- Resource-intensive for many connections
+
+---
+
+### 3. Asynchronous Job Queue
+
+**Pattern**: Database-backed queue with worker polling
+
+```
+API Request              Database Queue           Background Worker
+     │                         │                          │
+     │  Create job             │                          │
+     │────────────────────────▶│                          │
+     │                         │                          │
+     │  Return job_id          │                          │
+     │◀────────────────────────│                          │
+     │                         │                          │
+     │                         │  Poll for pending jobs   │
+     │                         │◀─────────────────────────│
+     │                         │                          │
+     │                         │  Job found               │
+     │                         │─────────────────────────▶│
+     │                         │                          │
+     │                         │                          │ Process
+     │                         │                          │────────┐
+     │                         │                          │        │
+     │                         │                          │◀───────┘
+     │                         │                          │
+     │                         │  Update status           │
+     │                         │◀─────────────────────────│
+     │                         │                          │
+     │  Poll for results       │                          │
+     │────────────────────────▶│                          │
+     │                         │                          │
+     │  Results ready          │                          │
+     │◀────────────────────────│                          │
+```
+
+**Used For**:
+- Repo-Scanner job processing
+- Long-running tasks
+- Background operations
+
+**Advantages**:
+- Non-blocking
+- Survives restarts
+- Scalable workers
+
+**Disadvantages**:
+- Delayed processing
+- More complex
+- Requires polling
+
+---
+
+### 4. Direct Database Access
+
+**Pattern**: Service directly connects to shared database
+
+```
+Service                    PostgreSQL
+   │                           │
+   │  SQLAlchemy Query         │
+   │──────────────────────────▶│
+   │                           │
+   │  Result Set               │
+   │◀──────────────────────────│
+```
+
+**Used For**:
+- Repo-Scanner (direct DB access)
+- Internal state management
+
+**Advantages**:
+- High performance
+- No API overhead
+- Transactional integrity
+
+**Disadvantages**:
+- Tight coupling
+- Schema changes impact service
+- Bypasses data access layer
+
+---
+
+## Data Flow Examples
+
+## 6. DATA FLOWS & USE CASES
+
+### 6.1 End-to-End TLS Scan Workflow
+
+```
+User                Frontend            Crypto-Scanner        Universal-Scoring      DB Service       PostgreSQL
+ │                      │                      │                      │                  │                │
+ │ Click "Scan"         │                      │                      │                  │                │
+ │─────────────────────▶│                      │                      │                  │                │
+ │                      │                      │                      │                  │                │
+ │                      │ POST /scan-with-progress                    │                  │                │
+ │                      │─────────────────────▶│                      │                  │                │
+ │                      │                      │                      │                  │                │
+ │                      │ SSE Stream           │                      │                  │                │
+ │                      │◀─────────────────────│                      │                  │                │
+ │                      │                      │                      │                  │                │
+ │ "Processing..."      │                      │ Execute ssllabs-scan │                  │                │
+ │◀─────────────────────│                      │──────────┐           │                  │                │
+ │                      │                      │          │           │                  │                │
+ │                      │                      │◀─────────┘           │                  │                │
+ │                      │                      │                      │                  │                │
+ │                      │                      │ POST /api/v1/score/tls-scan             │                │
+ │                      │                      │─────────────────────▶│                  │                │
+ │                      │                      │                      │                  │                │
+ │                      │                      │                      │ Calculate Score  │                │
+ │                      │                      │                      │──────────┐       │                │
+ │                      │                      │                      │          │       │                │
+ │                      │                      │                      │◀─────────┘       │                │
+ │                      │                      │                      │                  │                │
+ │                      │                      │ ◀── Score Response ──│                  │                │
+ │                      │                      │                      │                  │                │
+ │                      │                      │ POST /scans/result                      │                │
+ │                      │                      │─────────────────────────────────────────▶│                │
+ │                      │                      │                      │                  │                │
+ │                      │                      │                      │                  │ INSERT         │
+ │                      │                      │                      │                  │───────────────▶│
+ │                      │                      │                      │                  │                │
+ │                      │                      │                      │                  │ ◀── ID ────────│
+ │                      │                      │                      │                  │                │
+ │                      │                      │ ◀────── Success ─────────────────────────│                │
+ │                      │                      │                      │                  │                │
+ │                      │ SSE: complete        │                      │                  │                │
+ │                      │◀─────────────────────│                      │                  │                │
+ │                      │                      │                      │                  │                │
+ │ "Scan Complete!"     │                      │                      │                  │                │
+ │◀─────────────────────│                      │                      │                  │                │
+ │                      │                      │                      │                  │                │
+ │                      │ GET /scans/results/{id}                     │                  │                │
+ │                      │─────────────────────────────────────────────────────────────────▶│                │
+ │                      │                      │                      │                  │                │
+ │                      │                      │                      │                  │ SELECT         │
+ │                      │                      │                      │                  │───────────────▶│
+ │                      │                      │                      │                  │                │
+ │                      │                      │                      │                  │ ◀── Data ──────│
+ │                      │                      │                      │                  │                │
+ │                      │ ◀───── Report JSON ──────────────────────────────────────────────│                │
+ │                      │                      │                      │                  │                │
+ │ Display Report       │                      │                      │                  │                │
+ │◀─────────────────────│                      │                      │                  │                │
+```
+
+---
+
+### 6.2 Repository Scan Workflow
+
+```
+User            Frontend         Repo-Scanner           Universal-Scoring      PostgreSQL
+ │                  │                   │                       │                  │
+ │ Submit repo URL  │                   │                       │                  │
+ │─────────────────▶│                   │                       │                  │
+ │                  │                   │                       │                  │
+ │                  │ POST /api/scan    │                       │                  │
+ │                  │──────────────────▶│                       │                  │
+ │                  │                   │                       │                  │
+ │                  │                   │ Check cache           │                  │
+ │                  │                   │───────────────────────────────────────▶│
+ │                  │                   │                       │                  │
+ │                  │                   │ ◀────── No cache ─────────────────────────│
+ │                  │                   │                       │                  │
+ │                  │                   │ INSERT job (pending)  │                  │
+ │                  │                   │───────────────────────────────────────▶│
+ │                  │                   │                       │                  │
+ │                  │ ◀── job_id ───────│                       │                  │
+ │                  │                   │                       │                  │
+ │ "Job queued"     │                   │                       │                  │
+ │◀─────────────────│                   │                       │                  │
+ │                  │                   │                       │                  │
+ │                  │                   │ [Background Worker]   │                  │
+ │                  │                   │                       │                  │
+ │                  │                   │ Poll for jobs         │                  │
+ │                  │                   │───────────────────────────────────────▶│
+ │                  │                   │                       │                  │
+ │                  │                   │ ◀── Job found ────────────────────────────│
+ │                  │                   │                       │                  │
+ │                  │                   │ UPDATE (in_progress)  │                  │
+ │                  │                   │───────────────────────────────────────▶│
+ │                  │                   │                       │                  │
+ │                  │                   │ git clone repo        │                  │
+ │                  │                   │────────┐              │                  │
+ │                  │                   │        │              │                  │
+ │                  │                   │◀───────┘              │                  │
+ │                  │                   │                       │                  │
+ │                  │                   │ Scan files (regex)    │                  │
+ │                  │                   │────────┐              │                  │
+ │                  │                   │        │              │                  │
+ │                  │                   │◀───────┘              │                  │
+ │                  │                   │                       │                  │
+ │                  │                   │ POST /api/v1/score/repository            │
+ │                  │                   │──────────────────────▶│                  │
+ │                  │                   │                       │                  │
+ │                  │                   │                       │ Score algos      │
+ │                  │                   │                       │──────┐           │
+ │                  │                   │                       │      │           │
+ │                  │                   │                       │◀─────┘           │
+ │                  │                   │                       │                  │
+ │                  │                   │ ◀─ Score Response ────│                  │
+ │                  │                   │                       │                  │
+ │                  │                   │ UPDATE (completed + results)             │
+ │                  │                   │───────────────────────────────────────▶│
+ │                  │                   │                       │                  │
+ │                  │ GET /api/scans/{id}                       │                  │
+ │                  │──────────────────▶│                       │                  │
+ │                  │                   │                       │                  │
+ │                  │                   │ SELECT * FROM repos   │                  │
+ │                  │                   │───────────────────────────────────────▶│
+ │                  │                   │                       │                  │
+ │                  │                   │ ◀──── Results ────────────────────────────│
+ │                  │                   │                       │                  │
+ │                  │ ◀── Report ───────│                       │                  │
+ │                  │                   │                       │                  │
+ │ Display Results  │                   │                       │                  │
+ │◀─────────────────│                   │                       │                  │
+```
+
+---
+
+### 6.2 Save Scan Result (DB Service)
+
+```
+Request: Save Scan Result
+
+Client Service         DB Service API          CRUD Layer           SQLAlchemy           PostgreSQL
+     │                      │                      │                    │                    │
+     │ POST /scans/result   │                      │                    │                    │
+     │─────────────────────▶│                      │                    │                    │
+     │                      │                      │                    │                    │
+     │                      │ Validate Schema      │                    │                    │
+     │                      │──────────┐           │                    │                    │
+     │                      │          │           │                    │                    │
+     │                      │◀─────────┘           │                    │                    │
+     │                      │                      │                    │                    │
+     │                      │ crud.create_scan_result()                 │                    │
+     │                      │─────────────────────▶│                    │                    │
+     │                      │                      │                    │                    │
+     │                      │                      │ Create Model Instance                   │
+     │                      │                      │───────────────────▶│                    │
+     │                      │                      │                    │                    │
+     │                      │                      │                    │ INSERT INTO ...    │
+     │                      │                      │                    │───────────────────▶│
+     │                      │                      │                    │                    │
+     │                      │                      │                    │ ◀─── ID + Row ─────│
+     │                      │                      │                    │                    │
+     │                      │                      │ ◀── Model Object ──│                    │
+     │                      │                      │                    │                    │
+     │                      │ ◀─── Result Dict ────│                    │                    │
+     │                      │                      │                    │                    │
+     │ ◀─── JSON Response ──│                      │                    │                    │
+     │  (200 OK + new ID)   │                      │                    │                    │
+```
+
+---
+
+### 6.3 Batch Onboarding Workflow
+
+**Scenario:** User uploads Excel with 100 domains for bulk TLS scanning
+
+**Participants:**
+- User (uploads file)
+- Frontend (UI)
+- Onboarding Service (orchestrator)
+- Crypto-Scanner (performs actual scans)
+- Universal-Scoring (calculates scores)
+- DB Service (stores results)
+
+```
+User         Frontend        Onboarding         Crypto-Scanner    Universal-Scoring    DB Service
+ │               │                  │                   │                 │                │
+ │ Upload Excel  │                  │                   │                 │                │
+ │──────────────▶│                  │                   │                 │                │
+ │               │                  │                   │                 │                │
+ │               │ POST /api/tls-scan/batch             │                 │                │
+ │               │─────────────────▶│                   │                 │                │
+ │               │                  │                   │                 │                │
+ │               │                  │ Parse Excel       │                 │                │
+ │               │                  │────────┐          │                 │                │
+ │               │                  │        │          │                 │                │
+ │               │                  │◀───────┘          │                 │                │
+ │               │                  │                   │                 │                │
+ │               │                  │ Create batch_jobs[job_id]           │                │
+ │               │                  │────────┐          │                 │                │
+ │               │                  │        │          │                 │                │
+ │               │                  │◀───────┘          │                 │                │
+ │               │                  │                   │                 │                │
+ │               │ ◀── job_id + URLs ─│                 │                 │                │
+ │               │                  │                   │                 │                │
+ │ "Processing"  │                  │                   │                 │                │
+ │◀──────────────│                  │                   │                 │                │
+ │               │                  │                   │                 │                │
+ │               │ SSE /api/batch-jobs/{id}             │                 │                │
+ │               │─────────────────▶│                   │                 │                │
+ │               │                  │                   │                 │                │
+ │               │ [Stream opened]  │                   │                 │                │
+ │               │◀─────────────────│                   │                 │                │
+ │               │                  │                   │                 │                │
+ │               │                  │ [Background Task]                   │                │
+ │               │                  │                   │                 │                │
+ │               │                  │ For each domain:  │                 │                │
+ │               │                  │                   │                 │                │
+ │               │                  │ POST /scan-with-progress             │                │
+ │               │                  │──────────────────▶│                 │                │
+ │               │                  │                   │                 │                │
+ │               │                  │                   │ Scan            │                │
+ │               │                  │                   │─────┐           │                │
+ │               │                  │                   │     │           │                │
+ │               │                  │                   │◀────┘           │                │
+ │               │                  │                   │                 │                │
+ │               │                  │                   │ POST /score     │                │
+ │               │                  │                   │────────────────▶│                │
+ │               │                  │                   │                 │                │
+ │               │                  │                   │ ◀─── Score ─────│                │
+ │               │                  │                   │                 │                │
+ │               │                  │                   │ POST /scans/result               │
+ │               │                  │                   │─────────────────────────────────▶│
+ │               │                  │                   │                 │                │
+ │               │                  │ ◀── Result ───────│                 │                │
+ │               │                  │                   │                 │                │
+ │               │                  │ Update batch_jobs │                 │                │
+ │               │                  │────────┐          │                 │                │
+ │               │                  │        │          │                 │                │
+ │               │                  │◀───────┘          │                 │                │
+ │               │                  │                   │                 │                │
+ │               │ SSE: domain_complete                 │                 │                │
+ │               │◀─────────────────│                   │                 │                │
+ │               │                  │                   │                 │                │
+ │ Update UI     │                  │                   │                 │                │
+ │◀──────────────│                  │                   │                 │                │
+ │               │                  │                   │                 │                │
+ │               │                  │ [Repeat for all domains]            │                │
+ │               │                  │                   │                 │                │
+ │               │ SSE: complete    │                   │                 │                │
+ │               │◀─────────────────│                   │                 │                │
+ │               │                  │                   │                 │                │
+ │ "All Done!"   │                  │                   │                 │                │
+ │◀──────────────│                  │                   │                 │                │
+
+---
+
+### 6.4 Agent-Based System Scan
+
+```
+Sequence: Agent Submits Audit Results
+
+Scanning Agent                System-Scanner (`system-scan`)    Universal-Scoring (`universal-scoring-service`)    DB Service
+      │                            │                         │                    │
+      │ POST /receive_audit_result │                         │                    │
+      │───────────────────────────▶│                         │                    │
+      │                            │                         │                    │
+      │                            │ Validate Request        │                    │
+      │                            │──────────┐              │                    │
+      │                            │          │              │                    │
+      │                            │◀─────────┘              │                    │
+      │                            │                         │                    │
+      │                            │ POST /api/v1/score      │                    │
+      │                            │────────────────────────▶│                    │
+      │                            │                         │                    │
+      │                            │                         │ Calculate Score    │
+      │                            │                         │─────────┐          │
+      │                            │                         │         │          │
+      │                            │                         │◀────────┘          │
+      │                            │                         │                    │
+      │                            │ ◀───── Score Response ──│                    │
+      │                            │                         │                    │
+      │                            │ POST /scans/result                           │
+      │                            │─────────────────────────────────────────────▶│
+      │                            │                                              │
+      │                            │ ◀───── Success ──────────────────────────────│
+      │                            │                         │                    │
+      │ ◀─── Success Response ─────│                         │                    │
+      │                            │                         │                    │
+```
+```
+
+---
+
+## Deployment Architecture
+
+### Docker Compose Network
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     Docker Network: app-network                 │
+│                                                                 │
+│  ┌──────────────┐         ┌──────────────┐                     │
+│  │   frontend   │         │  onboarding  │                     │
+│  │   :3000      │         │    :8008     │                     │
+│  └──────────────┘         └──────────────┘                     │
+│         │                         │                             │
+│         └────────────┬────────────┘                             │
+│                      │                                          │
+│              ┌───────▼──────────┐                               │
+│              │   system-scan    │                               │
+│              │      :9000       │                               │
+│              └───────┬──────────┘                               │
+│                      │                                          │
+│         ┌────────────┼────────────┬──────────────┐              │
+│         │            │            │              │              │
+│  ┌──────▼──────┐ ┌──▼──────┐ ┌──▼─────────┐ ┌──▼──────────┐   │
+│  │crypto-scanner│ │repo-scanner│ │universal-  │ │ db-service  │   │
+│  │    :8000    │ │  :8003    │ │scoring:9500 │ │   :8001     │   │
+│  └─────────────┘ └───────────┘ └────────────┘ └──────┬──────┘   │
+│                                                      │          │
+│                                              ┌───────▼──────┐   │
+│                                              │  postgres    │   │
+│                                              │    :5432     │   │
+│                                              └──────────────┘   │
+└────────────────────────────────────────────────────────────────┘
+
+External Access:
+- Frontend: http://localhost:3000
+- Services: Internal network only (no external ports except for debugging)
+```
+
+### Service Configuration
+
+```yaml
+services:
+  frontend:
+    build: ./Frontend
+    container_name: frontend
+    ports:
+      - "3000:8080"
+    networks:
+      - xencrypt-network
+
+  universal-scoring-service:
+    build: ./universal-scoring-service
+    container_name: universal-scoring-service
+    ports:
+      - "9500:9500"
+    networks:
+      - xencrypt-network
+
+  system-scan:
+    build: ./system-scaner
+    container_name: system-scan
+    ports:
+      - "9000:9000"
+    environment:
+      - DB_SERVICE_URL=http://db-service:8001
+      - SCORING_SERVICE_URL=http://universal-scoring-service:9500
+    networks:
+      - xencrypt-network
+
+  crypto-scanner:
+    build: ./scan-service
+    container_name: crypto-scanner
+    ports:
+      - "8000:8000"
+    networks:
+      - xencrypt-network
+
+  db-service:
+    build: ./db-service
+    container_name: db-service-1
+    ports:
+      - "8001:8001"
+    networks:
+      - xencrypt-network
+
+  repo-scanner:
+    build: ./repo_scanner
+    ports:
+      - "8003:8001"
+    networks:
+      - xencrypt-network
+
+
+│  │ /register_agent    - Agent registration              │   │
+│  │ /fetch_action      - Task polling                    │   │
+│  │ /receive_audit     - Result submission               │   │
+│  │ /health            - Health check                    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│         │                    │                    │          │
+│         ▼                    ▼                    ▼          │
+│  ┌──────────┐        ┌──────────┐        ┌──────────┐      │
+│  │  Agent   │        │   Task   │        │  Result  │      │
+│  │  Manager │        │Dispatcher│        │Processor │      │
+│  └──────────┘        └──────────┘        └──────────┘      │
+│         │                                         │          │
+│         │                                         ▼          │
+│         │                              ┌────────────────┐   │
+│         │                              │ Call Scoring   │   │
+│         │                              │    Service     │   │
+│         │                              └────────────────┘   │
+│         │                                         │          │
+│         ▼                                         ▼          │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │           DB Service API Client                      │   │
+│  │  - Store agent info                                  │   │
+│  │  - Store scan results                                │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+         ▲                                           │
+         │                                           ▼
+   ┌──────────┐                            ┌──────────────────┐
+   │ Scanning │                            │ Universal-Scoring│
+   │  Agents  │                            │     Service      │
+   └──────────┘                            └──────────────────┘
+                                                     │
+                                                     ▼
+                                           ┌──────────────────┐
+                                           │   DB Service     │
+                                           └──────────────────┘
+```
+
+#### Request Flow Example
+
+```
+Sequence: Agent Submits Audit Results
+
+Scanning Agent                System-Scanner (`system-scan`)         Universal-Scoring        DB Service
+      │                            │                         │                    │
+      │ POST /receive_audit_result │                         │                    │
+      │───────────────────────────▶│                         │                    │
+      │                            │                         │                    │
+      │                            │ Validate Request        │                    │
+      │                            │──────────┐              │                    │
+      │                            │          │              │                    │
+      │                            │◀─────────┘              │                    │
+      │                            │                         │                    │
+      │                            │ POST /api/v1/score      │                    │
+      │                            │────────────────────────▶│                    │
+      │                            │                         │                    │
+      │                            │                         │ Calculate Score    │
+      │                            │                         │─────────┐          │
+      │                            │                         │         │          │
+      │                            │                         │◀────────┘          │
+      │                            │                         │                    │
+      │                            │ ◀───── Score Response ──│                    │
+      │                            │                         │                    │
+      │                            │ POST /scans/result                           │
+      │                            │─────────────────────────────────────────────▶│
+      │                            │                                              │
+      │                            │ ◀───── Success ──────────────────────────────│
+      │                            │                         │                    │
+      │ ◀─── Success Response ─────│                         │                    │
+      │                            │                         │                    │
+```
+
+#### Key Responsibilities
+
+- **Agent Management**: Tracks registered agents and their status
+- **Command & Control**: Dispatches tasks to agents based on system needs
+- **Result Processing**: Receives and validates audit data from agents
+- **Orchestration**: Coordinates scoring and storage operations
+- **Logging**: Comprehensive structured logging for debugging
+
+#### Technology Stack
+
+| Component | Technology | Justification |
+|-----------|-----------|---------------|
+| Language | Python 3 | Rich libraries for web and data handling |
+| Framework | FastAPI | High performance, auto-validation, async support |
+| Protocol | REST API | Stateless, scalable, well-understood |
+| Container | Docker | Isolated, reproducible environment |
+
+---
+
+## 13. REFERENCE TABLES
+
+### 13.1 Port Reference
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Frontend | 3000 | User interface |
+| Onboarding | 8008 | Batch operations orchestrator |
+| DB Service | 8001 | Data access API |
+| Repo-Scanner | 8003 | Git repository scanning |
+| Universal-Scoring | 9500 | Scoring engine |
+| Crypto-Scanner | 8000 | TLS/SSL scanning |
+| System-Scanner (`system-scan`) | 9000 | Infrastructure scanning (agent-based) |
+| PostgreSQL | 5432 | Database |
+
+---
+
+#### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   REPO-SCANNER SERVICE                       │
+│                                                              │
+│  API Layer (FastAPI)                                         │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ /api/scan         - Queue new scan                   │   │
+│  │ /api/scans        - List all scans                   │   │
+│  │ /api/scans/{id}   - Get scan details                 │   │
+│  │ /api/queue/status - Queue summary                    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │       Request Handler                  │                 │
+│  │  - Validate Git URL                    │                 │
+│  │  - Check cache (commit hash)           │                 │
+│  │  - Create job in database              │                 │
+│  └────────────────────────────────────────┘                 │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │      PostgreSQL Job Queue              │                 │
+│  │  repositories table                    │                 │
+│  │  - id, url, branch, status             │                 │
+│  │  - pending → in_progress → completed   │                 │
+│  └────────────────────────────────────────┘                 │
+│         ▲                                                    │
+│         │                                                    │
+│         │  Background Worker Thread (Polls Queue)           │
+│         │                                                    │
+│  ┌────────────────────────────────────────┐                 │
+│  │      Scan Job Processor                │                 │
+│  │  1. Clone repository                   │                 │
+│  │  2. Recursively scan files             │                 │
+│  │  3. Apply regex patterns               │                 │
+│  │  4. Group findings                     │                 │
+│  │  5. Call scoring service               │                 │
+│  │  6. Save results to database           │                 │
+│  └────────────────────────────────────────┘                 │
+│         │                    │                               │
+│         ▼                    ▼                               │
+│  Universal-Scoring      PostgreSQL                           │
+│     Service              (Direct)                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Job Lifecycle
+
+```
+Job States:
+
+pending ──────▶ in_progress ──────▶ completed
+                     │
+                     │
+                     ▼
+                  failed
+
+
+Detailed Flow:
+
+1. API Request Received
+   └─▶ /api/scan with repo URL
+
+2. Validation & Caching
+   ├─▶ Validate Git URL format
+   ├─▶ Temporary clone to get commit hash
+   └─▶ Check DB for existing scan of same commit
+       ├─▶ If found: Return cached result
+       └─▶ If not found: Continue
+
+3. Job Creation
+   └─▶ INSERT into repositories table
+       - scan_status = 'pending'
+       - repo_url, branch_name
+       └─▶ Return job_id to client
+
+4. Background Processing (Worker Thread)
+   └─▶ Poll: SELECT * WHERE scan_status = 'pending'
+       └─▶ For each pending job:
+           ├─▶ UPDATE scan_status = 'in_progress'
+           │
+           ├─▶ Clone repository
+           │   └─▶ git clone <url> -b <branch>
+           │
+           ├─▶ Scan files recursively
+           │   └─▶ For each file:
+           │       └─▶ Apply 100+ crypto regex patterns
+           │           └─▶ Collect matches
+           │
+           ├─▶ Group findings by algorithm
+           │
+           ├─▶ Call Universal-Scoring Service
+           │   └─▶ POST /api/v1/score/repository
+           │
+           ├─▶ Save complete report to DB
+           │   └─▶ UPDATE repositories SET
+           │       - scan_status = 'completed'
+           │       - results = <JSON>
+           │
+           └─▶ Cleanup: Remove cloned repo
+```
+
+#### Key Responsibilities
+
+- **Asynchronous Job Queue**: Manages long-running scan jobs
+- **Git Operations**: Clones and analyzes source code repositories
+- **Pattern Matching**: Searches for 100+ cryptographic patterns
+- **State Management**: Tracks job lifecycle in database
+- **Caching**: Avoids duplicate scans using commit hashes
+
+---
+
+#### Key Responsibilities
+
+- **Algorithm Analysis**: Evaluates cryptographic strength
+- **PQC Assessment**: Determines quantum resistance
+- **Score Calculation**: Produces quantitative metrics
+- **Knowledge Base**: Maintains cryptographic algorithm database
+- **Stateless Processing**: No dependencies, purely computational
+
+---
+
+
+
+

@@ -20,24 +20,22 @@ import requests
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional, Any
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request # Import Request and status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError # Import RequestValidationError
+from fastapi.responses import JSONResponse # Import JSONResponse
 from pydantic import BaseModel, HttpUrl
 import uvicorn 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, Float
 from sqlalchemy.orm import sessionmaker, relationship, Session
 from sqlalchemy.ext.declarative import declarative_base
 from contextlib import contextmanager
+from logging_config import setup_logging
+from exceptions import APIError
+from logging_middleware import correlation_middleware
 
 # --- Logging Setup ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("repo_scanner.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+setup_logging("REPO-SCANNER", logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # --- SQLAlchemy Setup ---
@@ -1388,6 +1386,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors consistently"""
+    logger.error(f"Validation error: {exc.errors()}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": {
+                "error": "validation_error",
+                "message": "Request validation failed",
+                "errors": exc.errors(),
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    )
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Catch-all for unexpected errors"""
+    logger.exception(f"Unexpected error: {exc}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": {
+                "error": "internal_error",
+                "message": "An internal server error occurred",
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    )
+
 def calculate_repo_overall_score(scored_algorithms: Dict) -> Dict:
     """
     Calculate weighted overall score AND category-wise scores for a repository.
@@ -1587,12 +1618,12 @@ async def validate_url_endpoint(scan_request: ScanRequest):
     repo_url = scan_request.repo_url.strip()
 
     if not repo_url:
-        raise HTTPException(status_code=400, detail='Repository URL is required')
+        raise APIError(status_code=400, error_code="repo_url_required", message='Repository URL is required')
 
     is_valid, message = url_parser.validate_url(repo_url)
 
     if not is_valid:
-        raise HTTPException(status_code=400, detail=message)
+        raise APIError(status_code=400, error_code="invalid_repo_url", message=message)
 
     normalized_url = url_parser.normalize_url(repo_url)
     platform = url_parser.detect_platform(normalized_url)
@@ -1610,12 +1641,12 @@ async def fetch_branches_endpoint(scan_request: ScanRequest):
     repo_url = scan_request.repo_url.strip()
 
     if not repo_url:
-        raise HTTPException(status_code=400, detail='Repository URL is required')
+        raise APIError(status_code=400, error_code="repo_url_required", message='Repository URL is required')
 
     # Validate URL
     is_valid, validation_msg = url_parser.validate_url(repo_url)
     if not is_valid:
-        raise HTTPException(status_code=400, detail=validation_msg)
+        raise APIError(status_code=400, error_code="invalid_repo_url", message=validation_msg)
 
     # Normalize URL and detect platform
     normalized_url = url_parser.normalize_url(repo_url)
@@ -1626,9 +1657,10 @@ async def fetch_branches_endpoint(scan_request: ScanRequest):
     owner, repo = fetcher.extract_owner_repo(normalized_url, platform)
 
     if not owner or not repo:
-        raise HTTPException(
+        raise APIError(
             status_code=400, 
-            detail='Could not extract repository owner and name from URL'
+            error_code="repo_owner_repo_not_extracted",
+            message='Could not extract repository owner and name from URL'
         )
 
     # Fetch branches based on platform
@@ -1639,14 +1671,15 @@ async def fetch_branches_endpoint(scan_request: ScanRequest):
     elif platform == 'Bitbucket':
         result = fetcher.fetch_bitbucket_branches(owner, repo)
     else:
-        raise HTTPException(
+        raise APIError(
             status_code=400, 
-            detail=f'Branch fetching not supported for {platform} yet. Please enter branch name manually.'
+            error_code="platform_not_supported",
+            message=f'Branch fetching not supported for {platform} yet. Please enter branch name manually.'
         )
 
     # Check for errors
     if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+        raise APIError(status_code=400, error_code="branch_fetch_failed", message=result["error"])
 
     return BranchListResponse(
         branches=result["branches"],
@@ -1664,12 +1697,12 @@ async def scan_repository_endpoint(scan_request: ScanRequest):
     branch_name = branch_name.strip()
 
     if not repo_url:
-        raise HTTPException(status_code=400, detail='repo_url is required')
+        raise APIError(status_code=400, error_code="repo_url_required", message='repo_url is required')
 
     # Validate URL
     is_valid, validation_msg = url_parser.validate_url(repo_url)
     if not is_valid:
-        raise HTTPException(status_code=400, detail=validation_msg)
+        raise APIError(status_code=400, error_code="invalid_repo_url", message=validation_msg)
 
     # Normalize URL and detect platform
     normalized_url = url_parser.normalize_url(repo_url)
@@ -1726,15 +1759,15 @@ async def scan_repository_endpoint(scan_request: ScanRequest):
             error_msg = e.stderr.decode() if e.stderr else 'Failed to clone repository'
             if 'did not match any remote' in error_msg or 'not found' in error_msg.lower():
                 error_msg = f"Branch '{branch_name}' not found in {platform} repository"
-            raise HTTPException(status_code=400, detail=f'Failed to clone repository from {platform}. Details: {error_msg}')
+            raise APIError(status_code=400, error_code="clone_failed", message=f'Failed to clone repository from {platform}. Details: {error_msg}')
         except subprocess.TimeoutExpired:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            raise HTTPException(status_code=408, detail='Repository clone timed out. The repository might be too large or the connection is slow.')
+            raise APIError(status_code=408, error_code="clone_timeout", message='Repository clone timed out. The repository might be too large or the connection is slow.')
         except Exception as e:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            raise HTTPException(status_code=500, detail=str(e))
+            raise APIError(status_code=500, error_code="internal_server_error", message=str(e))
 
 
 @app.get('/api/scans', response_model=List[AllScansResponse])
@@ -1753,9 +1786,9 @@ async def get_scan_details_endpoint(scan_id: int):
             details = db_manager.get_scan_details(db, scan_id)
             return details
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise APIError(status_code=404, error_code="scan_not_found", message=str(e))
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
+            raise APIError(status_code=500, error_code="internal_server_error", message=f'Internal server error: {str(e)}')
 
 
 @app.get('/api/scans/{scan_id}/algorithm/{algorithm}/findings', response_model=AlgorithmFindingsResponse)
@@ -1777,7 +1810,7 @@ async def get_algorithm_findings(
             ).first()
 
             if not scan_result:
-                raise HTTPException(status_code=404, detail='Algorithm not found in this scan')
+                raise APIError(status_code=404, error_code="algorithm_not_found", message='Algorithm not found in this scan')
 
             findings_query = db.query(Finding).filter(
                 Finding.scan_result_id == scan_result.id
@@ -1842,7 +1875,7 @@ async def get_algorithm_findings(
             }
         except Exception as e:
             logger.error(f"Failed to get algorithm findings: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f'Internal server error: {str(e)}')
+            raise APIError(status_code=500, error_code="internal_server_error", message=f'Internal server error: {str(e)}')
 
 
 @app.get('/api/queue/status', response_model=QueueStatusResponse)
@@ -1863,7 +1896,13 @@ async def get_queue_status():
                 'pending_jobs': pending[:5] # Return first 5 pending jobs
             }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise APIError(status_code=500, error_code="internal_server_error", message=str(e))
+
+
+@app.get("/health")
+def health():
+    logger.debug("Health check called")
+    return {"status": "ok"}
 
 
 if __name__ == '__main__':

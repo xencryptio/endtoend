@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { UnifiedBackButton, UnifiedResultCard, UnifiedCard, UnifiedFileInput, UnifiedActionLoading, UnifiedInlineRefresh } from "@/components/ui/unified";
 import ResultsDetailPage from "./ResultsDetailPage";
+import { apiFetch } from '@/lib/api';
 
 // ============================================================================
 // INTERFACES & TYPES
@@ -325,7 +326,7 @@ const deleteScanBatch = async (apiBaseUrl: string, batchId: string): Promise<boo
     const deleteUrl = `${normalizedBaseUrl}/scans/batch/${batchId}`;
     console.log('🗑️ Attempting to delete batch at:', deleteUrl);
     
-    const response = await fetch(deleteUrl, {
+    const response = await apiFetch(deleteUrl, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json'
@@ -333,15 +334,12 @@ const deleteScanBatch = async (apiBaseUrl: string, batchId: string): Promise<boo
     });
     
     console.log('Response status:', response.status);
-    console.log('Response OK:', response.ok);
     
-    if (response.ok) {
-      const data = await response.json();
-      console.log('✅ Batch deleted successfully:', data);
+    if (response) {
+      console.log('✅ Batch deleted successfully:', response);
       return true;
     } else {
-      const errorData = await response.text();
-      console.error('❌ Delete failed with status', response.status, ':', errorData);
+      console.error('❌ Delete failed with status');
       return false;
     }
   } catch (error) {
@@ -358,7 +356,7 @@ const deleteScanResult = async (apiBaseUrl: string, resultId: number): Promise<b
     const deleteUrl = `${normalizedBaseUrl}/scans/result/${resultId}`;
     console.log('🗑️ Attempting to delete result at:', deleteUrl);
     
-    const response = await fetch(deleteUrl, {
+    const response = await apiFetch(deleteUrl, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json'
@@ -366,15 +364,12 @@ const deleteScanResult = async (apiBaseUrl: string, resultId: number): Promise<b
     });
     
     console.log('Response status:', response.status);
-    console.log('Response OK:', response.ok);
     
-    if (response.ok) {
-      const data = await response.json();
-      console.log('✅ Result deleted successfully:', data);
+    if (response) {
+      console.log('✅ Result deleted successfully:', response);
       return true;
     } else {
-      const errorData = await response.text();
-      console.error('❌ Delete failed with status', response.status, ':', errorData);
+      console.error('❌ Delete failed with status');
       return false;
     }
   } catch (error) {
@@ -392,7 +387,7 @@ const clearAllScans = async (apiBaseUrl: string): Promise<boolean> => {
     const deleteUrl = `${normalizedBaseUrl}/scans/clear-all`;
     console.log('🗑️ Attempting to clear all at:', deleteUrl);
     
-    const response = await fetch(deleteUrl, {
+    const response = await apiFetch(deleteUrl, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json'
@@ -400,15 +395,12 @@ const clearAllScans = async (apiBaseUrl: string): Promise<boolean> => {
     });
     
     console.log('Response status:', response.status);
-    console.log('Response OK:', response.ok);
     
-    if (response.ok) {
-      const data = await response.json();
-      console.log('✅ All data cleared successfully:', data);
+    if (response) {
+      console.log('✅ All data cleared successfully:', response);
       return true;
     } else {
-      const errorData = await response.text();
-      console.error('❌ Clear all failed with status', response.status, ':', errorData);
+      console.error('❌ Clear all failed with status');
       return false;
     }
   } catch (error) {
@@ -421,16 +413,10 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
   try {
     // Call the scan-service which proxies to db-service
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
-    const response = await fetch(`${normalizedBaseUrl}/batches`);
+    const response = await apiFetch(`${normalizedBaseUrl}/batches`);
     
-    if (!response.ok) {
-      console.warn(`Failed to load historical scans: ${response.status}`);
-      return [];
-    }
-    
-    const batchesData = await response.json();
     // Handle both array and object with 'batches' key
-    const batches = Array.isArray(batchesData) ? batchesData : (batchesData.batches || []);
+    const batches = Array.isArray(response) ? response : (response.batches || []);
     
     // Convert batches to ScanResult format
     console.log(`📊 Loaded ${batches.length} batches from database`);
@@ -468,14 +454,9 @@ const loadBatchDetails = async (apiBaseUrl: string, batchId: string) => {
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
     
     // Fetch batch results
-    const response = await fetch(`${normalizedBaseUrl}/results/batch/${batchId}`);
+    const response = await apiFetch(`${normalizedBaseUrl}/results/batch/${batchId}`);
     
-    if (!response.ok) {
-      console.warn(`Failed to load batch details for ${batchId}: ${response.status}`);
-      return [];
-    }
-    const data = await response.json();
-    const results = Array.isArray(data) ? data : (data.results || []);
+    const results = Array.isArray(response) ? response : (response.results || []);
     
     // Map and normalize results
     return results.map((result: any) => ({
@@ -528,7 +509,7 @@ const connectSSEWithPost = async (
       save_to_db: saveToDb  // ADD THIS
     });
 
-    const response = await fetch(fullUrl, {
+    const response = await fetch(fullUrl, { // We are deliberately not using apiFetch here because it parses the response body as JSON
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -658,13 +639,10 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl }) => {
     
     setIsCancelling(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/cancel-scan/${currentRequestId}`, {
+      await apiFetch(`${apiBaseUrl}/cancel-scan/${currentRequestId}`, {
         method: 'POST'
       });
-      
-      if (response.ok) {
-        showMessage('Cancelling scan...', 'warning');
-      }
+      showMessage('Cancelling scan...', 'warning');
     } catch (error) {
       showMessage('Failed to cancel scan', 'error');
     }

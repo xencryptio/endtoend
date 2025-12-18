@@ -19,26 +19,25 @@ import servicemanager
 import win32event
 import win32service
 import win32serviceutil
+from logging_config import setup_logging
+import httpx
+from http_client import call_service
+import asyncio
+from exceptions import APIError
 
 # Import the crypto audit function
 from windows_audit import crypto_information_audit
 
 # Configuration
-API_BASE_URL = "http://192.168.91.128:9000"  # Change this to your API server URL
-POLL_INTERVAL = 5  # seconds
-LOG_FILE = "C:\\ProgramData\\CryptoAgent\\crypto_agent.log"
-AGENT_ID_FILE = "C:\\ProgramData\\CryptoAgent\\agent_id.txt"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://192.168.91.128:9000")
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))
+LOG_FILE = os.getenv("AGENT_LOG_FILE", "C:\\ProgramData\\CryptoAgent\\crypto_agent.log")
+AGENT_ID_FILE = os.getenv("AGENT_ID_FILE", "C:\\ProgramData\\CryptoAgent\\agent_id.txt")
+AGENT_PROFILE = os.getenv("AGENT_PROFILE", "default")
 
 # Setup logging
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+setup_logging("CRYPTO-AGENT-WINDOWS", logging.INFO)
 logger = logging.getLogger("CryptoAgentWindows")
 
 
@@ -121,67 +120,87 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
     
     def register_agent(self):
         """Register this agent with the API server"""
-        try:
-            system_info = self.get_system_info()
-            if not system_info:
-                logger.error("Failed to get system information")
-                return False
-            
-            url = f"{API_BASE_URL}/api/v1/agent/register"
-            response = requests.post(url, json=system_info, timeout=10)
-            
-            if response.status_code == 200:
-                logger.info("Agent registered successfully")
-                self.registered = True
-                return True
-            else:
-                logger.error(f"Registration failed: {response.status_code} - {response.text}")
-                return False
+        async def _async_register():
+            try:
+                system_info = self.get_system_info()
+                if not system_info:
+                    logger.error("Failed to get system information")
+                    return False
                 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Registration request failed: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error during registration: {e}")
-            return False
+                url = f"{API_BASE_URL}/api/v1/agent/register"
+                headers = {
+                  "X-Agent-ID": self.agent_id,
+                  "X-Agent-Profile": AGENT_PROFILE
+                }
+
+                response = await call_service("POST", url, json=system_info, headers=headers, timeout=10)
+                
+                return response.status_code == 200
+                    
+            except httpx.RequestError as e:
+                logger.error(f"Registration request failed: {e}")
+                raise APIError(status_code=500, error_code="network_error", message=f"Registration network request failed: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error during registration: {e}")
+                raise APIError(status_code=500, error_code="unexpected_error", message=f"Unexpected error during registration: {e}")
+        
+        success = asyncio.run(_async_register())
+        if success:
+            logger.info("Agent registered successfully")
+            self.registered = True
+        return success
     
     def send_system_info(self):
         """Send current system information to API server"""
-        try:
-            system_info = self.get_system_info()
-            if not system_info:
-                return False
-            
-            url = f"{API_BASE_URL}/api/v1/system/info"
-            response = requests.post(url, json=system_info, timeout=10)
-            
-            if response.status_code == 200:
-                logger.debug("System info sent successfully")
-                return True
-            else:
-                logger.warning(f"Failed to send system info: {response.status_code}")
-                return False
+        async def _async_send():
+            try:
+                system_info = self.get_system_info()
+                if not system_info:
+                    return False
                 
-        except Exception as e:
-            logger.error(f"Error sending system info: {e}")
-            return False
+                url = f"{API_BASE_URL}/api/v1/system/info"
+                headers = {
+                  "X-Agent-ID": self.agent_id,
+                  "X-Agent-Profile": AGENT_PROFILE
+                }
+
+                response = await call_service("POST", url, json=system_info, headers=headers, timeout=10)
+                
+                return response.status_code == 200
+                    
+            except httpx.RequestError as e:
+                logger.error(f"Error sending system info: {e}")
+                raise APIError(status_code=500, error_code="network_error", message=f"Network error sending system info: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error sending system info: {e}")
+                raise APIError(status_code=500, error_code="unexpected_error", message=f"Unexpected error sending system info: {e}")
+        
+        success = asyncio.run(_async_send())
+        if success:
+            logger.debug("System info sent successfully")
+        return success
     
     def fetch_action(self):
         """Poll the API server for pending actions"""
-        try:
-            url = f"{API_BASE_URL}/api/v1/agent/fetchaction/{self.agent_id}"
-            response = requests.get(url, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                return data
-            else:
-                logger.warning(f"Fetch action failed: {response.status_code}")
-                return None
+        async def _async_fetch():
+            try:
+                url = f"{API_BASE_URL}/api/v1/agent/fetchaction/{self.agent_id}"
+                headers = {
+                  "X-Agent-ID": self.agent_id,
+                  "X-Agent-Profile": AGENT_PROFILE
+                }
+
+                response = await call_service("GET", url, headers=headers, timeout=10)
                 
-        except Exception as e:
-            logger.error(f"Error fetching action: {e}")
-            return None
+                return response.json()
+                    
+            except httpx.RequestError as e:
+                logger.error(f"Error fetching action: {e}")
+                raise APIError(status_code=500, error_code="network_error", message=f"Network error fetching action: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error fetching action: {e}")
+                raise APIError(status_code=500, error_code="unexpected_error", message=f"Unexpected error fetching action: {e}")
+        return asyncio.run(_async_fetch())
     
     def perform_crypto_audit(self):
         """Execute cryptographic audit locally - NO LOCAL STORAGE"""
@@ -211,42 +230,44 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
     
     def send_audit_results(self, task_id, audit_results):
         """Send audit results to API server"""
-        try:
-            url = f"{API_BASE_URL}/api/v1/audit/result"
-            
-            payload = {
-                "agent_id": self.agent_id,
-                "task_id": task_id,
-                "os": "Windows",  # ✅ ADD PLATFORM TO PAYLOAD
-                "audit_results": audit_results,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            logger.info(f"Sending audit results with os: {payload.get('os')}")
-            
-            response = requests.post(url, json=payload, timeout=30)
-            
-            if response.status_code == 200:
-                logger.info(f"Audit results sent successfully (Task: {task_id})")
-                return True
-            elif response.status_code == 422:
-                # Validation error - log details
-                logger.error(f"Validation error (422): {response.text}")
-                try:
-                    error_detail = response.json()
-                    logger.error(f"Validation details: {json.dumps(error_detail, indent=2)}")
-                except:
-                    pass
-                return False
-            else:
-                logger.error(f"Failed to send audit results: {response.status_code} - {response.text}")
-                return False
+        async def _async_send():
+            try:
+                url = f"{API_BASE_URL}/api/v1/audit/result"
                 
-        except Exception as e:
-            logger.error(f"Error sending audit results: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return False
+                payload = {
+                    "agent_id": self.agent_id,
+                    "task_id": task_id,
+                    "os": "Windows",  # ✅ ADD PLATFORM TO PAYLOAD
+                    "audit_results": audit_results,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                logger.info(f"Sending audit results with os: {payload.get('os')}")
+                
+                headers = {
+                  "X-Agent-ID": self.agent_id,
+                  "X-Agent-Profile": AGENT_PROFILE
+                }
+
+                response = await call_service("POST", url, json=payload, headers=headers, timeout=30)
+                
+                return response.status_code == 200
+                    
+            except httpx.RequestError as e:
+                logger.error(f"Error sending audit results: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise APIError(status_code=500, error_code="network_error", message=f"Network error sending audit results: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error sending audit results: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise APIError(status_code=500, error_code="unexpected_error", message=f"Unexpected error sending audit results: {e}")
+        
+        success = asyncio.run(_async_send())
+        if success:
+            logger.info(f"Audit results sent successfully (Task: {task_id})")
+        return success
     
     def SvcStop(self):
         """Called when the service is being stopped"""
@@ -322,6 +343,12 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
                 # Sleep for polling interval
                 time.sleep(POLL_INTERVAL)
                 
+            except APIError as e:
+                logger.error(f"Error in main loop with APIError: {e.message} (Code: {e.error_code})")
+                import traceback
+                logger.error(traceback.format_exc())
+                if self.running:
+                    time.sleep(POLL_INTERVAL)
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
                 import traceback

@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y \
 # =============================================================================
 # PYTHON DEPENDENCIES
 # =============================================================================
-RUN pip3 install requests
+RUN pip3 install requests httpx
 
 # =============================================================================
 # DIRECTORY STRUCTURE
@@ -45,10 +45,13 @@ RUN mkdir -p /opt/crypto-agent \
     /etc/ssh
 
 # =============================================================================
-# COPY AGENT FILES
+# COPY AGENT FILES (INCLUDING MISSING MODULES)
 # =============================================================================
 COPY crypto_agent_service.py /opt/crypto-agent/
 COPY linux_server.py /opt/crypto-agent/
+COPY logging_config.py /opt/crypto-agent/
+COPY http_client.py /opt/crypto-agent/
+COPY exceptions.py /opt/crypto-agent/
 COPY entrypoint.sh /opt/crypto-agent/
 RUN chmod +x /opt/crypto-agent/entrypoint.sh
 
@@ -89,7 +92,6 @@ RUN mkdir -p /run/sshd && \
 # =============================================================================
 
 # Generate legacy certificates (RSA-1024 with MD5 - intentionally weak)
-# Note: Added -y to force overwrite existing files without prompting
 RUN openssl req -x509 -newkey rsa:1024 -md5 -nodes \
     -keyout /etc/ssl/private/legacy-server.key \
     -out /etc/ssl/certs/legacy-server.crt \
@@ -108,7 +110,6 @@ RUN openssl req -x509 -newkey rsa:2048 -sha1 -nodes \
     -subj "/C=US/ST=Demo/L=Docker/O=CryptoAudit/OU=Legacy/CN=debian-legacy-sha1" \
     -days 365 -nodes -batch
 
-# --- FIX: Force removal before generating SSH host keys ---
 # Generate SSH host keys (legacy algorithms)
 RUN rm -f /etc/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key.pub /etc/ssh/ssh_host_dsa_key /etc/ssh/ssh_host_dsa_key.pub && \
     ssh-keygen -t rsa -b 1024 -f /etc/ssh/ssh_host_rsa_key -N "" && \
@@ -123,6 +124,7 @@ ENV CRYPTO_API_BASE_URL=${API_SERVER}
 ENV CRYPTO_POLL_INTERVAL=10
 ENV CRYPTO_LOG_FILE=/var/log/crypto_agent.log
 ENV CRYPTO_AGENT_ID_FILE=/var/lib/crypto_agent/agent_id
+ENV AGENT_PROFILE=legacy
 
 EXPOSE 22
 

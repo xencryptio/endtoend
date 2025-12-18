@@ -20,4 +20,4 @@ EXPOSE 8001
 
 # Run the application
 # Run migrations and then start the application
-CMD alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8001
+CMD alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8001 --log-level debug

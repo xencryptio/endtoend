@@ -20,8 +20,8 @@ RUN apk add --no-cache \
     sudo \
     bash
 
-# Install Python dependencies
-RUN pip3 install --break-system-packages requests
+# Install Python dependencies (including httpx)
+RUN pip3 install --break-system-packages requests httpx
 
 # Create directories
 RUN mkdir -p /opt/crypto-agent \
@@ -29,9 +29,12 @@ RUN mkdir -p /opt/crypto-agent \
     /var/log \
     /etc/ssh
 
-# Copy agent files
+# Copy agent files (including missing modules)
 COPY crypto_agent_service.py /opt/crypto-agent/
 COPY linux_server.py /opt/crypto-agent/
+COPY logging_config.py /opt/crypto-agent/
+COPY http_client.py /opt/crypto-agent/
+COPY exceptions.py /opt/crypto-agent/
 COPY entrypoint.sh /opt/crypto-agent/
 
 RUN chmod +x /opt/crypto-agent/entrypoint.sh
@@ -102,6 +105,7 @@ ENV CRYPTO_API_BASE_URL=${API_SERVER}
 ENV CRYPTO_POLL_INTERVAL=10
 ENV CRYPTO_LOG_FILE=/var/log/crypto_agent.log
 ENV CRYPTO_AGENT_ID_FILE=/var/lib/crypto_agent/agent_id
+ENV AGENT_PROFILE=mixed
 
 EXPOSE 22
 

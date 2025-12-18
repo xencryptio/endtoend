@@ -11,6 +11,7 @@ import {
 import { typography } from "@/lib/design-tokens";
 import WebScan from '@/components/scan/webscan';
 import GitScan from "@/components/git-scan/git-scan";
+import { apiFetch } from '@/lib/api';
 
 // ============================================================================
 // INTERFACES & TYPES
@@ -48,13 +49,9 @@ const API_CONFIG = {
 
 const fetchDataFromAPI = async (): Promise<ApiCryptoAlgorithm[]> => {
   try {
-    const response = await fetch(`${API_CONFIG.cryptoApi}/apps3`);
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
-    }
-    const result = await response.json();
+    const response = await apiFetch(`${API_CONFIG.cryptoApi}/apps3`);
     console.log('✓ API data fetched successfully');
-    return result.data || [];
+    return response.data || [];
   } catch (error) {
     console.error('✗ Failed to fetch data from API:', error);
     return [];

@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 import models
 import schemas
 from data_extractor import extract_all_normalized_fields
+import logging
 
 
 # ============================================================
@@ -85,22 +86,16 @@ def create_scan_result(
 ) -> models.ScanResult:
     """Create a new scan result and extract normalized fields."""
     scan_data = scan.model_dump()
+    log = logging.getLogger(__name__)
 
-    print(f"\n{'='*60}")
-    print(f"📥 DB-SERVICE: Creating scan result")
-    print(f"   URL: {scan_data.get('url')}")
-    print(f"   Status: {scan_data.get('status')}")
-    print(f"   Has raw_response: {bool(scan_data.get('raw_response'))}")
+    log.info(f"Creating scan result for URL: {scan_data.get('url')}, Status: {scan_data.get('status')}")
 
     raw_response = scan_data.get("raw_response")
     if raw_response:
-        print(f"   🔍 Extracting normalized fields...")
-        print(f"   Raw response keys: {list(raw_response.keys())}")
+        log.info("Extracting normalized fields...")
         try:
             normalized_fields = extract_all_normalized_fields(raw_response)
-            print(f"   ✅ Extracted {len(normalized_fields)} normalized fields")
-            print(f"   PQC Score: {normalized_fields.get('pqc_overall_score')}")
-            print(f"   PQC Grade: {normalized_fields.get('pqc_overall_grade')}")
+            log.info(f"Extracted {len(normalized_fields)} normalized fields. PQC Score: {normalized_fields.get('pqc_overall_score')}, PQC Grade: {normalized_fields.get('pqc_overall_grade')}")
 
             # Update scan_data with normalized fields
             scan_data.update(normalized_fields)
@@ -112,16 +107,16 @@ def create_scan_result(
             if scan_data['status'] == 'completed' and 'scan_status' not in raw_response:
                  scan_data['scan_status'] = 'completed'
         except Exception as e:
-            print(f"   ⚠️ Error extracting normalized fields: {e}")
+            log.warning(f"Error extracting normalized fields: {e}")
     else:
-        print(f"   ⚠️ No raw_response provided!")
+        log.warning("No raw_response provided!")
 
     # Remove deprecated fields
     if 'quantum_score' in scan_data:
-        print(f"   🗑️ Removing quantum_score (replaced with pqc_overall_score)")
+        log.info("Removing quantum_score (replaced with pqc_overall_score)")
         del scan_data['quantum_score']
     if 'quantum_grade' in scan_data:
-        print(f"   🗑️ Removing quantum_grade (replaced with pqc_overall_grade)")
+        log.info("Removing quantum_grade (replaced with pqc_overall_grade)")
         del scan_data['quantum_grade']
 
     try:
@@ -130,17 +125,13 @@ def create_scan_result(
         db.commit()
         db.refresh(db_scan)
 
-        print(f"   ✅ Saved to database with ID: {db_scan.id}")
-        print(f"   Stored PQC Score: {db_scan.pqc_overall_score}")
-        print(f"   Stored PQC Grade: {db_scan.pqc_overall_grade}")
-        print(f"{'='*60}\n")
+        log.info(f"Saved to database with ID: {db_scan.id}. Stored PQC Score: {db_scan.pqc_overall_score}, Stored PQC Grade: {db_scan.pqc_overall_grade}")
 
         update_batch_counts(db, scan.batch_id)
         return db_scan
 
     except Exception as e:
-        print(f"   ❌ Error creating database record: {e}")
-        print(f"{'='*60}\n")
+        log.exception("Error creating database record")
         db.rollback()
         raise
 

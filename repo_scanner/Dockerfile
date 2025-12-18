@@ -14,9 +14,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY alembic.ini .
 COPY alembic ./alembic
+COPY logging_config.py .
+COPY logging_middleware.py .
+COPY http_client.py .
+COPY exceptions.py .
 
 # ✅ CHANGE PORT FROM 5000 TO 8001
 EXPOSE 8001
 
 # Run migrations and then start the application
-CMD alembic upgrade head && uvicorn app:app --host 0.0.0.0 --port 8001
+CMD alembic upgrade head && uvicorn app:app --host 0.0.0.0 --port 8001 --log-level debug

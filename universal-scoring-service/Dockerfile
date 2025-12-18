@@ -7,4 +7,4 @@ RUN apt-get update && apt-get install -y curl && pip install --no-cache-dir -r r
 
 COPY . .
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9500"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9500", "--log-level", "debug"]

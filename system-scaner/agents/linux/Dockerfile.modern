@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-RUN pip3 install requests
+RUN pip3 install requests httpx
 
 # Create directories
 RUN mkdir -p /opt/crypto-agent \
@@ -34,6 +34,9 @@ RUN mkdir -p /opt/crypto-agent \
 # Copy agent files
 COPY crypto_agent_service.py /opt/crypto-agent/
 COPY linux_server.py /opt/crypto-agent/
+COPY logging_config.py /opt/crypto-agent/
+COPY http_client.py /opt/crypto-agent/
+COPY exceptions.py /opt/crypto-agent/
 COPY entrypoint.sh /opt/crypto-agent/
 
 # Make entrypoint executable
@@ -98,6 +101,7 @@ ENV CRYPTO_API_BASE_URL=${API_SERVER}
 ENV CRYPTO_POLL_INTERVAL=10
 ENV CRYPTO_LOG_FILE=/var/log/crypto_agent.log
 ENV CRYPTO_AGENT_ID_FILE=/var/lib/crypto_agent/agent_id
+ENV AGENT_PROFILE=modern
 
 # Expose SSH port (for demonstration)
 EXPOSE 22

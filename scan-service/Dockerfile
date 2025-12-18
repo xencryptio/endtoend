@@ -37,10 +37,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # ============================================================================
-# STAGE 4: Copy application code (FIXED - Copy ALL Python files)
+# STAGE 4: Copy ALL Python files (FIXED)
 # ============================================================================
-COPY crypto_audit.py .
-COPY db_handler.py .
+COPY *.py .
 
 # ============================================================================
 # STAGE 5: Configuration
@@ -54,4 +53,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "crypto_audit:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "crypto_audit:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug"]

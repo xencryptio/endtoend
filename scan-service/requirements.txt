@@ -4,3 +4,4 @@ uvicorn[standard]==0.27.0
 pydantic==2.5.3
 requests
 cryptography==42.0.0
+httpx

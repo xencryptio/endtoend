@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, status # Import Request and status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse # Import JSONResponse
+from fastapi.exceptions import RequestValidationError # Import RequestValidationError
 from pydantic import BaseModel, ValidationError
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from sqlalchemy import create_engine, Column, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import sessionmaker, relationship, Session, declarative_base
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from exceptions import APIError # Import APIError
 
 import requests
 from typing import Dict, Any, Optional, List
@@ -24,105 +26,221 @@ import os
 # --- Remote Scoring Configuration ---
 SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
 
-def transform_agent_data_to_scoring_format(audit_results: Dict, os_type: str) -> List[Dict]:
-    """Transform agent-specific data to universal scoring format"""
+import httpx
+
+async def score_crypto_audit_remote(audit_results: Dict[str, Any], os_type: str) -> Dict[str, Any]:
+    """
+    Send audit results to remote scoring service for PQC readiness analysis.
+    
+    Args:
+        audit_results: Raw audit data from agent
+        os_type: Operating system type ("Linux" or "Windows")
+    
+    Returns:
+        Dict containing scored results with pqc_score field
+    """
+    try:
+        logger.info(f"Calling remote scoring service at {SCORING_SERVICE_URL}")
+        
+        # ✅ TRANSFORM audit results into the format expected by scoring service
+        algorithms = extract_algorithms_from_audit(audit_results, os_type)
+        
+        payload = {
+            "scoring_type": "agent",  # ✅ Specify agent scoring type
+            "algorithms": algorithms,
+            "metadata": {
+                "os_type": os_type,
+                "timestamp": datetime.now().isoformat(),
+                "source": "crypto-agent"
+            }
+        }
+        
+        # ✅ CORRECT ENDPOINT: /api/v1/score/agent-audit
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{SCORING_SERVICE_URL}/api/v1/score/agent-audit",  # ✅ Fixed endpoint
+                json=payload
+            )
+            
+            if response.status_code == 200:
+                scored_data = response.json()
+                logger.info(f"Scoring successful - Overall score: {scored_data.get('overall_score', 'N/A')}")
+                
+                # Return original results with scoring added
+                return {
+                    **audit_results,
+                    "pqc_score": scored_data  # ✅ Full scoring response
+                }
+            else:
+                logger.error(f"Scoring service returned {response.status_code}: {response.text}")
+                return {
+                    **audit_results,
+                    "pqc_score": {
+                        "error": f"Scoring failed with status {response.status_code}",
+                        "overall_score": "N/A"
+                    }
+                }
+                
+    except httpx.TimeoutException:
+        logger.error(f"Scoring service timeout at {SCORING_SERVICE_URL}")
+        return {
+            **audit_results,
+            "pqc_score": {
+                "error": "Scoring service timeout",
+                "overall_score": "N/A"
+            }
+        }
+    except Exception as e:
+        logger.exception(f"Unexpected error during scoring: {e}")
+        return {
+            **audit_results,
+            "pqc_score": {
+                "error": f"Unexpected error: {str(e)}",
+                "overall_score": "N/A"
+            }
+        }
+
+
+def extract_algorithms_from_audit(audit_results: Dict[str, Any], os_type: str) -> List[Dict]:
+    """
+    Extract and transform algorithms from audit results into scoring service format.
+    
+    The scoring service expects:
+    {
+        "name": "AES-256-GCM",
+        "algorithm_type": "symmetric",  # kex, signature, symmetric, hash
+        "key_size": 256,
+        "position": 0
+    }
+    """
     algorithms = []
     
     if os_type.lower() == "linux":
-        data_source = audit_results.get("with_sudo") or audit_results.get("without_sudo") or audit_results
-        openssl_data = data_source.get("openssl_crypto", {})
-        cipher_details = openssl_data.get("cipher_information", {}).get("cipher_details", [])
-        
-        for idx, cipher in enumerate(cipher_details):
-            algorithms.append({
-                "name": cipher.get("name", ""),
-                "algorithm_type": "symmetric",
-                "key_size": 256 if "256" in cipher.get("name", "") else 128,
-                "position": idx,
-                "context": {"source": "openssl", "cipher": cipher}
-            })
-        
-        ssh_data = data_source.get("ssh_crypto", {})
-        if ssh_data:
-            algo_info = ssh_data.get("algorithm_information", {})
-            for cat, key in [("kex", "kex"), ("symmetric", "cipher"), ("hash", "mac")]:
-                for idx, algo in enumerate(algo_info.get(key, {}).get("algorithms", [])):
-                    algorithms.append({
-                        "name": algo,
-                        "algorithm_type": cat,
-                        "position": idx,
-                        "context": {"source": "ssh"}
-                    })
-
+        algorithms.extend(_extract_linux_algorithms(audit_results))
     elif os_type.lower() == "windows":
-        tls_ssl_config = audit_results.get("tls_ssl_configuration", {})
-        if tls_ssl_config:
-            cipher_suites_data = tls_ssl_config.get("cipher_suites", {})
-            if isinstance(cipher_suites_data, dict) and "error" not in cipher_suites_data:
-                cipher_details = cipher_suites_data.get("cipher_details", [])
-                for idx, cipher in enumerate(cipher_details):
-                    algorithms.append({
-                        "name": cipher.get("name", ""),
-                        "algorithm_type": "symmetric",
-                        "key_size": 256 if "256" in cipher.get("name", "") else 128,
-                        "position": idx,
-                        "context": {"source": "schannel"}
-                    })
+        algorithms.extend(_extract_windows_algorithms(audit_results))
     
     return algorithms
 
-def merge_scoring_into_agent_format(original: Dict, scoring: Dict) -> Dict:
-    """Merge scoring results while preserving original JSON structure"""
-    return {
-        **original,
-        "pqc_score": {
-            "overall_score": scoring["overall_score"],
-            "overall_grade": scoring["overall_grade"],
-            "security_level": scoring["security_level"],
-            "quantum_ready": scoring["quantum_ready"],
-            "hybrid_ready": scoring["hybrid_ready"],
-            "components": scoring["components"],
-            "individual_scores": scoring["algorithm_scores"]
-        }
-    }
 
-async def score_crypto_audit_remote(audit_results: Dict, os_type: str) -> Dict:
-    """Call universal scoring service instead of local scoring"""
-    algorithms_to_score = transform_agent_data_to_scoring_format(audit_results, os_type)
+def _extract_linux_algorithms(audit: Dict) -> List[Dict]:
+    """Extract algorithms from Linux audit results"""
+    algorithms = []
+    position = 0
     
-    if not algorithms_to_score:
-        logger.warning("No algorithms found to score.")
-        return {**audit_results, "pqc_score": {"error": "No algorithms found to score", "status": "scoring_failed"}}
+    # Extract from with_sudo section (most comprehensive)
+    sudo_data = audit.get("with_sudo", {})
+    
+    # 1. OpenSSL ciphers
+    openssl = sudo_data.get("openssl_crypto", {})
+    cipher_info = openssl.get("cipher_information", {})
+    
+    for cipher in cipher_info.get("cipher_details", [])[:10]:  # Top 10 ciphers
+        algorithms.append({
+            "name": cipher.get("name", "UNKNOWN"),
+            "algorithm_type": "symmetric",
+            "position": position,
+            "context": {"source": "openssl_ciphers"}
+        })
+        position += 1
+    
+    # 2. SSH ciphers
+    ssh = sudo_data.get("ssh_crypto", {})
+    ssh_algos = ssh.get("algorithm_information", {})
+    
+    for cipher in ssh_algos.get("cipher", {}).get("algorithms", [])[:5]:
+        algorithms.append({
+            "name": cipher,
+            "algorithm_type": "symmetric",
+            "position": position,
+            "context": {"source": "ssh_ciphers"}
+        })
+        position += 1
+    
+    # 3. SSH MACs (hash algorithms)
+    for mac in ssh_algos.get("mac", {}).get("algorithms", [])[:5]:
+        algorithms.append({
+            "name": mac,
+            "algorithm_type": "hash",
+            "position": position,
+            "context": {"source": "ssh_macs"}
+        })
+        position += 1
+    
+    # 4. SSH key exchange
+    for kex in ssh_algos.get("kex", {}).get("algorithms", [])[:5]:
+        algorithms.append({
+            "name": kex,
+            "algorithm_type": "kex",
+            "position": position,
+            "context": {"source": "ssh_kex"}
+        })
+        position += 1
+    
+    # 5. Certificate signatures
+    certs = sudo_data.get("certificates", {})
+    for cert in certs.get("certificates", [])[:3]:
+        crypto = cert.get("crypto_information", {})
+        sig_algo = crypto.get("signature_algorithm")
+        if sig_algo:
+            algorithms.append({
+                "name": sig_algo,
+                "algorithm_type": "signature",
+                "key_size": crypto.get("key_size", 0),
+                "position": position,
+                "context": {"source": "certificate"}
+            })
+            position += 1
+    
+    return algorithms
 
-    try:
-        response = requests.post(
-            f"{SCORING_SERVICE_URL}/api/v1/score/agent-audit",
-            json={
-                "scoring_type": "agent",
-                "algorithms": algorithms_to_score,
-                "metadata": {
-                    "source": "agent_scanner",
-                    "os": os_type,
-                    "hostname": audit_results.get("_metadata", {}).get("hostname"),
-                    "timestamp": datetime.now().isoformat()
-                }
-            },
-            timeout=30
-        )
-        response.raise_for_status()
-        scoring_results = response.json()
-        return merge_scoring_into_agent_format(audit_results, scoring_results)
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Scoping service unavailable: {e}")
-        return {**audit_results, "pqc_score": {"error": "Scoring service unavailable", "status": "scoring_failed"}}
-		
+
+def _extract_windows_algorithms(audit: Dict) -> List[Dict]:
+    """Extract algorithms from Windows audit results"""
+    algorithms = []
+    position = 0
+    
+    # 1. TLS cipher suites
+    tls = audit.get("tls_ssl_configuration", {})
+    cipher_suites = tls.get("cipher_suites", {})
+    
+    for cipher in cipher_suites.get("cipher_details", [])[:10]:
+        algorithms.append({
+            "name": cipher.get("name", "UNKNOWN"),
+            "algorithm_type": "symmetric",
+            "position": position,
+            "context": {
+                "source": "tls_cipher",
+                "protocols": cipher.get("protocols", "")
+            }
+        })
+        position += 1
+    
+    # 2. Certificate signatures
+    cert_stores = audit.get("certificate_stores", {})
+    for store_name, store_data in cert_stores.items():
+        for cert in store_data.get("certificates", [])[:3]:
+            sig_algo = cert.get("signature_algorithm")
+            if sig_algo:
+                algorithms.append({
+                    "name": sig_algo,
+                    "algorithm_type": "signature",
+                    "key_size": cert.get("public_key_size", 0),
+                    "position": position,
+                    "context": {"source": f"cert_store_{store_name}"}
+                })
+                position += 1
+    
+    return algorithms
+
+from logging_config import setup_logging
 # Configure logging
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(levelname)s - %(message)s")
+setup_logging("SYSTEM-SCAN", logging.DEBUG)
 logger = logging.getLogger(__name__)
-
+from logging_middleware import correlation_middleware
+		
 app = FastAPI(title="Crypto Audit API Server")
+app.middleware("http")(correlation_middleware)
 
 # CORS Configuration
 app.add_middleware(
@@ -132,6 +250,39 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors consistently"""
+    logger.error(f"Validation error: {exc.errors()}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": {
+                "error": "validation_error",
+                "message": "Request validation failed",
+                "errors": exc.errors(),
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    )
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Catch-all for unexpected errors"""
+    logger.exception(f"Unexpected error: {exc}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": {
+                "error": "internal_error",
+                "message": "An internal server error occurred",
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    )
 
 # Configuration
 AGENT_TIMEOUT_MINUTES = 5
@@ -263,6 +414,7 @@ def get_folder_files(folder_name: str):
 @app.post("/api/v1/agent/register")
 async def register_agent(registration: AgentRegistration, db: Session = Depends(get_db)):
     """Register a new agent with system information"""
+    logger.info("Entered /api/v1/agent/register endpoint")
     try:
         agent = db.query(Agent).filter(Agent.agent_id == registration.agent_id).first()
         timestamp = datetime.fromisoformat(registration.timestamp)
@@ -286,11 +438,13 @@ async def register_agent(registration: AgentRegistration, db: Session = Depends(
         return {"success": True, "message": "Agent registered successfully", "agent_id": registration.agent_id}
     except SQLAlchemyError as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        logger.exception("Agent registration failed")
+        raise APIError(status_code=500, error_code="registration_failed", message=f"Registration failed: {str(e)}")
 
 @app.post("/api/v1/system/info")
 async def receive_system_info(system_info: SystemInfo, db: Session = Depends(get_db)):
     """Receive and store system information from agent (heartbeat)"""
+    logger.info("Entered /api/v1/system/info endpoint")
     try:
         update_agent_last_seen(db, system_info.agent_id)
         agent = db.query(Agent).filter(Agent.agent_id == system_info.agent_id).first()
@@ -298,11 +452,13 @@ async def receive_system_info(system_info: SystemInfo, db: Session = Depends(get
         logger.info(f"Heartbeat received from: {system_info.agent_id} ({system_info.hostname}) - Status: {status}")
         return {"success": True, "message": "System information received", "agent_id": system_info.agent_id, "status": status}
     except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process system info: {str(e)}")
+        logger.exception("Failed to process system info")
+        raise APIError(status_code=500, error_code="system_info_failed", message=f"Failed to process system info: {str(e)}")
 
 @app.get("/api/v1/agent/fetchaction/{agent_id}")
 async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
     """Agent polls this endpoint to check if a scan is requested"""
+    logger.info(f"Entered /api/v1/agent/fetchaction/{agent_id} endpoint")
     try:
         update_agent_last_seen(db, agent_id)
         task = db.query(Task).filter(Task.agent_id == agent_id, Task.status == 'pending').order_by(Task.created_at).first()
@@ -312,14 +468,18 @@ async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
             db.commit()
             logger.info(f"Scan task dispatched to agent: {agent_id}")
             return FetchActionResponse(scan_flag=True, task_id=task.task_id, message="Crypto audit scan requested")
+        
+        logger.info(f"No pending tasks for agent: {agent_id}")
         return FetchActionResponse(scan_flag=False, message="No pending tasks")
     except SQLAlchemyError as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Fetch action failed: {str(e)}")
+        logger.exception("Fetch action failed")
+        raise APIError(status_code=500, error_code="fetch_action_failed", message=f"Fetch action failed: {str(e)}")
 
 @app.post("/api/v1/audit/result")
 async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
     """Receive cryptographic audit results from agent"""
+    logger.info("Entered /api/v1/audit/result endpoint")
     try:
         body = await request.json()
         logger.debug(f"Received audit result payload: {body}")
@@ -327,7 +487,7 @@ async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
             audit_data = AuditData.model_validate(body)
         except ValidationError as e:
             logger.error(f"Validation error for audit result: {e.errors()}")
-            raise HTTPException(status_code=422, detail=e.errors())
+            raise APIError(status_code=422, error_code="validation_failed", message="Audit result validation failed", details=e.errors())
 
         update_agent_last_seen(db, audit_data.agent_id)
         result_id = f"{audit_data.agent_id}_{audit_data.task_id}"
@@ -364,15 +524,17 @@ async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
         return {"success": True, "message": "Audit results received and stored", "result_id": result_id}
     except SQLAlchemyError as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to process audit results: {str(e)}")
+        logger.exception("Failed to process audit results")
+        raise APIError(status_code=500, error_code="process_audit_failed", message=f"Failed to process audit results: {str(e)}")
 
 @app.post("/api/v1/admin/trigger-scan/{agent_id}")
 async def trigger_scan(agent_id: str, db: Session = Depends(get_db)):
     """Admin endpoint to trigger a scan for a specific agent"""
+    logger.info(f"Entered /api/v1/admin/trigger-scan/{agent_id} endpoint")
     try:
         agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
         if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
+            raise APIError(status_code=404, error_code="agent_not_found", message=f"Agent {agent_id} not found")
         
         status = get_agent_status(agent)
         if status == "inactive":
@@ -387,121 +549,191 @@ async def trigger_scan(agent_id: str, db: Session = Depends(get_db)):
         return {"success": True, "message": "Scan triggered successfully", "task_id": task_id, "agent_id": agent_id, "agent_status": status}
     except SQLAlchemyError as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to trigger scan: {str(e)}")
+        logger.exception("Failed to trigger scan")
+        raise APIError(status_code=500, error_code="trigger_scan_failed", message=f"Failed to trigger scan: {str(e)}")
 
 @app.get("/api/v1/admin/agents")
 async def list_agents(db: Session = Depends(get_db)):
     """List all registered agents with current status"""
-    agents = db.query(Agent).order_by(Agent.last_seen.desc()).all()
-    agents_with_status = []
-    for agent in agents:
-        agent_dict = {c.name: getattr(agent, c.name) for c in agent.__table__.columns}
-        agent_dict["status"] = get_agent_status(agent)
-        try:
-            time_diff = datetime.now() - agent.last_seen
-            agent_dict["minutes_since_last_seen"] = int(time_diff.total_seconds() / 60)
-        except:
-            agent_dict["minutes_since_last_seen"] = 999999
-        agents_with_status.append(agent_dict)
-    
-    active_count = sum(1 for a in agents_with_status if a["status"] == "active")
-    return {
-        "success": True, "count": len(agents_with_status), "active_count": active_count,
-        "inactive_count": len(agents_with_status) - active_count,
-        "timeout_minutes": AGENT_TIMEOUT_MINUTES, "server_time": datetime.now().isoformat(),
-        "agents": agents_with_status
-    }
+    logger.info("Entered /api/v1/admin/agents endpoint")
+    try:
+        agents = db.query(Agent).order_by(Agent.last_seen.desc()).all()
+        agents_with_status = []
+        for agent in agents:
+            agent_dict = {c.name: getattr(agent, c.name) for c in agent.__table__.columns}
+            agent_dict["status"] = get_agent_status(agent)
+            try:
+                time_diff = datetime.now() - agent.last_seen
+                agent_dict["minutes_since_last_seen"] = int(time_diff.total_seconds() / 60)
+            except:
+                agent_dict["minutes_since_last_seen"] = 999999
+            agents_with_status.append(agent_dict)
+        
+        active_count = sum(1 for a in agents_with_status if a["status"] == "active")
+        
+        logger.info("Agents listed successfully")
+        return {
+            "success": True, "count": len(agents_with_status), "active_count": active_count,
+            "inactive_count": len(agents_with_status) - active_count,
+            "timeout_minutes": AGENT_TIMEOUT_MINUTES, "server_time": datetime.now().isoformat(),
+            "agents": agents_with_status
+        }
+    except Exception as e:
+        logger.exception("Failed to list agents")
+        raise APIError(status_code=500, error_code="list_agents_failed", message=f"Failed to list agents: {str(e)}")
 
 @app.get("/api/v1/admin/agent/{agent_id}/results")
 async def get_agent_results(agent_id: str, db: Session = Depends(get_db)):
     """Get all results for a specific agent"""
-    results = db.query(Result).filter(Result.agent_id == agent_id).order_by(Result.received_at.desc()).all()
-    results_list = []
-    for result in results:
-        result_dict = {c.name: getattr(result, c.name) for c in result.__table__.columns}
-        result_dict["audit_results"] = json.loads(result_dict["audit_results"])
-        results_list.append(result_dict)
-    return {"success": True, "agent_id": agent_id, "count": len(results_list), "results": results_list}
+    logger.info(f"Entered /api/v1/admin/agent/{agent_id}/results endpoint")
+    try:
+        results = db.query(Result).filter(Result.agent_id == agent_id).order_by(Result.received_at.desc()).all()
+        results_list = []
+        for result in results:
+            result_dict = {c.name: getattr(result, c.name) for c in result.__table__.columns}
+            result_dict["audit_results"] = json.loads(result_dict["audit_results"])
+            results_list.append(result_dict)
+        
+        logger.info(f"Agent {agent_id} results retrieved successfully")
+        return {"success": True, "agent_id": agent_id, "count": len(results_list), "results": results_list}
+    except Exception as e:
+        logger.exception(f"Failed to get agent {agent_id} results")
+        raise APIError(status_code=500, error_code="agent_results_failed", message=f"Failed to get agent {agent_id} results: {str(e)}")
 
 @app.get("/api/v1/admin/tasks")
 async def list_tasks(db: Session = Depends(get_db)):
     """List all scan tasks"""
-    tasks = db.query(Task).order_by(Task.created_at.desc()).all()
-    return {"success": True, "count": len(tasks), "tasks": [dict(row.__dict__) for row in tasks]}
+    logger.info("Entered /api/v1/admin/tasks endpoint")
+    try:
+        tasks = db.query(Task).order_by(Task.created_at.desc()).all()
+        logger.info("Tasks listed successfully")
+        return {"success": True, "count": len(tasks), "tasks": [dict(row.__dict__) for row in tasks]}
+    except Exception as e:
+        logger.exception("Failed to list tasks")
+        raise APIError(status_code=500, error_code="list_tasks_failed", message=f"Failed to list tasks: {str(e)}")
 
 @app.get("/api/v1/admin/results/{result_id}")
 async def get_result_detail(result_id: str, db: Session = Depends(get_db)):
     """Get detailed audit results by result_id"""
-    result = db.query(Result).filter(Result.result_id == result_id).first()
-    if result:
-        result_dict = {c.name: getattr(result, c.name) for c in result.__table__.columns}
-        result_dict["audit_results"] = json.loads(result_dict["audit_results"])
-        return {"success": True, "result": result_dict}
-    raise HTTPException(status_code=404, detail="Result not found")
+    logger.info(f"Entered /api/v1/admin/results/{result_id} endpoint")
+    try:
+        result = db.query(Result).filter(Result.result_id == result_id).first()
+        if result:
+            result_dict = {c.name: getattr(result, c.name) for c in result.__table__.columns}
+            result_dict["audit_results"] = json.loads(result_dict["audit_results"])
+            logger.info(f"Result {result_id} retrieved successfully")
+            return {"success": True, "result": result_dict}
+        
+        logger.warning(f"Result {result_id} not found")
+        raise APIError(status_code=404, error_code="result_not_found", message=f"Result {result_id} not found")
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to get result {result_id}")
+        raise APIError(status_code=500, error_code="get_result_failed", message=f"Failed to get result {result_id}: {str(e)}")
 
 @app.get("/api/v1/admin/stats")
 async def get_stats(db: Session = Depends(get_db)):
     """Get overall statistics"""
-    total_agents = db.query(func.count(Agent.agent_id)).scalar()
-    active_agents = db.query(func.count(Agent.agent_id)).filter(Agent.last_seen > datetime.now() - timedelta(minutes=AGENT_TIMEOUT_MINUTES)).scalar()
-    task_stats = db.query(Task.status, func.count(Task.status)).group_by(Task.status).all()
-    result_count = db.query(func.count(Result.result_id)).scalar()
-    
-    return {
-        "success": True, "timestamp": datetime.now().isoformat(),
-        "agents": {"total": total_agents, "active": active_agents, "inactive": total_agents - active_agents},
-        "tasks": {"total": sum(c for s, c in task_stats), **{s: c for s, c in task_stats}},
-        "results": {"total": result_count}
-    }
+    logger.info("Entered /api/v1/admin/stats endpoint")
+    try:
+        total_agents = db.query(func.count(Agent.agent_id)).scalar()
+        active_agents = db.query(func.count(Agent.agent_id)).filter(Agent.last_seen > datetime.now() - timedelta(minutes=AGENT_TIMEOUT_MINUTES)).scalar()
+        task_stats = db.query(Task.status, func.count(Task.status)).group_by(Task.status).all()
+        result_count = db.query(func.count(Result.result_id)).scalar()
+        
+        logger.info("Stats retrieved successfully")
+        return {
+            "success": True, "timestamp": datetime.now().isoformat(),
+            "agents": {"total": total_agents, "active": active_agents, "inactive": total_agents - active_agents},
+            "tasks": {"total": sum(c for s, c in task_stats), **{s: c for s, c in task_stats}},
+            "results": {"total": result_count}
+        }
+    except Exception as e:
+        logger.exception("Failed to get stats")
+        raise APIError(status_code=500, error_code="get_stats_failed", message=f"Failed to get stats: {str(e)}")
 
 @app.get("/api/v1/files/list/{folder_type}")
 async def list_files(folder_type: str):
     """List files in Linux Agent or Windows Agent folder"""
-    if folder_type not in AGENT_FOLDERS:
-        raise HTTPException(status_code=400, detail="Invalid folder type")
-    folder_name = AGENT_FOLDERS[folder_type]
-    files = get_folder_files(folder_name)
-    return {"success": True, "folder": folder_name, "folder_type": folder_type, "count": len(files), "files": files}
+    logger.info(f"Entered /api/v1/files/list/{folder_type} endpoint")
+    try:
+        if folder_type not in AGENT_FOLDERS:
+            raise APIError(status_code=400, error_code="invalid_folder_type", message="Invalid folder type")
+        folder_name = AGENT_FOLDERS[folder_type]
+        files = get_folder_files(folder_name)
+        logger.info(f"Files in {folder_type} listed successfully")
+        return {"success": True, "folder": folder_name, "folder_type": folder_type, "count": len(files), "files": files}
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to list files in {folder_type}")
+        raise APIError(status_code=500, error_code="list_files_failed", message=f"Failed to list files in {folder_type}: {str(e)}")
 
 @app.get("/api/v1/files/download/{folder_type}/{filename}")
 async def download_file(folder_type: str, filename: str):
     """Download a specific file from agent folder"""
-    if folder_type not in AGENT_FOLDERS:
-        raise HTTPException(status_code=400, detail="Invalid folder type")
-    folder_name = AGENT_FOLDERS[folder_type]
-    file_path = Path(folder_name) / filename
-    if not file_path.resolve().is_relative_to(Path(folder_name).resolve()):
-        raise HTTPException(status_code=403, detail="Access denied")
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path=str(file_path), filename=filename, media_type='application/octet-stream')
+    logger.info(f"Entered /api/v1/files/download/{folder_type}/{filename} endpoint")
+    try:
+        if folder_type not in AGENT_FOLDERS:
+            raise APIError(status_code=400, error_code="invalid_folder_type", message="Invalid folder type")
+        folder_name = AGENT_FOLDERS[folder_type]
+        file_path = Path(folder_name) / filename
+        if not file_path.resolve().is_relative_to(Path(folder_name).resolve()):
+            raise APIError(status_code=403, error_code="access_denied", message="Access denied")
+        if not file_path.exists() or not file_path.is_file():
+            raise APIError(status_code=404, error_code="file_not_found", message="File not found")
+        
+        logger.info(f"File {filename} from {folder_type} downloaded successfully")
+        return FileResponse(path=str(file_path), filename=filename, media_type='application/octet-stream')
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to download file {filename} from {folder_type}")
+        raise APIError(status_code=500, error_code="download_failed", message=f"Failed to download file {filename} from {folder_type}: {str(e)}")
 
 @app.get("/api/v1/files/download-zip/{folder_type}")
 async def download_folder_as_zip(folder_type: str):
     """Download all files from a folder as a ZIP archive"""
-    if folder_type not in AGENT_FOLDERS:
-        raise HTTPException(status_code=400, detail="Invalid folder type")
-    folder_name = AGENT_FOLDERS[folder_type]
-    folder_path = Path(folder_name)
-    if not folder_path.exists() or not folder_path.is_dir():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Folder not found at {folder_path}"
-        )
-    
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        file_count = 0
-        for file_path in folder_path.iterdir():
-            if file_path.is_file():
-                zip_file.write(file_path, arcname=file_path.name)
-                file_count += 1
-        if file_count == 0:
-            raise HTTPException(status_code=404, detail="No files found in folder")
-    
-    zip_buffer.seek(0)
-    zip_filename = f"{folder_name.replace(' ', '_')}.zip"
-    return StreamingResponse(zip_buffer, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={zip_filename}"})
+    logger.info(f"Entered /api/v1/files/download-zip/{folder_type} endpoint")
+    try:
+        if folder_type not in AGENT_FOLDERS:
+            raise APIError(status_code=400, error_code="invalid_folder_type", message="Invalid folder type")
+        folder_name = AGENT_FOLDERS[folder_type]
+        folder_path = Path(folder_name)
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise APIError(
+                status_code=404,
+                error_code="folder_not_found",
+                message=f"Folder not found at {folder_path}"
+            )
+        
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            file_count = 0
+            for file_path in folder_path.iterdir():
+                if file_path.is_file():
+                    zip_file.write(file_path, arcname=file_path.name)
+                    file_count += 1
+            if file_count == 0:
+                raise APIError(status_code=404, error_code="no_files_found", message="No files found in folder")
+        
+        zip_buffer.seek(0)
+        zip_filename = f"{folder_name.replace(' ', '_')}.zip"
+        
+        logger.info(f"Folder {folder_type} downloaded as zip successfully")
+        return StreamingResponse(zip_buffer, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={zip_filename}"})
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to download folder {folder_type} as zip")
+        raise APIError(status_code=500, error_code="download_zip_failed", message=f"Failed to download folder {folder_type} as zip: {str(e)}")
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    logger.debug("Health check called")
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     logger.info("=" * 60)
@@ -513,3 +745,4 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     
     uvicorn.run(app, host="0.0.0.0", port=9000)
+

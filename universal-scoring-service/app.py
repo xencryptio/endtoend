@@ -6,18 +6,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import scoring
 import logging
+from logging_config import setup_logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+setup_logging("SCORING-SERVICE", logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Universal PQC Scoring Service",
     description="Centralized post-quantum cryptography scoring for agent, TLS, and repository scans",
     version="1.0.0"
 )
+from logging_middleware import correlation_middleware
+app.middleware("http")(correlation_middleware)
 
 # CORS
 app.add_middleware(

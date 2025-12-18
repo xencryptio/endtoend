@@ -5,7 +5,7 @@ import { UnifiedCard, UnifiedEntryCard, UnifiedBackButton, UnifiedFileInput } fr
 import { typography } from "@/lib/design-tokens";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, UploadCloud, FileText, Github, Loader2, Download, Trash2, RefreshCw, XCircle, Server, Terminal, BookOpen, CheckCircle, Activity, AlertCircle, ArrowRight, Globe } from "lucide-react";
+import { ArrowLeft, UploadCloud, FileText, Github, Loader2, Download, Trash2, RefreshCw, XCircle, Server, Terminal, BookOpen, CheckCircle, Activity, AlertCircle, ArrowRight, Globe, X, AlertTriangle } from "lucide-react";
 
 // ============================================================================ 
 // INTERFACES & TYPES
@@ -38,6 +38,24 @@ interface FileInfo {
 
 type ViewType = 'dashboard' | 'tls' | 'repo' | 'system';
 
+interface Toast {
+    id: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+    message: string;
+    duration?: number;
+}
+
+interface ConfirmModal {
+    show: boolean;
+    title: string;
+    message: string;
+    type: 'danger' | 'warning' | 'info';
+    confirmLabel: string;
+    cancelLabel: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+}
+
 // ============================================================================ 
 // CONSTANTS
 // ============================================================================ 
@@ -46,6 +64,12 @@ const cardVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0 },
     exit: { opacity: 0, y: -20 },
+};
+
+const toastVariants = {
+    hidden: { opacity: 0, x: 100, scale: 0.8 },
+    visible: { opacity: 1, x: 0, scale: 1 },
+    exit: { opacity: 0, x: 100, scale: 0.8 },
 };
 
 // API base URLs
@@ -95,7 +119,118 @@ const ScanProgress = ({ progress, logs }) => (
     </div>
 );
 
+// Toast Notification Component
+const ToastNotification: React.FC<Toast & { onDismiss: () => void }> = ({ 
+    type, 
+    message, 
+    onDismiss 
+}) => {
+    const icons = {
+        success: <CheckCircle className="w-5 h-5" />,
+        error: <XCircle className="w-5 h-5" />,
+        warning: <AlertTriangle className="w-5 h-5" />,
+        info: <AlertCircle className="w-5 h-5" />
+    };
 
+    const colors = {
+        success: 'bg-success/10 dark:bg-success/20 text-success border-success/20',
+        error: 'bg-destructive/10 dark:bg-destructive/20 text-destructive border-destructive/20',
+        warning: 'bg-warning/10 dark:bg-warning/20 text-warning border-warning/20',
+        info: 'bg-primary/10 dark:bg-primary/20 text-primary border-primary/20'
+    };
+
+    return (
+        <motion.div
+            variants={toastVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            className={`flex items-start gap-3 min-w-[320px] max-w-md p-4 rounded-lg border shadow-lg backdrop-blur-sm ${colors[type]}`}
+        >
+            <div className="flex-shrink-0 mt-0.5">{icons[type]}</div>
+            <p className="flex-1 text-sm font-medium text-foreground">{message}</p>
+            <button
+                onClick={onDismiss}
+                className="flex-shrink-0 hover:opacity-70 transition-opacity"
+            >
+                <X className="w-4 h-4" />
+            </button>
+        </motion.div>
+    );
+};
+
+// Confirmation Modal Component
+const ConfirmationModal: React.FC<ConfirmModal> = ({
+    show,
+    title,
+    message,
+    type,
+    confirmLabel,
+    cancelLabel,
+    onConfirm,
+    onCancel
+}) => {
+    if (!show) return null;
+
+    const typeColors = {
+        danger: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+        warning: 'bg-warning text-warning-foreground hover:bg-warning/90',
+        info: 'bg-primary text-primary-foreground hover:bg-primary/90'
+    };
+
+    const typeIcons = {
+        danger: <AlertTriangle className="w-6 h-6 text-destructive" />,
+        warning: <AlertCircle className="w-6 h-6 text-warning" />,
+        info: <AlertCircle className="w-6 h-6 text-primary" />
+    };
+
+    return (
+        <AnimatePresence>
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={onCancel}
+            >
+                <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.9, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-background border rounded-lg shadow-2xl max-w-md w-full p-6"
+                >
+                    <div className="flex items-start gap-4 mb-4">
+                        <div className="flex-shrink-0">{typeIcons[type]}</div>
+                        <div className="flex-1">
+                            <h3 className="text-lg font-bold text-foreground mb-2">{title}</h3>
+                            <p className="text-sm text-muted-foreground">{message}</p>
+                        </div>
+                    </div>
+                    <div className="flex gap-3 justify-end">
+                        <Button
+                            variant="outline"
+                            onClick={onCancel}
+                        >
+                            {cancelLabel}
+                        </Button>
+                        <Button
+                            className={typeColors[type]}
+                            onClick={() => {
+                                onConfirm();
+                                onCancel();
+                            }}
+                        >
+                            {confirmLabel}
+                        </Button>
+                    </div>
+                </motion.div>
+            </motion.div>
+        </AnimatePresence>
+    );
+};
 
 const SystemDownloadCard: React.FC<{
     title: string;
@@ -106,7 +241,8 @@ const SystemDownloadCard: React.FC<{
     loading: boolean;
     formatBytes: (bytes: number) => string;
     apiUrl: string;
-}> = ({ title, folderType, icon, description, files, loading, formatBytes, apiUrl }) => {
+    showToast: (type: string, message: string, duration?: number) => void;
+}> = ({ title, folderType, icon, description, files, loading, formatBytes, apiUrl, showToast }) => {
     const handleDownload = async () => {
         try {
             const response = await fetch(`${AGENT_API_BASE}/api/v1/files/download-zip/${folderType}`);
@@ -122,9 +258,10 @@ const SystemDownloadCard: React.FC<{
             a.click();
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
+            showToast('success', `${title} downloaded successfully!`, 3000);
         } catch (error: any) {
             console.error('Download error:', error);
-            alert(`Failed to download: ${error.message}`);
+            showToast('error', `Failed to download: ${error.message}`, 5000);
         }
     };
 
@@ -337,6 +474,46 @@ const OnboardingPage = () => {
     const [windowsFiles, setWindowsFiles] = useState<FileInfo[]>([]);
     const [systemLoading, setSystemLoading] = useState(false);
 
+    // Toast and Modal States
+    const [toasts, setToasts] = useState<Toast[]>([]);
+    const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
+
+    // Toast Management
+    const showToast = (type: 'success' | 'error' | 'warning' | 'info', message: string, duration: number = 5000) => {
+        const id = Date.now().toString() + Math.random();
+        const newToast: Toast = { id, type, message, duration };
+        setToasts(prev => [...prev, newToast]);
+        
+        setTimeout(() => {
+            setToasts(prev => prev.filter(t => t.id !== id));
+        }, duration);
+    };
+
+    const dismissToast = (id: string) => {
+        setToasts(prev => prev.filter(t => t.id !== id));
+    };
+
+    // Confirmation Modal Management
+    const showConfirmModal = (
+        title: string,
+        message: string,
+        onConfirm: () => void,
+        type: 'danger' | 'warning' | 'info' = 'info',
+        confirmLabel: string = 'Confirm',
+        cancelLabel: string = 'Cancel'
+    ) => {
+        setConfirmModal({
+            show: true,
+            title,
+            message,
+            type,
+            confirmLabel,
+            cancelLabel,
+            onConfirm,
+            onCancel: () => setConfirmModal(null)
+        });
+    };
+
     // Fetch jobs on mount and periodically
     useEffect(() => {
         if (view === 'dashboard') {
@@ -363,6 +540,7 @@ const OnboardingPage = () => {
             if (windowsData.success) setWindowsFiles(windowsData.files);
         } catch (error) {
             console.error('Error fetching files:', error);
+            showToast('error', 'Failed to load agent files', 5000);
         } finally {
             setSystemLoading(false);
         }
@@ -396,15 +574,17 @@ const OnboardingPage = () => {
             // Ensure each repo has a unique id
             const reposWithIds = data.repositories.map((repo, index) => ({
                 ...repo,
-                id: repo.id ?? index // Use repo.id if available, otherwise use index as fallback
+                id: repo.id ?? index
             }));
             
             console.log('📦 Discovered repos with IDs:', reposWithIds.map(r => ({ name: r.full_name, id: r.id })));
             
             setDiscoveredRepos(reposWithIds);
             setSelectedRepos(new Set(reposWithIds.map(r => r.id)));
+            showToast('success', `Successfully discovered ${reposWithIds.length} repositories`, 4000);
         } catch (error: any) {
             setGithubError(error.message || 'An unknown error occurred.');
+            showToast('error', error.message || 'Failed to discover repositories', 5000);
         } finally {
             setIsDiscovering(false);
         }
@@ -428,6 +608,7 @@ const OnboardingPage = () => {
                 }));
             } else if (data.type === 'complete') {
                 setScanProgress(prev => ({ ...prev, logs: [...prev.logs, { timestamp: new Date().toLocaleTimeString(), level: 'success', message: `✅ Scan finished! Job ID: ${jobId.substring(0, 8)}...` }] }));
+                showToast('success', `Scan completed! Job ID: ${jobId.substring(0, 8)}...`, 5000);
                 eventSource.close();
                 loadJobs();
             }
@@ -435,6 +616,7 @@ const OnboardingPage = () => {
         
         eventSource.onerror = () => {
             setScanProgress(prev => ({ ...prev, logs: [...prev.logs, { timestamp: new Date().toLocaleTimeString(), level: 'error', message: 'Connection lost. Refresh jobs list for final status.' }] }));
+            showToast('warning', 'Connection lost. Refresh the jobs list to see final status.', 7000);
             eventSource.close();
         };
     };
@@ -455,10 +637,11 @@ const OnboardingPage = () => {
                 failed: 0,
                 logs: [{ timestamp: new Date().toLocaleTimeString(), level: 'info', message: `Scan started with Job ID: ${result.job_id.substring(0, 8)}...` }]
             });
+            showToast('success', `${type.toUpperCase()} scan started successfully! Job ID: ${result.job_id.substring(0, 8)}...`, 4000);
             connectSSE(result.job_id);
             loadJobs();
         } catch (error: any) {
-            alert(`Error starting ${type} scan: ${error.message}`);
+            showToast('error', `Failed to start ${type} scan: ${error.message}`, 5000);
         }
     };
 
@@ -478,12 +661,26 @@ const OnboardingPage = () => {
         
     const exportJob = (jobId: string) => {
         window.open(`${BATCH_API_BASE}/api/batch-jobs/${jobId}/export`, '_blank');
+        showToast('info', 'Opening export in new tab...', 3000);
     };
     
     const deleteJob = async (jobId: string) => {
-        if (!confirm('Are you sure you want to delete this job?')) return;
-        await fetch(`${BATCH_API_BASE}/api/batch-jobs/${jobId}`, { method: 'DELETE' });
-        loadJobs();
+        showConfirmModal(
+            'Delete Job',
+            'Are you sure you want to delete this job? This action cannot be undone.',
+            async () => {
+                try {
+                    await fetch(`${BATCH_API_BASE}/api/batch-jobs/${jobId}`, { method: 'DELETE' });
+                    showToast('success', 'Job deleted successfully', 3000);
+                    loadJobs();
+                } catch (error) {
+                    showToast('error', 'Failed to delete job', 5000);
+                }
+            },
+            'danger',
+            'Delete',
+            'Cancel'
+        );
     };
 
     const toggleRepoSelection = (repoId: number) => {
@@ -498,9 +695,9 @@ const OnboardingPage = () => {
     const toggleSelectAll = () => {
       setSelectedRepos(prev => {
         if (prev.size === discoveredRepos.length) {
-          return new Set(); // unselect all
+          return new Set();
         } else {
-          return new Set(discoveredRepos.map(r => r.id)); // select all
+          return new Set(discoveredRepos.map(r => r.id));
         }
       });
     };
@@ -514,34 +711,46 @@ const OnboardingPage = () => {
     
     const startGitHubRepoScan = async () => {
         const selectedReposList = discoveredRepos.filter(repo => selectedRepos.has(repo.id));
-        if (selectedReposList.length === 0) return alert('Please select at least one repository to scan.');
+        
+        if (selectedReposList.length === 0) {
+            showToast('warning', 'Please select at least one repository to scan', 4000);
+            return;
+        }
     
         const reposToScan = selectedReposList.map(repo => ({
             repo_url: repo.clone_url || `https://github.com/${repo.full_name}.git`,
             branch_name: repoBranches[repo.id] || repo.default_branch
         }));
     
-        if (!confirm(`You are about to scan ${reposToScan.length} repositories. Proceed?`)) return;
-    
-        try {
-            const response = await fetch(`${BATCH_API_BASE}/api/repo-scan/batch-from-github`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ repos: reposToScan })
-            });
-    
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Scan request failed');
-            }
-    
-            const result = await response.json();
-            alert(`✅ Scan started! Job ID: ${result.job_id.substring(0, 8)}...`);
-            setDiscoveredRepos([]);
-            loadJobs();
-        } catch (error: any) {
-            alert('Error starting scan: ' + error.message);
-        }
+        showConfirmModal(
+            'Start Repository Scan',
+            `You are about to scan ${reposToScan.length} ${reposToScan.length === 1 ? 'repository' : 'repositories'}. This may take some time depending on the size of the repositories. Do you want to proceed?`,
+            async () => {
+                try {
+                    const response = await fetch(`${BATCH_API_BASE}/api/repo-scan/batch-from-github`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ repos: reposToScan })
+                    });
+            
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Scan request failed');
+                    }
+            
+                    const result = await response.json();
+                    showToast('success', `Scan started successfully! Job ID: ${result.job_id.substring(0, 8)}...`, 5000);
+                    setDiscoveredRepos([]);
+                    setSelectedRepos(new Set());
+                    loadJobs();
+                } catch (error: any) {
+                    showToast('error', `Failed to start scan: ${error.message}`, 5000);
+                }
+            },
+            'warning',
+            'Start Scan',
+            'Cancel'
+        );
     };
 
     const resetScanState = () => {
@@ -570,382 +779,406 @@ const OnboardingPage = () => {
     // ============================================================================ 
 
     return (
-        <AnimatePresence mode="wait">
-            {view === 'dashboard' && (
-                <motion.div
-                    key="dashboard"
-                    variants={cardVariants}
-                    initial="hidden"
-                    animate="visible"
-                    exit="exit"
-                    className="p-4 md:p-8"
-                >
-                    <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-4">
-                            <div className="p-3 bg-primary/10 rounded-lg">
-                                <UploadCloud className="h-8 w-8 text-primary" />
-                            </div>
-                            <div>
-                                <h1 className="text-2xl font-bold">Onboarding</h1>
-                                <p className="text-muted-foreground">Get started by scanning your assets</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-                        <UnifiedEntryCard
-                            icon={UploadCloud}
-                            title="TLS/SSL Scanner"
-                            subtitle="Scan domains from an Excel file"
-                            description="Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations and ensure secure connections across your infrastructure."
-                            actionLabel="Start Scan"
-                            onClick={() => setView('tls')}
-                            variant="premium"
-                        />
-
-                        <UnifiedEntryCard
-                            icon={Github}
-                            title="Repository Scanner"
-                            subtitle="Scan repos from GitHub or Excel"
-                            description="Analyze Git repositories for cryptographic algorithm usage and security best practices. Discover vulnerabilities and ensure compliance with modern standards."
-                            actionLabel="Start Scan"
-                            onClick={() => setView('repo')}
-                            variant="premium"
-                        />
-
-                        <UnifiedEntryCard
-                            icon={Download}
-                            title="System Scanner"
-                            subtitle="Download and setup agents"
-                            description="Download agents for Linux and Windows to scan system cryptographic configurations. Deploy lightweight agents to monitor and audit your infrastructure in real-time."
-                            actionLabel="Download Agents"
-                            onClick={() => setView('system')}
-                            variant="premium"
-                        />
-                    </div>
-
-                    <UnifiedCard className="mt-12 max-w-6xl mx-auto">
-                        <div className="p-6">
-                            <div className="flex flex-row items-center justify-between">
-                                <h3 className="text-lg font-bold">Recent Batch Jobs</h3>
-                                <Button variant="outline" size="sm" onClick={loadJobs}><RefreshCw className="w-4 h-4 mr-2" /> Refresh</Button>
-                            </div>
-                        </div>
-                        <div className="p-6">
-                            <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead>
-                                        <tr className="text-left text-muted-foreground">
-                                            <th className="p-3">Job ID</th>
-                                            <th className="p-3">Type</th>
-                                            <th className="p-3">Status</th>
-                                            <th className="p-3">Progress</th>
-                                            <th className="p-3">Started</th>
-                                            <th className="p-3">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {jobs.length > 0 ? jobs.map(job => (
-                                            <tr key={job.job_id} className="border-t">
-                                                <td className="p-3 font-mono text-sm">{job.job_id.substring(0, 8)}...</td>
-                                                <td className="p-3 uppercase">{job.scan_type}</td>
-                                                <td className="p-3"><span className={`px-2 py-1 text-xs font-bold rounded-full ${job.status === 'completed' ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'}`}>{job.status}</span></td>
-                                                <td className="p-3">{`${job.completed_items + job.failed_items} / ${job.total_items}`}</td>
-                                                <td className="p-3 text-sm">{new Date(job.started_at).toLocaleString()}</td>
-                                                <td className="p-3 space-x-2">
-                                                    {job.status.toLowerCase() === 'completed' && <Button size="sm" variant="outline" onClick={() => exportJob(job.job_id)}><Download className="w-4 h-4" /></Button>}
-                                                    <Button size="sm" variant="destructive" onClick={() => deleteJob(job.job_id)}><Trash2 className="w-4 h-4" /></Button>
-                                                </td>
-                                            </tr>
-                                        )) : (
-                                            <tr><td colSpan={6} className="text-center p-8 text-muted-foreground">No jobs found.</td></tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </UnifiedCard>
-                </motion.div>
-            )}
-
-            {[ 'tls', 'repo', 'system' ].includes(view) && (
-                 <motion.div
-                    key={view}
-                    variants={cardVariants}
-                    initial="hidden"
-                    animate="visible"
-                    exit="exit"
-                    className="p-4 md:p-8 max-w-4xl mx-auto"
-                >
-                    <UnifiedBackButton onClick={navigateBack} label="Back" className="mb-6" />
-                    
-                    {/* TLS SCANNER VIEW */}
-                    {view === 'tls' && (
-                        <UnifiedCard padding="none">
-                            <div className="p-6">
-                                <h2 className={typography.h2}>TLS/SSL Scanner</h2>
-                                <p className="text-muted-foreground">Upload an Excel file with a 'domain' column.</p>
-                            </div>
-                            <div className="p-6">
-                                {!showProgress ? (
-                                    <>
-                                        <UnifiedFileInput
-                                          label="Upload Excel File"
-                                          accept=".xlsx,.xls"
-                                          helperText="Upload an Excel file with a 'domain' column."
-                                          selectedFile={tlsFile}
-                                          onFileSelect={setTlsFile}
-                                          onFileRemove={() => setTlsFile(null)}
-                                          dragAndDrop={true}
-                                        />
-                                        <Button className="w-full mt-6" disabled={!tlsFile} onClick={startTLSScan}>Start TLS Scan</Button>
-                                    </>
-                                ) : (
-                                    <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
-                                )}
-                            </div>
-                        </UnifiedCard>
-                    )}
-
-                    {/* REPO SCANNER VIEW */}
-                    {view === 'repo' && (
-                        <Tabs defaultValue="github">
-                            <TabsList className="grid w-full grid-cols-2">
-                                <TabsTrigger value="github">From GitHub</TabsTrigger>
-                                <TabsTrigger value="excel">From Excel</TabsTrigger>
-                            </TabsList>
-                            <TabsContent value="github">
-                                <UnifiedCard padding="none">
-                                    <div className="p-6">
-                                        <h3 className="text-lg font-bold">Discover from GitHub</h3>
-                                        <p className="text-muted-foreground text-sm">
-                                            Enter a GitHub username or organization URL to find public repositories.
-                                        </p>
-                                    </div>
-
-                                    <div className="p-6">
-                                        {/* URL + Discover */}
-                                        <div className="flex gap-2">
-                                            <Input
-                                                placeholder="e.g., https://github.com/torvalds"
-                                                value={githubUrl}
-                                                onChange={(e) => setGithubUrl(e.target.value)}
-                                            />
-                                            <Button onClick={discoverGitHubRepos} disabled={isDiscovering}>
-                                                {isDiscovering ? <Loader2 className="w-4 h-4 animate-spin" /> : "Discover"}
-                                            </Button>
-                                        </div>
-
-                                        {/* Error */}
-                                        {githubError && (
-                                            <p className="text-destructive text-sm mt-2 flex items-center gap-2">
-                                                <XCircle className="w-4 h-4" />
-                                                {githubError}
-                                            </p>
-                                        )}
-
-                                        {/* Loading */}
-                                        {isDiscovering && (
-                                            <div className="text-center p-10">
-                                                <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
-                                            </div>
-                                        )}
-
-                                        {/* Repos list with branch selector */}
-                                        {!isDiscovering && discoveredRepos.length > 0 && (
-                                            <div className="mt-6">
-                                                <div className="mb-3">
-                                                    <h3 className="font-bold">{discoveredRepos.length} Repos Found</h3>
-                                                </div>
-
-                                                <div className="max-h-60 overflow-y-auto border rounded-md">
-                                                    <table className="w-full text-xs md:text-sm">
-                                                        <thead className="bg-muted sticky top-0 z-10">
-                                                            <tr className="text-left text-muted-foreground">
-                                                                <th className="p-2">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <input 
-                                                                            type="checkbox" 
-                                                                            checked={discoveredRepos.length > 0 && selectedRepos.size === discoveredRepos.length}
-                                                                            onChange={toggleSelectAll}
-                                                                            className="cursor-pointer w-4 h-4 accent-primary"
-                                                                        />
-                                                                        <span className="font-semibold">Select All</span>
-                                                                    </div>
-                                                                </th>
-                                                                <th className="p-2">Repository</th>
-                                                                <th className="p-2">Branch</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {discoveredRepos.map((repo) => (
-                                                                <tr
-                                                                    key={repo.id}
-                                                                    className={`border-t last:border-b-0 transition-colors ${ 
-                                                                        selectedRepos.has(repo.id) 
-                                                                            ? 'bg-primary/5 dark:bg-primary/30 hover:bg-primary/10 dark:hover:bg-primary/50' 
-                                                                            : 'hover:bg-accent/50'
-                                                                    }`}
-                                                                >
-                                                                    <td className="p-2 align-middle">
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={selectedRepos.has(repo.id)}
-                                                                            onChange={() => toggleRepoSelection(repo.id)}
-                                                                            className="cursor-pointer w-4 h-4 accent-primary"
-                                                                        />
-                                                                    </td>
-                                                                    <td className="p-2 align-middle font-medium truncate max-w-[220px]">
-                                                                        {repo.full_name.split('/')[1]}
-                                                                    </td>
-                                                                    <td className="p-2 align-middle">
-                                                                        <select
-                                                                            className="w-full min-w-[180px] max-w-full px-3 py-2 border border-border rounded-md text-sm font-medium bg-background focus:outline-none focus:ring-2 focus:ring-primary whitespace-nowrap"
-                                                                            value={repoBranches[repo.id] || repo.default_branch}
-                                                                            onChange={(e) => handleBranchChange(repo.id, e.target.value)}
-                                                                        >
-                                                                            {repo.branches && repo.branches.length > 0 ? (
-                                                                                repo.branches.map((branch) => (
-                                                                                    <option key={branch} value={branch}>
-                                                                                        {branch}
-                                                                                        {branch === repo.default_branch ? " (default)" : ""}
-                                                                                    </option>
-                                                                                ))
-                                                                            ) : (
-                                                                                <option value={repo.default_branch}>
-                                                                                    {repo.default_branch} (default)
-                                                                                </option>
-                                                                            )}
-                                                                        </select>
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-
-                                                <div className="mt-4 p-4 bg-muted/50 rounded-lg">
-                                                    <div className="flex items-center justify-between">
-                                                        <div>
-                                                            <p className="text-sm text-muted-foreground">Total Repositories</p>
-                                                            <p className="text-2xl font-bold">{discoveredRepos.length}</p>
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-sm text-muted-foreground">Selected</p>
-                                                            <p className="text-2xl font-bold text-primary">{selectedRepos.size}</p>
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-sm text-muted-foreground">Not Selected</p>
-                                                            <p className="text-2xl font-bold text-muted-foreground">
-                                                                {discoveredRepos.length - selectedRepos.size}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <Button
-                                                    className="w-full mt-4"
-                                                    onClick={startGitHubRepoScan}
-                                                    disabled={selectedRepos.size === 0}
-                                                >
-                                                    Scan Selected ({selectedRepos.size})
-                                                </Button>
-                                            </div>
-                                        )}
-                                    </div>
-                                </UnifiedCard>
-                            </TabsContent>
-                            <TabsContent value="excel">
-                                <UnifiedCard padding="none">
-                                    <div className="p-6">
-                                        <h3 className="text-lg font-bold">Scan from Excel</h3>
-                                        <p className="text-muted-foreground text-sm">Upload an Excel file with 'repo_url' and 'branch_name' columns.</p>
-                                    </div>
-                                    <div className="p-6">
-                                        {!showProgress ? (
-                                            <>
-                                                <UnifiedFileInput
-                                                  label="Upload Excel File"
-                                                  accept=".xlsx,.xls"
-                                                  helperText="Upload an Excel file with 'repo_url' and 'branch_name' columns."
-                                                  selectedFile={repoFile}
-                                                  onFileSelect={setRepoFile}
-                                                  onFileRemove={() => setRepoFile(null)}
-                                                  dragAndDrop={true}
-                                                />
-                                                <Button className="w-full mt-6" disabled={!repoFile} onClick={startRepoScan}>Start Scan from Excel</Button>
-                                            </>
-                                        ) : (
-                                            <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
-                                        )}
-                                    </div>
-                                </UnifiedCard>
-                            </TabsContent>
-                        </Tabs>
-                    )}
-
-                    {/* SYSTEM SCANNER VIEW */}
-                    {view === 'system' && (
-                        <div className="space-y-8">
-                            <div className="max-w-6xl mx-auto">
-                                <header className="text-center mb-8">
-                                    <h1 className={typography.display}>System Agent Downloads</h1>
-                                    <p className="text-lg text-muted-foreground mt-2">
-                                        Download agents and follow setup instructions for your platform
-                                    </p>
-                                </header>
-
-                                <div className="space-y-10">
-                                    {/* Linux Section */}
-                                    <section>
-                                        <SystemDownloadCard
-                                            title="Linux Agent"
-                                            folderType="linux"
-                                            icon={<Terminal size={28} />}
-                                            description="For Ubuntu, Debian, RHEL, CentOS"
-                                            files={linuxFiles}
-                                            loading={systemLoading}
-                                            formatBytes={formatBytes}
-                                            apiUrl={AGENT_API_BASE}
-                                        />
-                                        <div className="mt-6">
-                                            <LinuxInstructionsCard />
-                                        </div>
-                                    </section>
-
-                                    {/* Windows Section */}
-                                    <section>
-                                        <SystemDownloadCard
-                                            title="Windows Agent"
-                                            folderType="windows"
-                                            icon={<Server size={28} />}
-                                            description="For Windows Server 2016+"
-                                            files={windowsFiles}
-                                            loading={systemLoading}
-                                            formatBytes={formatBytes}
-                                            apiUrl={AGENT_API_BASE}
-                                        />
-                                        <div className="mt-6">
-                                            <WindowsInstructionsCard />
-                                        </div>
-                                    </section>
-
-                                    {/* Configuration Section */}
-                                    <section>
-                                        <ConfigurationCard />
-                                    </section>
-
-                                    {/* Monitoring Section */}
-                                    <section>
-                                        <MonitoringCard />
-                                    </section>
+        <>
+            <AnimatePresence mode="wait">
+                {view === 'dashboard' && (
+                    <motion.div
+                        key="dashboard"
+                        variants={cardVariants}
+                        initial="hidden"
+                        animate="visible"
+                        exit="exit"
+                        className="p-4 md:p-8"
+                    >
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-primary/10 rounded-lg">
+                                    <UploadCloud className="h-8 w-8 text-primary" />
+                                </div>
+                                <div>
+                                    <h1 className="text-2xl font-bold">Onboarding</h1>
+                                    <p className="text-muted-foreground">Get started by scanning your assets</p>
                                 </div>
                             </div>
                         </div>
-                    )}
-                </motion.div>
-            )}
-        </AnimatePresence>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+                            <UnifiedEntryCard
+                                icon={UploadCloud}
+                                title="TLS/SSL Scanner"
+                                subtitle="Scan domains from an Excel file"
+                                description="Upload a spreadsheet with a list of domains to check their TLS/SSL certificate configurations and ensure secure connections across your infrastructure."
+                                actionLabel="Start Scan"
+                                onClick={() => setView('tls')}
+                                variant="premium"
+                            />
+
+                            <UnifiedEntryCard
+                                icon={Github}
+                                title="Repository Scanner"
+                                subtitle="Scan repos from GitHub or Excel"
+                                description="Analyze Git repositories for cryptographic algorithm usage and security best practices. Discover vulnerabilities and ensure compliance with modern standards."
+                                actionLabel="Start Scan"
+                                onClick={() => setView('repo')}
+                                variant="premium"
+                            />
+
+                            <UnifiedEntryCard
+                                icon={Download}
+                                title="System Scanner"
+                                subtitle="Download and setup agents"
+                                description="Download agents for Linux and Windows to scan system cryptographic configurations. Deploy lightweight agents to monitor and audit your infrastructure in real-time."
+                                actionLabel="Download Agents"
+                                onClick={() => setView('system')}
+                                variant="premium"
+                            />
+                        </div>
+
+                        <UnifiedCard className="mt-12 max-w-6xl mx-auto">
+                            <div className="p-6">
+                                <div className="flex flex-row items-center justify-between">
+                                    <h3 className="text-lg font-bold">Recent Batch Jobs</h3>
+                                    <Button variant="outline" size="sm" onClick={loadJobs}><RefreshCw className="w-4 h-4 mr-2" /> Refresh</Button>
+                                </div>
+                            </div>
+                            <div className="p-6">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full">
+                                        <thead>
+                                            <tr className="text-left text-muted-foreground">
+                                                <th className="p-3">Job ID</th>
+                                                <th className="p-3">Type</th>
+                                                <th className="p-3">Status</th>
+                                                <th className="p-3">Progress</th>
+                                                <th className="p-3">Started</th>
+                                                <th className="p-3">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {jobs.length > 0 ? jobs.map(job => (
+                                                <tr key={job.job_id} className="border-t">
+                                                    <td className="p-3 font-mono text-sm">{job.job_id.substring(0, 8)}...</td>
+                                                    <td className="p-3 uppercase">{job.scan_type}</td>
+                                                    <td className="p-3"><span className={`px-2 py-1 text-xs font-bold rounded-full ${job.status === 'completed' ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'}`}>{job.status}</span></td>
+                                                    <td className="p-3">{`${job.completed_items + job.failed_items} / ${job.total_items}`}</td>
+                                                    <td className="p-3 text-sm">{new Date(job.started_at).toLocaleString()}</td>
+                                                    <td className="p-3 space-x-2">
+                                                        {job.status.toLowerCase() === 'completed' && <Button size="sm" variant="outline" onClick={() => exportJob(job.job_id)}><Download className="w-4 h-4" /></Button>}
+                                                        <Button size="sm" variant="destructive" onClick={() => deleteJob(job.job_id)}><Trash2 className="w-4 h-4" /></Button>
+                                                    </td>
+                                                </tr>
+                                            )) : (
+                                                <tr><td colSpan={6} className="text-center p-8 text-muted-foreground">No jobs found.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </UnifiedCard>
+                    </motion.div>
+                )}
+
+                {[ 'tls', 'repo', 'system' ].includes(view) && (
+                     <motion.div
+                        key={view}
+                        variants={cardVariants}
+                        initial="hidden"
+                        animate="visible"
+                        exit="exit"
+                        className="p-4 md:p-8 max-w-4xl mx-auto"
+                    >
+                        <UnifiedBackButton onClick={navigateBack} label="Back" className="mb-6" />
+                        
+                        {/* TLS SCANNER VIEW */}
+                        {view === 'tls' && (
+                            <UnifiedCard padding="none">
+                                <div className="p-6">
+                                    <h2 className={typography.h2}>TLS/SSL Scanner</h2>
+                                    <p className="text-muted-foreground">Upload an Excel file with a 'domain' column.</p>
+                                </div>
+                                <div className="p-6">
+                                    {!showProgress ? (
+                                        <>
+                                            <UnifiedFileInput
+                                              label="Upload Excel File"
+                                              accept=".xlsx,.xls"
+                                              helperText="Upload an Excel file with a 'domain' column."
+                                              selectedFile={tlsFile}
+                                              onFileSelect={setTlsFile}
+                                              onFileRemove={() => setTlsFile(null)}
+                                              dragAndDrop={true}
+                                            />
+                                            <Button className="w-full mt-6" disabled={!tlsFile} onClick={startTLSScan}>Start TLS Scan</Button>
+                                        </>
+                                    ) : (
+                                        <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
+                                    )}
+                                </div>
+                            </UnifiedCard>
+                        )}
+
+                        {/* REPO SCANNER VIEW */}
+                        {view === 'repo' && (
+                            <Tabs defaultValue="github">
+                                <TabsList className="grid w-full grid-cols-2">
+                                    <TabsTrigger value="github">From GitHub</TabsTrigger>
+                                    <TabsTrigger value="excel">From Excel</TabsTrigger>
+                                </TabsList>
+                                <TabsContent value="github">
+                                    <UnifiedCard padding="none">
+                                        <div className="p-6">
+                                            <h3 className="text-lg font-bold">Discover from GitHub</h3>
+                                            <p className="text-muted-foreground text-sm">
+                                                Enter a GitHub username or organization URL to find public repositories.
+                                            </p>
+                                        </div>
+
+                                        <div className="p-6">
+                                            {/* URL + Discover */}
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    placeholder="e.g., https://github.com/torvalds"
+                                                    value={githubUrl}
+                                                    onChange={(e) => setGithubUrl(e.target.value)}
+                                                />
+                                                <Button onClick={discoverGitHubRepos} disabled={isDiscovering}>
+                                                    {isDiscovering ? <Loader2 className="w-4 h-4 animate-spin" /> : "Discover"}
+                                                </Button>
+                                            </div>
+
+                                            {/* Error */}
+                                            {githubError && (
+                                                <div className="mt-3 p-3 rounded-lg bg-destructive/10 dark:bg-destructive/20 border border-destructive/20">
+                                                    <p className="text-destructive text-sm flex items-center gap-2">
+                                                        <XCircle className="w-4 h-4" />
+                                                        {githubError}
+                                                    </p>
+                                                </div>
+                                            )}
+
+                                            {/* Loading */}
+                                            {isDiscovering && (
+                                                <div className="text-center p-10">
+                                                    <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
+                                                    <p className="text-sm text-muted-foreground mt-3">Discovering repositories...</p>
+                                                </div>
+                                            )}
+
+                                            {/* Repos list with branch selector */}
+                                            {!isDiscovering && discoveredRepos.length > 0 && (
+                                                <div className="mt-6">
+                                                    <div className="mb-3">
+                                                        <h3 className="font-bold">{discoveredRepos.length} Repos Found</h3>
+                                                    </div>
+
+                                                    <div className="max-h-60 overflow-y-auto border rounded-md">
+                                                        <table className="w-full text-xs md:text-sm">
+                                                            <thead className="bg-muted sticky top-0 z-10">
+                                                                <tr className="text-left text-muted-foreground">
+                                                                    <th className="p-2">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input 
+                                                                                type="checkbox" 
+                                                                                checked={discoveredRepos.length > 0 && selectedRepos.size === discoveredRepos.length}
+                                                                                onChange={toggleSelectAll}
+                                                                                className="cursor-pointer w-4 h-4 accent-primary"
+                                                                            />
+                                                                            <span className="font-semibold">Select All</span>
+                                                                        </div>
+                                                                    </th>
+                                                                    <th className="p-2">Repository</th>
+                                                                    <th className="p-2">Branch</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {discoveredRepos.map((repo) => (
+                                                                    <tr
+                                                                        key={repo.id}
+                                                                        className={`border-t last:border-b-0 transition-colors ${ 
+                                                                            selectedRepos.has(repo.id) 
+                                                                                ? 'bg-primary/5 dark:bg-primary/30 hover:bg-primary/10 dark:hover:bg-primary/50' 
+                                                                                : 'hover:bg-accent/50'
+                                                                        }`}
+                                                                    >
+                                                                        <td className="p-2 align-middle">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={selectedRepos.has(repo.id)}
+                                                                                onChange={() => toggleRepoSelection(repo.id)}
+                                                                                className="cursor-pointer w-4 h-4 accent-primary"
+                                                                            />
+                                                                        </td>
+                                                                        <td className="p-2 align-middle font-medium truncate max-w-[220px]">
+                                                                            {repo.full_name.split('/')[1]}
+                                                                        </td>
+                                                                        <td className="p-2 align-middle">
+                                                                            <select
+                                                                                className="w-full min-w-[180px] max-w-full px-3 py-2 border border-border rounded-md text-sm font-medium bg-background focus:outline-none focus:ring-2 focus:ring-primary whitespace-nowrap"
+                                                                                value={repoBranches[repo.id] || repo.default_branch}
+                                                                                onChange={(e) => handleBranchChange(repo.id, e.target.value)}
+                                                                            >
+                                                                                {repo.branches && repo.branches.length > 0 ? (
+                                                                                    repo.branches.map((branch) => (
+                                                                                        <option key={branch} value={branch}>
+                                                                                            {branch}
+                                                                                            {branch === repo.default_branch ? " (default)" : ""}
+                                                                                        </option>
+                                                                                    ))
+                                                                                ) : (
+                                                                                    <option value={repo.default_branch}>
+                                                                                        {repo.default_branch} (default)
+                                                                                    </option>
+                                                                                )}
+                                                                            </select>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+
+                                                    <div className="mt-4 p-4 bg-muted/50 rounded-lg">
+                                                        <div className="flex items-center justify-between">
+                                                            <div>
+                                                                <p className="text-sm text-muted-foreground">Total Repositories</p>
+                                                                <p className="text-2xl font-bold">{discoveredRepos.length}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm text-muted-foreground">Selected</p>
+                                                                <p className="text-2xl font-bold text-primary">{selectedRepos.size}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm text-muted-foreground">Not Selected</p>
+                                                                <p className="text-2xl font-bold text-muted-foreground">
+                                                                    {discoveredRepos.length - selectedRepos.size}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <Button
+                                                        className="w-full mt-4"
+                                                        onClick={startGitHubRepoScan}
+                                                        disabled={selectedRepos.size === 0}
+                                                    >
+                                                        Scan Selected ({selectedRepos.size})
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </UnifiedCard>
+                                </TabsContent>
+                                <TabsContent value="excel">
+                                    <UnifiedCard padding="none">
+                                        <div className="p-6">
+                                            <h3 className="text-lg font-bold">Scan from Excel</h3>
+                                            <p className="text-muted-foreground text-sm">Upload an Excel file with 'repo_url' and 'branch_name' columns.</p>
+                                        </div>
+                                        <div className="p-6">
+                                            {!showProgress ? (
+                                                <>
+                                                    <UnifiedFileInput
+                                                      label="Upload Excel File"
+                                                      accept=".xlsx,.xls"
+                                                      helperText="Upload an Excel file with 'repo_url' and 'branch_name' columns."
+                                                      selectedFile={repoFile}
+                                                      onFileSelect={setRepoFile}
+                                                      onFileRemove={() => setRepoFile(null)}
+                                                      dragAndDrop={true}
+                                                    />
+                                                    <Button className="w-full mt-6" disabled={!repoFile} onClick={startRepoScan}>Start Scan from Excel</Button>
+                                                </>
+                                            ) : (
+                                                <ScanProgress progress={scanProgress} logs={scanProgress.logs} />
+                                            )}
+                                        </div>
+                                    </UnifiedCard>
+                                </TabsContent>
+                            </Tabs>
+                        )}
+
+                        {/* SYSTEM SCANNER VIEW */}
+                        {view === 'system' && (
+                            <div className="space-y-8">
+                                <div className="max-w-6xl mx-auto">
+                                    <header className="text-center mb-8">
+                                        <h1 className={typography.display}>System Agent Downloads</h1>
+                                        <p className="text-lg text-muted-foreground mt-2">
+                                            Download agents and follow setup instructions for your platform
+                                        </p>
+                                    </header>
+
+                                    <div className="space-y-10">
+                                        {/* Linux Section */}
+                                        <section>
+                                            <SystemDownloadCard
+                                                title="Linux Agent"
+                                                folderType="linux"
+                                                icon={<Terminal size={28} />}
+                                                description="For Ubuntu, Debian, RHEL, CentOS"
+                                                files={linuxFiles}
+                                                loading={systemLoading}
+                                                formatBytes={formatBytes}
+                                                apiUrl={AGENT_API_BASE}
+                                                showToast={showToast}
+                                            />
+                                            <div className="mt-6">
+                                                <LinuxInstructionsCard />
+                                            </div>
+                                        </section>
+
+                                        {/* Windows Section */}
+                                        <section>
+                                            <SystemDownloadCard
+                                                title="Windows Agent"
+                                                folderType="windows"
+                                                icon={<Server size={28} />}
+                                                description="For Windows Server 2016+"
+                                                files={windowsFiles}
+                                                loading={systemLoading}
+                                                formatBytes={formatBytes}
+                                                apiUrl={AGENT_API_BASE}
+                                                showToast={showToast}
+                                            />
+                                            <div className="mt-6">
+                                                <WindowsInstructionsCard />
+                                            </div>
+                                        </section>
+
+                                        {/* Configuration Section */}
+                                        <section>
+                                            <ConfigurationCard />
+                                        </section>
+
+                                        {/* Monitoring Section */}
+                                        <section>
+                                            <MonitoringCard />
+                                        </section>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Toast Container - Fixed position at bottom-right */}
+            <div className="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none">
+                <AnimatePresence>
+                    {toasts.map(toast => (
+                        <div key={toast.id} className="pointer-events-auto">
+                            <ToastNotification
+                                {...toast}
+                                onDismiss={() => dismissToast(toast.id)}
+                            />
+                        </div>
+                    ))}
+                </AnimatePresence>
+            </div>
+
+            {/* Confirmation Modal */}
+            {confirmModal && <ConfirmationModal {...confirmModal} />}
+        </>
     );
 };
 
