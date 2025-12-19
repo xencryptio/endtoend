@@ -1,0 +1,20 @@
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Frontend as Frontend (Web UI)
+    participant DBService as db-service (FastAPI)
+    participant RepoScanner as repo_scanner (FastAPI)
+    participant SystemScan as system-scaner (FastAPI)
+    participant ScanService as scan-service (FastAPI)
+    participant Agent as System Agent (Linux/Windows)
+    participant Postgres as PostgreSQL
+
+    Frontend->>DBService: API Calls (URL scans)
+    Frontend->>RepoScanner: API Calls (Repo scans)
+    Frontend->>SystemScan: API Calls (Agent management)
+    DBService->>Postgres: SQLAlchemy (scandb)
+    RepoScanner->>Postgres: SQLAlchemy (repo_scanner_db)
+    SystemScan->>Postgres: SQLAlchemy (system_scanner_db)
+    ScanService->>DBService: HTTP API Calls (store results)
+    Agent->>SystemScan: HTTP (register, heartbeat, tasks, results)
+```
