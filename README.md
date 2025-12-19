@@ -405,35 +405,35 @@ Collects infrastructure and system-level security information using lightweight 
 #### Architecture Diagram
 
 ┌─────────────────────────────────────────────────────────────┐
-│              SYSTEM-SCANNER SERVICE (`system-scan`)                          │
-│                                                              │
-│  API Layer (FastAPI)                                         │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ /register_agent    - Agent registration              │   │
-│  │ /fetch_action      - Agent polls for tasks           │   │
-│  │ /receive_audit     - Agent submits results           │   │
-│  │ /health            - Health check                    │   │
-│  └──────────────────────────────────────────────────────┘   │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌────────────────────────────────────────┐                 │
-│  │   Agent Manager                        │                 │
-│  │   - Track registered agents            │                 │
-│  │   - Monitor agent status               │                 │
-│  │   - Assign scan tasks                  │                 │
-│  └────────────────────────────────────────┘                 │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌────────────────────────────────────────┐                 │
-│  │   Result Processor                     │                 │
-│  │   - Validate agent data                │                 │
-│  │   - Extract system info                │                 │
-│  │   - Send to Universal-Scoring          │                 │
-│  └────────────────────────────────────────┘                 │
-│         │                    │                               │
-│         ▼                    ▼                               │
-│  Universal-Scoring      DB Service                           │
-│     (Scoring)           (Storage)                            │
+│              SYSTEM-SCANNER SERVICE (`system-scan`)          │
+│                                                             │
+│  API Layer (FastAPI)                                        │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ /register_agent    - Agent registration              │  │
+│  │ /fetch_action      - Agent polls for tasks            │  │
+│  │ /receive_audit     - Agent submits results            │  │
+│  │ /health            - Health check                     │  │
+│  └──────────────────────────────────────────────────────┘  │
+│         │                                                   │
+│         ▼                                                   │
+│  ┌────────────────────────────────────────┐                │
+│  │   Agent Manager                         │                │
+│  │   - Track registered agents             │                │
+│  │   - Monitor agent status                │                │
+│  │   - Assign scan tasks                   │                │
+│  └────────────────────────────────────────┘                │
+│         │                                                   │
+│         ▼                                                   │
+│  ┌────────────────────────────────────────┐                │
+│  │   Result Processor                      │                │
+│  │   - Validate agent data                 │                │
+│  │   - Extract system info                 │                │
+│  │   - Send to Universal-Scoring           │                │
+│  └────────────────────────────────────────┘                │
+│         │                    │                              │
+│         ▼                    ▼                              │
+│  Universal-Scoring      DB Service                          │
+│     (Scoring)           (Storage)                           │
 └─────────────────────────────────────────────────────────────┘
          ▲
          │
@@ -442,6 +442,7 @@ Collects infrastructure and system-level security information using lightweight 
    │  Agents   │
    │(Win/Linux)│
    └───────────┘
+
 
 #### Key Responsibilities
 - **Agent Management:** Register and track deployed agents
@@ -644,36 +645,37 @@ Handles bulk scanning operations by processing Excel file uploads and orchestrat
 ┌─────────────────────────────────────────────────────────────┐
 │                  ONBOARDING SERVICE                          │
 │                 (Batch Orchestrator)                         │
-│                                                              │
-│  API Layer (FastAPI)                                         │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ /api/tls-scan/batch   - Batch TLS scanning          │   │
-│  │ /api/repo-scan/batch  - Batch repo scanning         │   │
-│  │ /api/github/discover  - GitHub repo discovery       │   │
-│  │ /api/batch-jobs/{id}  - SSE progress stream         │   │
-│  └──────────────────────────────────────────────────────┘   │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌────────────────────────────────────────┐                 │
-│  │   Excel File Processor                 │                 │
-│  │   - Parse .xlsx/.xls                   │                 │
-│  │   - Extract domains/repo URLs          │                 │
-│  │   - Validate entries                   │                 │
-│  └────────────────────────────────────────┘                 │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌────────────────────────────────────────┐                 │
-│  │   Batch Job Manager                    │                 │
-│  │   - Create job queue (in-memory)       │                 │
-│  │   - Manage concurrency                 │                 │
-│  │   - Track progress                     │                 │
-│  └────────────────────────────────────────┘                 │
-│         │                                                    │
-│         ├──────────────────┬────────────────────┐           │
-│         ▼                  ▼                    ▼           │
-│  Crypto-Scanner       Repo-Scanner       System-Scanner (`system-scan`)     │
+│                                                             │
+│  API Layer (FastAPI)                                        │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ /api/tls-scan/batch   - Batch TLS scanning            │  │
+│  │ /api/repo-scan/batch  - Batch repo scanning           │  │
+│  │ /api/github/discover  - GitHub repo discovery         │  │
+│  │ /api/batch-jobs/{id}  - SSE progress stream           │  │
+│  └──────────────────────────────────────────────────────┘  │
+│         │                                                   │
+│         ▼                                                   │
+│  ┌────────────────────────────────────────┐                │
+│  │   Excel File Processor                 │                │
+│  │   - Parse .xlsx/.xls                   │                │
+│  │   - Extract domains/repo URLs          │                │
+│  │   - Validate entries                   │                │
+│  └────────────────────────────────────────┘                │
+│         │                                                   │
+│         ▼                                                   │
+│  ┌────────────────────────────────────────┐                │
+│  │   Batch Job Manager                    │                │
+│  │   - Create job queue (in-memory)       │                │
+│  │   - Manage concurrency                 │                │
+│  │   - Track progress                     │                │
+│  └────────────────────────────────────────┘                │
+│         │                                                   │
+│         ├──────────────────┬────────────────────┐          │
+│         ▼                  ▼                    ▼          │
+│  Crypto-Scanner       Repo-Scanner       System-Scanner (`system-scan`) │
 │  (Dispatch TLS)       (Dispatch Repo)    (Dispatch Infra)   │
 └─────────────────────────────────────────────────────────────┘
+
 
 #### Key Responsibilities
 - **Bulk Operations:** Process large lists of assets
@@ -2828,37 +2830,14 @@ User         Frontend        Onboarding         Crypto-Scanner    Universal-Scor
 ### 6.4 Agent-Based System Scan
 
 ```
-Sequence: Agent Submits Audit Results
+sequenceDiagram
+    Agent->>SystemScan: POST /receive_audit_result
+    SystemScan->>UniversalScoring: POST /api/v1/score
+    UniversalScoring-->>SystemScan: Score Response
+    SystemScan->>DB: POST /scans/result
+    DB-->>SystemScan: Success
+    SystemScan-->>Agent: Success Response
 
-Scanning Agent                System-Scanner (`system-scan`)    Universal-Scoring (`universal-scoring-service`)    DB Service
-      │                            │                         │                    │
-      │ POST /receive_audit_result │                         │                    │
-      │───────────────────────────▶│                         │                    │
-      │                            │                         │                    │
-      │                            │ Validate Request        │                    │
-      │                            │──────────┐              │                    │
-      │                            │          │              │                    │
-      │                            │◀─────────┘              │                    │
-      │                            │                         │                    │
-      │                            │ POST /api/v1/score      │                    │
-      │                            │────────────────────────▶│                    │
-      │                            │                         │                    │
-      │                            │                         │ Calculate Score    │
-      │                            │                         │─────────┐          │
-      │                            │                         │         │          │
-      │                            │                         │◀────────┘          │
-      │                            │                         │                    │
-      │                            │ ◀───── Score Response ──│                    │
-      │                            │                         │                    │
-      │                            │ POST /scans/result                           │
-      │                            │─────────────────────────────────────────────▶│
-      │                            │                                              │
-      │                            │ ◀───── Success ──────────────────────────────│
-      │                            │                         │                    │
-      │ ◀─── Success Response ─────│                         │                    │
-      │                            │                         │                    │
-```
-```
 
 ---
 
