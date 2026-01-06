@@ -138,10 +138,9 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
       } border-2 ${getBorderColor()} rounded-2xl shadow-[0_4px_14px_rgba(0,0,0,0.06)] backdrop-blur-sm`}>
         <div>
           <div className="flex items-center gap-4 text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mb-3">
-            {getIcon()}
             <span>{title}</span>
           </div>
-          <div className="text-sm text-slate-600 dark:text-slate-400 font-medium ml-12 leading-relaxed">
+          <div className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
             {description}
           </div>
         </div>
@@ -214,13 +213,6 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
                 <div className={`flex items-center gap-2 text-sm font-bold mb-3 ${
                   algo.quantum_safe ? 'text-success' : 'text-destructive'
                 }`}>
-                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
-                    algo.quantum_safe 
-                      ? 'bg-success/10' 
-                      : 'bg-destructive/10'
-                  }`}>
-                    {algo.quantum_safe ? '✅' : '⚠️'}
-                  </div>
                   {algo.quantum_safe ? 'Quantum-Safe' : 'Quantum-Vulnerable'}
                 </div>
                 
@@ -569,7 +561,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
 
         {quantumVulnerable.length > 0 && (
           <AlgorithmSection 
-            title="⚠️ Quantum-Vulnerable Algorithms" 
+            title="Quantum-Vulnerable Algorithms" 
             description="Will be broken by quantum computers: RSA, ECDSA, DH, or weak parameters (AES-128, SHA-256)" 
             algorithms={quantumVulnerable} 
             type="unsafe"
@@ -578,7 +570,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
         )}
         {truePQC.length > 0 && (
           <AlgorithmSection 
-            title="🔮 Post-Quantum Cryptography (PQC)" 
+            title="Post-Quantum Cryptography (PQC)" 
             description="Mathematically resistant to quantum attacks: Kyber, Dilithium, SPHINCS+, Falcon, NTRU" 
             algorithms={truePQC} 
             type="pqc"
@@ -587,7 +579,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
         )}
         {quantumSafe.length > 0 && (
           <AlgorithmSection 
-            title="✅ Quantum-Safe (Classical)" 
+            title="Quantum-Safe (Classical)" 
             description="Classical algorithms with quantum-resistant parameters: AES-256, SHA-512, ChaCha20-256" 
             algorithms={quantumSafe} 
             type="safe"

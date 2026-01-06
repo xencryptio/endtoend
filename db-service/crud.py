@@ -30,13 +30,19 @@ def get_scan_batch(db: Session, batch_id: str) -> Optional[models.ScanBatch]:
 def get_scan_batches(
     db: Session,
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    status: str = None  # NEW: Filter by status
 ) -> List[models.ScanBatch]:
-    """Get all scan batches with pagination."""
-    return db.query(models.ScanBatch).order_by(
+    """Get all scan batches with pagination and optional status filter."""
+    query = db.query(models.ScanBatch).order_by(
         models.ScanBatch.created_at.desc()
-    ).offset(skip).limit(limit).all()
-
+    )
+    
+    # Apply status filter if provided
+    if status:
+        query = query.filter(models.ScanBatch.status == status)
+    
+    return query.offset(skip).limit(limit).all()
 
 def update_scan_batch_status(
     db: Session,

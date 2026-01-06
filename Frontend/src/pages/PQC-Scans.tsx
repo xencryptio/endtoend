@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -1054,6 +1055,9 @@ const RawJsonSection: React.FC<{ auditResults: any }> = ({ auditResults }) => (
 );
 
 const CryptoAuditDashboard: React.FC = () => {
+  const location = useLocation();
+  const focusIp = (location.state as any)?.focusIp || null;
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'downloads' | 'docs'>('dashboard');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -1328,6 +1332,14 @@ const CryptoAuditDashboard: React.FC = () => {
         agent.agent_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
         agent.ip_address.includes(searchQuery);
 
+      // If focusIp is set, prioritize matching by IP
+      if (focusIp && agent.ip_address === focusIp) {
+        return true;
+      }
+      if (focusIp) {
+        return false; // Don't show other agents if focusIp is set
+      }
+
       let matchesStatus = true;
       switch (statusFilter) {
         case 'all':
@@ -1349,7 +1361,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
       return matchesSearch && matchesStatus;
     });
-  }, [agents, searchQuery, statusFilter, agentTaskInfo]);
+  }, [agents, searchQuery, statusFilter, agentTaskInfo, focusIp]);
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -1414,7 +1426,28 @@ const CryptoAuditDashboard: React.FC = () => {
   useEffect(() => {
     refreshAll();
     fetchFiles();
-  }, []);
+    
+    // If focusIp is set, expand and load results for the matching agent
+    if (focusIp && agents.length > 0) {
+      const matchingAgent = agents.find(a => a.ip_address === focusIp);
+      if (matchingAgent && !expandedAgents.has(matchingAgent.agent_id)) {
+        const newExpanded = new Set(expandedAgents);
+        newExpanded.add(matchingAgent.agent_id);
+        setExpandedAgents(newExpanded);
+        
+        if (!agentResults.has(matchingAgent.agent_id)) {
+          setLoadingResults(prev => new Set(prev).add(matchingAgent.agent_id));
+          fetchAgentResults(matchingAgent.agent_id).then(() => {
+            setLoadingResults(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(matchingAgent.agent_id);
+              return newSet;
+            });
+          });
+        }
+      }
+    }
+  }, [focusIp]);
 
   useEffect(() => {
     const interval = setInterval(() => {

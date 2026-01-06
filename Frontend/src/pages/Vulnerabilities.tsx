@@ -169,7 +169,8 @@ export default function VulnerabilitiesPage() {
         <MetricCard
           title="Critical"
           value={severityCounts.Critical}
-iconClassName="text-destructive"
+          icon={ShieldAlert}
+          iconClassName="text-destructive"
           gradient
         />
         <MetricCard
@@ -186,7 +187,10 @@ iconClassName="text-destructive"
           iconClassName="text-warning"
         />
         <MetricCard
-iconClassName="text-success"
+          title="Low"
+          value={severityCounts.Low}
+          icon={ShieldCheck}
+          iconClassName="text-success"
         />
         <MetricCard
           title="Total Algorithms"

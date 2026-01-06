@@ -1,0 +1,26 @@
+{
+  "organization": {
+    "organization_name": "Example Corp",
+    "organization_type": "Customer",
+    "industry": "Software",
+    "organization_email": "contact@example.com",
+    "contact_person": "Alice Example"
+  },
+  "repositories": [
+    {"repo_url": "https://github.com/facebook/react", "branch_to_scan": "main"},
+    {"repo_url": "https://github.com/nodejs/node", "branch_to_scan": "main"},
+    {"repo_url": "https://github.com/microsoft/TypeScript", "branch_to_scan": "main"},
+    {"repo_url": "https://github.com/django/django", "branch_to_scan": "main"}
+  ],
+  "servers": [
+    {"server_name": "web-01", "operating_system": "linux", "hostname": "web-01.example.local", "ip_address": "10.1.1.10"},
+    {"server_name": "win-ad-01", "operating_system": "windows", "hostname": "win-ad-01.example.local", "ip_address": "10.1.1.11"}
+  ],
+  "domains": [
+    {"domain": "example.com"},
+    {"domain": "github.com"},
+    {"domain": "microsoft.com"},
+    {"domain": "python.org"}
+  ],
+  "created_by": "onboarding@example.com"
+}

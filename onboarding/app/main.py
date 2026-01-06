@@ -79,11 +79,13 @@ async def generic_exception_handler(request: Request, exc: Exception):
 TLS_SCANNER_URL = os.getenv("TLS_SCANNER_URL", "http://localhost:8000")
 REPO_SCANNER_URL = os.getenv("REPO_SCANNER_URL", "http://localhost:8003")
 MAX_CONCURRENT_SCANS = int(os.getenv("MAX_CONCURRENT_SCANS", "5"))
+DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db-service:8001")
 
 # Add debug logging
 logger.info(f"Configuration loaded:")
 logger.info(f"   TLS_SCANNER_URL: {TLS_SCANNER_URL}")
 logger.info(f"   REPO_SCANNER_URL: {REPO_SCANNER_URL}")
+logger.info(f"   DB_SERVICE_URL: {DB_SERVICE_URL}")
 logger.info(f"   MAX_CONCURRENT_SCANS: {MAX_CONCURRENT_SCANS}")
 
 # GitHub API Configuration
@@ -100,6 +102,27 @@ class ScanStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+# ==================== BACKGROUND TASK WRAPPER ====================
+# Wrapper to handle exceptions in background tasks safely
+async def safe_background_task_wrapper(func, job_id: str, *args, **kwargs):
+    """
+    Safely execute async background tasks with proper exception handling.
+    This ensures FastAPI doesn't silently swallow exceptions.
+    """
+    try:
+        logger.info(f"[{job_id}] Starting background task: {func.__name__}")
+        result = await func(job_id, *args, **kwargs)
+        logger.info(f"[{job_id}] Background task {func.__name__} completed successfully")
+        return result
+    except Exception as e:
+        logger.exception(f"[{job_id}] CRITICAL ERROR in background task {func.__name__}: {type(e).__name__} - {e}")
+        # Re-raise to ensure it's not silently swallowed
+        raise
+    except BaseException as e:
+        logger.exception(f"[{job_id}] FATAL ERROR in background task {func.__name__}: {type(e).__name__} - {e}")
+        raise
 
 
 class ScanResult(BaseModel):
@@ -126,6 +149,8 @@ class BatchScanJob(BaseModel):
 batch_jobs: Dict[str, BatchScanJob] = {}
 # Store SSE queues for active connections
 sse_queues: Dict[str, asyncio.Queue] = {}
+# Track running async tasks to avoid GC and capture failures
+running_tasks: Dict[str, asyncio.Task] = {}
 
 # ==================== GITHUB INTEGRATION MODELS ====================
 
@@ -148,6 +173,51 @@ class GitHubDiscoveryResponse(BaseModel):
 
 class BatchGitHubScanRequest(BaseModel):
     repos: List[Dict[str, str]]  # e.g., [{"repo_url": "...", "branch_name": "..."}]
+
+
+# =================== ONBOARDING MODELS ===================
+class OnboardingOrganization(BaseModel):
+    organization_name: str
+    organization_type: Optional[str] = None
+    industry: Optional[str] = None
+    organization_email: Optional[str] = None
+    contact_person: Optional[str] = None
+    onboarding_date: Optional[datetime] = None
+
+class OnboardingRepository(BaseModel):
+    project_name: Optional[str] = None
+    repo_name: Optional[str] = None
+    repo_url: str
+    branch_to_scan: Optional[str] = "main"
+    scan_frequency: Optional[str] = None
+
+class OnboardingServer(BaseModel):
+    server_name: Optional[str] = None
+    operating_system: Optional[str] = None
+    hostname: Optional[str] = None
+    ip_address: Optional[str] = None
+    mac_address: Optional[str] = None
+
+class OnboardingDomain(BaseModel):
+    domain: str
+
+class ApplicationPayload(BaseModel):
+    application_name: str
+    repositories: Optional[List[OnboardingRepository]] = []
+    servers: Optional[List[OnboardingServer]] = []
+    domains: Optional[List[OnboardingDomain]] = []
+
+class SubOrganizationPayload(BaseModel):
+    suborganization_name: str
+    applications: Optional[List[ApplicationPayload]] = []
+
+class OnboardingPayload(BaseModel):
+    organization: OnboardingOrganization
+    repositories: Optional[List[OnboardingRepository]] = []
+    servers: Optional[List[OnboardingServer]] = []
+    domains: Optional[List[OnboardingDomain]] = []
+    suborganizations: Optional[List[SubOrganizationPayload]] = []
+    created_by: Optional[str] = None
 
 
 # ==================== GITHUB INTEGRATION HELPERS AND ENDPOINTS ====================
@@ -271,75 +341,93 @@ class TLSScanRow(BaseModel):
 
 
 async def scan_single_tls_domain(domain: str) -> ScanResult:
-    """Scan a single domain using TLS scanner and wait for completion via SSE."""
-    logger.info(f"Initiating TLS scan for domain: {domain}")
+    """Scan a single domain using TLS scanner with queue-based API and polling."""
+    logger.info(f"🔍 Initiating TLS scan for domain: {domain}")
     try:
-        # Use a streaming POST request to the SSE endpoint
-        # We need to use httpx.AsyncClient directly to handle streaming
-        async with httpx.AsyncClient(timeout=630.0) as client:
+        # Step 1: Create scan request (queue-based)
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{TLS_SCANNER_URL}/scan-with-progress",
-                json={
-                    "domain": domain,
-                    "max_concurrent": 5,
-                    "save_to_db": True
-                },
-                headers={"Accept": "text/event-stream"},
-                timeout=630.0  # 10.5 minutes timeout for the entire scan
+                f"{TLS_SCANNER_URL}/create-scan-request",
+                json={"domain": domain},
+                timeout=30.0
             )
-            response.raise_for_status() # Raise for bad status codes
-
-            # Process SSE stream
-            async for line in response.aiter_lines():
-                if line.startswith('data:'):
-                    try:
-                        data_str = line[len('data:'):].strip()
-                        event_data = json.loads(data_str)
-                        
-                        # The 'complete' event signifies the end of the scan
-                        if event_data.get('type') == 'complete':
-                            # Check the summary to see if this specific domain succeeded
-                            summary = event_data.get('summary', {})
-                            if summary.get('successful', 0) > 0:
-                                logger.info(f"TLS scan completed successfully for {domain}")
-                                return ScanResult(
-                                    domain_or_repo=domain,
-                                    status="completed",
-                                    timestamp=datetime.utcnow()
-                                )
-                            else:
-                                # Find the specific error for this domain if available
-                                error_msg = "Scan failed for an unknown reason."
-                                if event_data.get('all_domains_status'):
-                                    domain_status = event_data['all_domains_status'].get(domain)
-                                    if domain_status and domain_status.get('error'):
-                                        error_msg = domain_status['error']
-                                logger.error(f"TLS scan failed for {domain}: {error_msg}")
-                                return ScanResult(
-                                    domain_or_repo=domain,
-                                    status="failed",
-                                    error=error_msg,
-                                    timestamp=datetime.utcnow()
-                                )
-                    except json.JSONDecodeError:
-                        logger.warning(f"Failed to decode JSON from SSE line: {line}")
-                        continue
+            response.raise_for_status()
+            batch_data = response.json()
+            batch_id = batch_data.get('batch_id')
             
-            # If the stream ends without a 'complete' event, it's an unexpected failure
-            logger.error(f"TLS scan stream ended unexpectedly for {domain}")
+            if not batch_id:
+                logger.error(f"Failed to get batch_id for {domain}")
+                return ScanResult(
+                    domain_or_repo=domain,
+                    status="failed",
+                    error="Failed to create scan request",
+                    timestamp=datetime.utcnow()
+                )
+            
+            logger.info(f"📝 Scan queued for {domain}, batch_id: {batch_id}")
+            
+            # Step 2: Poll for completion
+            max_polls = 120  # 120 polls * 5 seconds = 10 minutes max wait
+            poll_interval = 5  # 5 seconds between polls
+            
+            for poll_count in range(max_polls):
+                await asyncio.sleep(poll_interval)
+                
+                # Get batch status
+                status_response = await client.get(
+                    f"{TLS_SCANNER_URL}/batch/{batch_id}",
+                    timeout=10.0
+                )
+                status_response.raise_for_status()
+                batch_status = status_response.json()
+                
+                status = batch_status.get('status')
+                logger.debug(f"📊 Poll {poll_count + 1}/{max_polls} for {domain}: status={status}")
+                
+                if status == 'completed':
+                    successful = batch_status.get('successful_count', 0)
+                    failed = batch_status.get('failed_count', 0)
+                    
+                    if successful > 0:
+                        logger.info(f"TLS scan completed successfully for {domain}")
+                        return ScanResult(
+                            domain_or_repo=domain,
+                            status="completed",
+                            timestamp=datetime.utcnow()
+                        )
+                    else:
+                        logger.error(f"TLS scan failed for {domain}: {failed} failed")
+                        return ScanResult(
+                            domain_or_repo=domain,
+                            status="failed",
+                            error=f"Scan completed but failed ({failed} failures)",
+                            timestamp=datetime.utcnow()
+                        )
+                
+                elif status == 'failed':
+                    logger.error(f"TLS scan batch failed for {domain}")
+                    return ScanResult(
+                        domain_or_repo=domain,
+                        status="failed",
+                        error="Scan batch marked as failed",
+                        timestamp=datetime.utcnow()
+                    )
+            
+            # Timeout after max polls
+            logger.error(f"⏱️ TLS scan for {domain} timed out after {max_polls * poll_interval} seconds")
             return ScanResult(
                 domain_or_repo=domain,
                 status="failed",
-                error="Stream ended unexpectedly without a 'complete' event.",
+                error=f"Scan timeout ({max_polls * poll_interval} seconds exceeded)",
                 timestamp=datetime.utcnow()
             )
 
     except httpx.TimeoutException:
-        logger.error(f"TLS scan for {domain} timed out.")
+        logger.error(f"⏱️ TLS scan request for {domain} timed out.")
         return ScanResult(
             domain_or_repo=domain,
             status="failed",
-            error="Scan timeout (10.5 minutes exceeded)",
+            error="Request timeout",
             timestamp=datetime.utcnow()
         )
     except httpx.HTTPError as e:
@@ -351,68 +439,96 @@ async def scan_single_tls_domain(domain: str) -> ScanResult:
             timestamp=datetime.utcnow()
         )
     except Exception as e:
-        logger.exception(f"An unexpected error occurred during TLS scan for {domain}: {e}")
+        logger.exception(f"Unexpected error during TLS scan for {domain}: {e}")
         return ScanResult(
             domain_or_repo=domain,
             status="failed",
-            error=f"An unexpected error occurred: {str(e)}",
+            error=f"Unexpected error: {str(e)}",
             timestamp=datetime.utcnow()
         )
 
 
 async def process_tls_batch(job_id: str, domains: List[TLSScanRow]):
     """Process TLS batch scan in background with SSE updates"""
-    job = batch_jobs[job_id]
-    job.status = ScanStatus.IN_PROGRESS
-    job.started_at = datetime.utcnow()
-    
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
-    
-    async def scan_with_semaphore(row: TLSScanRow):
-        async with semaphore:
-            result = await scan_single_tls_domain(row.domain)
-            
-            if result.status == "failed":
-                job.failed_items += 1
-            else:
-                job.completed_items += 1
-            
-            job.results.append(result)
-            
-            # Send SSE update
-            if job_id in sse_queues:
-                await sse_queues[job_id].put({
-                    "type": "progress",
-                    "data": {
-                        "domain": result.domain_or_repo,
-                        "status": result.status,
-                        "error": result.error,
-                        "completed": job.completed_items,
-                        "failed": job.failed_items,
-                        "total": job.total_items,
-                        "percentage": round((job.completed_items + job.failed_items) / job.total_items * 100, 2)
-                    }
-                })
-            
-            return result
-    
-    tasks = [scan_with_semaphore(row) for row in domains]
-    await asyncio.gather(*tasks, return_exceptions=True)
-    
-    job.status = ScanStatus.COMPLETED
-    job.completed_at = datetime.utcnow()
-    
-    # Send completion event
-    if job_id in sse_queues:
-        await sse_queues[job_id].put({
-            "type": "complete",
-            "data": {
-                "total": job.total_items,
-                "completed": job.completed_items,
-                "failed": job.failed_items,
-                "completed_at": job.completed_at.isoformat()
-            }
-        })
+    try:
+        logger.info(f"Starting TLS batch job {job_id} with {len(domains)} domains")
+        
+        if job_id not in batch_jobs:
+            logger.error(f"Job {job_id} not found in batch_jobs dictionary!")
+            return
+        
+        job = batch_jobs[job_id]
+        job.status = ScanStatus.IN_PROGRESS
+        job.started_at = datetime.utcnow()
+        
+        logger.info(f"Processing domains: {[d.domain for d in domains]}")
+        
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
+        
+        async def scan_with_semaphore(row: TLSScanRow):
+            async with semaphore:
+                try:
+                    logger.info(f"🔍 Starting scan for domain: {row.domain}")
+                    result = await scan_single_tls_domain(row.domain)
+                    logger.info(f"Scan completed for {row.domain}: status={result.status}")
+                    
+                    if result.status == "failed":
+                        job.failed_items += 1
+                    else:
+                        job.completed_items += 1
+                    
+                    job.results.append(result)
+                    
+                    # Send SSE update
+                    if job_id in sse_queues:
+                        await sse_queues[job_id].put({
+                            "type": "progress",
+                            "data": {
+                                "domain": result.domain_or_repo,
+                                "status": result.status,
+                                "error": result.error,
+                                "completed": job.completed_items,
+                                "failed": job.failed_items,
+                                "total": job.total_items,
+                                "percentage": round((job.completed_items + job.failed_items) / job.total_items * 100, 2)
+                            }
+                        })
+                    
+                    return result
+                except Exception as e:
+                    logger.exception(f"Error scanning domain {row.domain}: {e}")
+                    job.failed_items += 1
+                    return ScanResult(
+                        domain_or_repo=row.domain,
+                        status="failed",
+                        error=str(e),
+                        timestamp=datetime.utcnow()
+                    )
+        
+        tasks = [scan_with_semaphore(row) for row in domains]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info(f"TLS batch scan completed: {job.completed_items} successful, {job.failed_items} failed")
+        
+        job.status = ScanStatus.COMPLETED
+        job.completed_at = datetime.utcnow()
+        logger.info(f"TLS batch job {job_id} completed successfully")
+        
+        # Send completion event
+        if job_id in sse_queues:
+            await sse_queues[job_id].put({
+                "type": "complete",
+                "data": {
+                    "total": job.total_items,
+                    "completed": job.completed_items,
+                    "failed": job.failed_items,
+                    "completed_at": job.completed_at.isoformat()
+                }
+            })
+        
+    except Exception as e:
+        logger.exception(f"Fatal error in TLS batch job {job_id}: {e}")
+        if job_id in batch_jobs:
+            batch_jobs[job_id].status = ScanStatus.FAILED
 
 
 @app.post("/api/tls-scan/batch", 
@@ -427,6 +543,38 @@ async def batch_tls_scan(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Excel file (.xlsx or .xls)")
 ):
+    """(existing implementation)"""
+
+
+@app.post("/api/tls-scan", summary="Trigger TLS scans for a list of domains (JSON)")
+async def tls_scan_json(background_tasks: BackgroundTasks, payload: dict):
+    """Accepts JSON payload: {"domains": ["example.com", ...]} and starts TLS scans"""
+    domains_list = payload.get('domains') if isinstance(payload, dict) else None
+    if not domains_list or not isinstance(domains_list, list):
+        raise APIError(status_code=400, error_code="invalid_payload", message="Expected JSON with 'domains' list")
+
+    rows = []
+    for d in domains_list:
+        if not isinstance(d, str) or not d.strip():
+            continue
+        rows.append(TLSScanRow(domain=d.strip()))
+
+    if not rows:
+        raise APIError(status_code=400, error_code="no_domains", message="No valid domains provided")
+
+    job_id = str(uuid.uuid4())
+    job = BatchScanJob(job_id=job_id, scan_type=ScanType.TLS, total_items=len(rows))
+    batch_jobs[job_id] = job
+    background_tasks.add_task(process_tls_batch, job_id, rows)
+
+    return {
+        "job_id": job_id,
+        "message": f"Batch TLS scan started for {len(rows)} domains",
+        "total_domains": len(rows),
+        "status": "pending",
+        "sse_url": f"/api/batch-jobs/{job_id}/stream",
+        "poll_url": f"/api/batch-jobs/{job_id}"
+    }
     """
     Batch scan multiple domains from Excel file.
     
@@ -623,45 +771,73 @@ async def scan_single_repository(repo_url: str, branch_name: str) -> ScanResult:
 
 async def process_repo_batch(job_id: str, repositories: List[RepoScanRow]):
     """Process repository batch scan in background with SSE updates"""
-    job = batch_jobs[job_id]
-    job.status = ScanStatus.IN_PROGRESS
-    job.started_at = datetime.utcnow()
-    
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
-    
-    async def scan_with_semaphore(row: RepoScanRow):
-        async with semaphore:
-            result = await scan_single_repository(row.repo_url, row.branch_name)
-            
-            if result.status == "failed":
-                job.failed_items += 1
-            else:
-                job.completed_items += 1
-            
-            job.results.append(result)
-            
-            # Send SSE update
-            if job_id in sse_queues:
-                await sse_queues[job_id].put({
-                    "type": "progress",
-                    "data": {
-                        "repo_url": result.domain_or_repo,
-                        "status": result.status,
-                        "error": result.error,
-                        "completed": job.completed_items,
-                        "failed": job.failed_items,
-                        "total": job.total_items,
-                        "percentage": round((job.completed_items + job.failed_items) / job.total_items * 100, 2)
-                    }
-                })
-            
-            return result
-    
-    tasks = [scan_with_semaphore(row) for row in repositories]
-    await asyncio.gather(*tasks, return_exceptions=True)
-    
-    job.status = ScanStatus.COMPLETED
-    job.completed_at = datetime.utcnow()
+    try:
+        logger.info(f"Starting repository batch job {job_id} with {len(repositories)} repositories")
+        
+        if job_id not in batch_jobs:
+            logger.error(f"Job {job_id} not found in batch_jobs dictionary!")
+            return
+        
+        job = batch_jobs[job_id]
+        job.status = ScanStatus.IN_PROGRESS
+        job.started_at = datetime.utcnow()
+        
+        logger.info(f"Processing repositories: {[r.repo_url for r in repositories]}")
+        
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
+        
+        async def scan_with_semaphore(row: RepoScanRow):
+            async with semaphore:
+                try:
+                    logger.info(f"🔍 Starting scan for repository: {row.repo_url}")
+                    result = await scan_single_repository(row.repo_url, row.branch_name)
+                    logger.info(f"Scan completed for {row.repo_url}: status={result.status}")
+                    
+                    if result.status == "failed":
+                        job.failed_items += 1
+                    else:
+                        job.completed_items += 1
+                    
+                    job.results.append(result)
+                    
+                    # Send SSE update
+                    if job_id in sse_queues:
+                        await sse_queues[job_id].put({
+                            "type": "progress",
+                            "data": {
+                                "repo_url": result.domain_or_repo,
+                                "status": result.status,
+                                "error": result.error,
+                                "completed": job.completed_items,
+                                "failed": job.failed_items,
+                                "total": job.total_items,
+                                "percentage": round((job.completed_items + job.failed_items) / job.total_items * 100, 2)
+                            }
+                        })
+                    
+                    return result
+                except Exception as e:
+                    logger.exception(f"Error scanning repository {row.repo_url}: {e}")
+                    job.failed_items += 1
+                    return ScanResult(
+                        domain_or_repo=row.repo_url,
+                        status="failed",
+                        error=str(e),
+                        timestamp=datetime.utcnow()
+                    )
+        
+        tasks = [scan_with_semaphore(row) for row in repositories]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info(f"Repository batch scan completed: {job.completed_items} successful, {job.failed_items} failed")
+        
+        job.status = ScanStatus.COMPLETED
+        job.completed_at = datetime.utcnow()
+        logger.info(f"Repository batch job {job_id} completed successfully")
+        
+    except Exception as e:
+        logger.exception(f"Fatal error in repository batch job {job_id}: {e}")
+        if job_id in batch_jobs:
+            batch_jobs[job_id].status = ScanStatus.FAILED
     
     # Send completion event
     if job_id in sse_queues:
@@ -683,6 +859,317 @@ async def process_repo_batch(job_id: str, repositories: List[RepoScanRow]):
           - repo_url (required): Git repository URL
           - branch_name (optional): Branch to scan (default: main)
           """)
+
+
+@app.post("/api/onboarding",
+          summary="Onboard organization via JSON payload",
+          description="""
+          Accepts JSON payload with organization, repositories, servers and domains.
+          This will create DB records and trigger repository/domain scans in background.
+          """)
+async def api_onboarding(
+    background_tasks: BackgroundTasks,
+    payload: OnboardingPayload
+):
+    """Create organization and related resources, then trigger scans"""
+    # 1) Create organization in DB
+    try:
+        org_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations", json=payload.organization.model_dump())
+        org_data = org_resp.json()
+        org_id = org_data['id']
+        logger.info(f"Created organization {org_id} in DB")
+    except Exception as e:
+        logger.exception(f"Failed to create organization in DB: {e}")
+        raise APIError(status_code=500, error_code="org_create_failed", message=str(e))
+
+    # 2) Create bulk repositories
+    created_repos = []
+    if payload.repositories:
+        try:
+            repos_payload = [r.model_dump() for r in payload.repositories]
+            repo_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/repositories/bulk", json=repos_payload)
+            created_repos = repo_resp.json()
+            logger.info(f"Created {len(created_repos)} repositories for org {org_id}")
+        except Exception as e:
+            logger.exception(f"Failed to create repositories: {e}")
+
+    # 3) Create bulk servers
+    created_servers = []
+    if payload.servers:
+        try:
+            servers_payload = [s.model_dump() for s in payload.servers]
+            svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_payload)
+            created_servers = svr_resp.json()
+            logger.info(f"Created {len(created_servers)} servers for org {org_id}")
+        except Exception as e:
+            logger.exception(f"Failed to create servers: {e}")
+
+    # 4) Create bulk domains
+    created_domains = []
+    if payload.domains:
+        try:
+            domains_payload = [d.model_dump() for d in payload.domains]
+            dom_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/domains/bulk", json=domains_payload)
+            created_domains = dom_resp.json()
+            logger.info(f"Created {len(created_domains)} domains for org {org_id}")
+        except Exception as e:
+            logger.exception(f"Failed to create domains: {e}")
+
+    # 4b) Create suborganizations and applications (hierarchical payload)
+    created_suborgs = []
+    created_apps = []
+    if payload.suborganizations:
+        for so in payload.suborganizations:
+            try:
+                suborg_payload = {"suborganization_name": so.suborganization_name}
+                suborg_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/suborganizations", json=suborg_payload)
+                suborg_data = suborg_resp.json()
+                suborg_id = suborg_data['id']
+                created_suborgs.append(suborg_data)
+                logger.info(f"Created suborganization {suborg_id} for org {org_id}")
+
+                # For each application, create app and then bulk create resources under it
+                for app_payload in so.applications or []:
+                    app_create = {"application_name": app_payload.application_name}
+                    app_resp = await call_service("POST", f"{DB_SERVICE_URL}/suborganizations/{suborg_id}/applications", json=app_create)
+                    app_data = app_resp.json()
+                    app_id = app_data['id']
+                    created_apps.append(app_data)
+                    logger.info(f"Created application {app_id} under suborg {suborg_id}")
+
+                    # Prepare and POST repositories for this app
+                    if app_payload.repositories:
+                        repos_payload = []
+                        for r in app_payload.repositories:
+                            rd = {**r.model_dump(), "organization_id": org_id, "suborganization_id": suborg_id, "application_id": app_id}
+                            repos_payload.append(rd)
+                        try:
+                            repo_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/repositories/bulk", json=repos_payload)
+                            app_created_repos = repo_resp.json()
+                            created_repos.extend(app_created_repos)  # Add to scan trigger list
+                            logger.info(f"Created {len(repos_payload)} repositories for app {app_id}")
+                        except Exception as e:
+                            logger.exception(f"Failed to create app repositories for app {app_id}: {e}")
+
+                    # Servers
+                    if app_payload.servers:
+                        servers_payload = []
+                        for s in app_payload.servers:
+                            sd = {**s.model_dump(), "organization_id": org_id, "suborganization_id": suborg_id, "application_id": app_id}
+                            servers_payload.append(sd)
+                        try:
+                            svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_payload)
+                            logger.info(f"Created {len(servers_payload)} servers for app {app_id}")
+                        except Exception as e:
+                            logger.exception(f"Failed to create app servers for app {app_id}: {e}")
+
+                    # Domains
+                    if app_payload.domains:
+                        domains_payload = []
+                        for d in app_payload.domains:
+                            dd = {**d.model_dump(), "organization_id": org_id, "suborganization_id": suborg_id, "application_id": app_id}
+                            domains_payload.append(dd)
+                        try:
+                            dom_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/domains/bulk", json=domains_payload)
+                            app_created_domains = dom_resp.json()
+                            created_domains.extend(app_created_domains)  # Add to scan trigger list
+                            logger.info(f"Created {len(domains_payload)} domains for app {app_id}")
+                        except Exception as e:
+                            logger.exception(f"Failed to create app domains for app {app_id}: {e}")
+
+            except Exception as e:
+                logger.exception(f"Failed to create suborganization or apps: {e}")
+
+    # 5) Record onboarding job
+    try:
+        job = {
+            "organization_id": org_id,
+            "job_type": "csv_or_api_onboarding",
+            "status": "queued",
+            "rows_processed": len(created_repos) + len(created_servers) + len(created_domains),
+            "created_by": payload.created_by
+        }
+        job_resp = await call_service("POST", f"{DB_SERVICE_URL}/onboarding/jobs", json=job)
+        job_data = job_resp.json()
+        logger.info(f"Onboarding job recorded: {job_data.get('id')}")
+    except Exception as e:
+        logger.exception(f"Failed to record onboarding job: {e}")
+
+    # 6) Trigger scans in background
+    repo_scan_rows = [RepoScanRow(repo_url=r['repo_url'], branch_name=r.get('branch_to_scan', 'main')) for r in created_repos]
+    domain_rows = [TLSScanRow(domain=d['domain']) for d in created_domains]
+
+    triggered_scans = {}
+
+    if repo_scan_rows:
+        scan_job_id = str(uuid.uuid4())
+        # Create BatchScanJob and add to batch_jobs dictionary
+        job = BatchScanJob(
+            job_id=scan_job_id,
+            scan_type=ScanType.REPOSITORY,
+            total_items=len(repo_scan_rows)
+        )
+        batch_jobs[scan_job_id] = job
+        
+        # Create scan job entry in DB
+        try:
+            await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/scan-jobs", json={"target_type": "repo", "scan_type": "repository", "target_id": None})
+        except Exception:
+            logger.warning("Failed to create scan_job record in DB (non-blocking)")
+        
+        # Run repo batch in its own task so TLS batch can run concurrently
+        try:
+            repo_task = asyncio.create_task(safe_background_task_wrapper(process_repo_batch, scan_job_id, repo_scan_rows))
+            running_tasks[scan_job_id] = repo_task
+            repo_task.add_done_callback(lambda t, job_id=scan_job_id: logger.error(f"Background repo task {job_id} failed: {t.exception()}") if t.exception() else logger.info(f"Background repo task {job_id} completed"))
+            triggered_scans['repo_scan_job_id'] = scan_job_id
+            logger.info(f"Triggered repository scan job {scan_job_id} for {len(repo_scan_rows)} repositories")
+        except Exception as e:
+            logger.exception(f"Failed to schedule repository scan job {scan_job_id}: {e}")
+
+    if domain_rows:
+        scan_job_id = str(uuid.uuid4())
+        # Create BatchScanJob and add to batch_jobs dictionary
+        job = BatchScanJob(
+            job_id=scan_job_id,
+            scan_type=ScanType.TLS,
+            total_items=len(domain_rows)
+        )
+        batch_jobs[scan_job_id] = job
+        
+        try:
+            await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/scan-jobs", json={"target_type": "domain", "scan_type": "tls", "target_id": None})
+        except Exception:
+            logger.warning("Failed to create scan_job record in DB (non-blocking)")
+        
+        # Run TLS batch concurrently (do not queue behind repo batch)
+        try:
+            tls_task = asyncio.create_task(safe_background_task_wrapper(process_tls_batch, scan_job_id, domain_rows))
+            running_tasks[scan_job_id] = tls_task
+            tls_task.add_done_callback(lambda t, job_id=scan_job_id: logger.error(f"Background TLS task {job_id} failed: {t.exception()}") if t.exception() else logger.info(f"Background TLS task {job_id} completed"))
+            triggered_scans['domain_scan_job_id'] = scan_job_id
+            logger.info(f"Triggered TLS/domain scan job {scan_job_id} for {len(domain_rows)} domains")
+        except Exception as e:
+            logger.exception(f"Failed to schedule TLS/domain scan job {scan_job_id}: {e}")
+
+    # 7) Create onboarding batch tracking record
+    onboarding_batch_id = None
+    try:
+        onboarding_batch_data = {
+            "organization_id": org_id,
+            "organization_name": payload.organization.organization_name,
+            "created_by": payload.created_by,
+            "repo_scan_job_id": triggered_scans.get('repo_scan_job_id'),
+            "tls_scan_batch_id": triggered_scans.get('domain_scan_job_id'),
+            "total_repos": len(created_repos),
+            "total_domains": len(created_domains),
+            "total_servers": len(created_servers)
+        }
+        batch_resp = await call_service("POST", f"{DB_SERVICE_URL}/onboarding-batches", json=onboarding_batch_data)
+        batch_data = batch_resp.json()
+        onboarding_batch_id = batch_data.get('id')
+        logger.info(f"Created onboarding batch tracking record {onboarding_batch_id}")
+    except Exception as e:
+        logger.exception(f"Failed to create onboarding batch record (non-blocking): {e}")
+
+    return {
+        "organization_id": org_id,
+        "org": org_data,
+        "onboarding_batch_id": onboarding_batch_id,
+        "created_repositories": len(created_repos),
+        "created_servers": len(created_servers),
+        "created_domains": len(created_domains),
+        "onboarding_job": job_data if 'job_data' in locals() else None,
+        "triggered_scans": triggered_scans,
+        "message": "Onboarding accepted; scans queued (if any)."
+    }
+
+
+@app.post("/api/onboarding/upload-csv",
+          summary="Upload onboarding CSVs (repositories, servers, domains)")
+async def onboarding_upload_csv(
+    background_tasks: BackgroundTasks,
+    repositories_file: Optional[UploadFile] = File(None, description="repositories.csv"),
+    servers_file: Optional[UploadFile] = File(None, description="servers.csv"),
+    domains_file: Optional[UploadFile] = File(None, description="domains.csv"),
+    organization_name: Optional[str] = None,
+    created_by: Optional[str] = None
+):
+    """Accepts multiple CSV files (repos, servers, domains) and creates DB records."""
+    # Simple CSV parser using pandas
+    org_payload = None
+    if organization_name:
+        org_payload = {"organization_name": organization_name}
+
+    repos = []
+    if repositories_file:
+        try:
+            content = await repositories_file.read()
+            df = pd.read_csv(io.BytesIO(content))
+            df.columns = df.columns.str.lower().str.strip()
+            for _, row in df.iterrows():
+                if pd.notna(row.get('repo_url')):
+                    repos.append({
+                        'repo_url': str(row['repo_url']).strip(),
+                        'branch_to_scan': str(row.get('branch_name', 'main')).strip()
+                    })
+        except Exception as e:
+            logger.exception(f"Failed to parse repositories CSV: {e}")
+            raise APIError(status_code=400, error_code="invalid_repositories_csv", message=str(e))
+
+    servers = []
+    if servers_file:
+        try:
+            content = await servers_file.read()
+            df = pd.read_csv(io.BytesIO(content))
+            df.columns = df.columns.str.lower().str.strip()
+            for _, row in df.iterrows():
+                if pd.notna(row.get('ip_address')) or pd.notna(row.get('hostname')):
+                    servers.append({
+                        'server_name': row.get('server_name'),
+                        'operating_system': row.get('operating_system'),
+                        'hostname': row.get('hostname'),
+                        'ip_address': row.get('ip_address'),
+                        'mac_address': row.get('mac_address')
+                    })
+        except Exception as e:
+            logger.exception(f"Failed to parse servers CSV: {e}")
+            raise APIError(status_code=400, error_code="invalid_servers_csv", message=str(e))
+
+    domains = []
+    if domains_file:
+        try:
+            content = await domains_file.read()
+            df = pd.read_csv(io.BytesIO(content))
+            df.columns = df.columns.str.lower().str.strip()
+            for _, row in df.iterrows():
+                if pd.notna(row.get('domain')):
+                    domains.append({'domain': str(row['domain']).strip()})
+        except Exception as e:
+            logger.exception(f"Failed to parse domains CSV: {e}")
+            raise APIError(status_code=400, error_code="invalid_domains_csv", message=str(e))
+
+    # Build payload
+    payload = {
+        'organization': org_payload or { 'organization_name': organization_name or 'Unnamed Org' },
+        'repositories': repos,
+        'servers': servers,
+        'domains': domains,
+        'created_by': created_by
+    }
+
+    # Reuse the JSON onboarding flow by calling the JSON endpoint internally
+    # Simpler to call the API endpoint via call_service
+    try:
+        # Call the JSON onboarding flow directly (avoid extra HTTP hop)
+        payload_model = OnboardingPayload.parse_obj(payload)
+        return await api_onboarding(background_tasks, payload_model)
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to process onboarding payload: {e}")
+        raise APIError(status_code=500, error_code="onboarding_failed", message=str(e))
+
 async def batch_repo_scan(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Excel file (.xlsx or .xls)")

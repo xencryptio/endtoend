@@ -9,6 +9,7 @@ import { AnimatePresence } from "framer-motion";
 import Dashboard from "./pages/Dashboard";
 import Applications from "./pages/Applications";
 import Vulnerabilities from "./pages/Vulnerabilities";
+import VulnerabilitiesNew from "./pages/VulnerabilitiesNew";
 import Profile from "./pages/Profile";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
@@ -18,6 +19,9 @@ import Scan from "./pages/SSL-TLS scans";
 import SystemScan from "./pages/PQC-Scans";
 import Readinessanalysis from "./pages/Readinessanalysis";
 import Onboarding from "./pages/onboarding";
+import OnboardingNipun from "./pages/onboarding_nipun";
+import ONboardingData from "./pages/ONboardingData";
+import OnboardingNew from "./pages/OnboardingNew";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -34,6 +38,7 @@ const AnimatedRoutes = () => {
         <Route path="/" element={<Dashboard />} />
         <Route path="/applications" element={<Applications />} />
         <Route path="/vulnerabilities" element={<Vulnerabilities />} />
+        <Route path="/vulnerabilities-new" element={<VulnerabilitiesNew />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/SSL-TLS scans" element={<Scan />} />
         <Route path="/PQC-Scans" element={<SystemScan />} />
@@ -42,7 +47,10 @@ const AnimatedRoutes = () => {
         <Route path="/settings" element={<Settings />} />
         <Route path="/migrationAssist" element={<MigrationAssist />} />
         <Route path="/integration" element={<Integration />} />
-        <Route path="/onboarding" element={<Onboarding />} />
+        {/* <Route path="/onboarding" element={<Onboarding />} /> */}
+        <Route path="/onboarding_nipun" element={<OnboardingNipun />} />
+        {/* <Route path="/onboarding-data" element={<ONboardingData />} /> */}
+        <Route path="/onboarding-new" element={<OnboardingNew />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AnimatePresence>

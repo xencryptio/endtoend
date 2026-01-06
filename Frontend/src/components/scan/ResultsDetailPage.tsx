@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Search, X, Globe, Lock, Key, Hash, Shield, Zap, Check, CheckCircle, AlertTriangle, ShieldAlert, Info, Clock, ExternalLink } from "lucide-react";
@@ -64,6 +64,7 @@ interface ComponentScore {
 interface ResultsDetailPageProps {
   scan: ScanResult;
   onBack: () => void;
+  targetDomain?: string;
 }
 
 // ============================================================================
@@ -720,8 +721,15 @@ const DomainCard: React.FC<{
 // MAIN RESULTS DETAIL PAGE COMPONENT
 // ============================================================================
 
-const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack }) => {
+const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack, targetDomain }) => {
   const [searchQuery, setSearchQuery] = useState('');
+
+  // If a target domain is provided (e.g., from Applications page), pre-filter to it
+  useEffect(() => {
+    if (targetDomain) {
+      setSearchQuery(targetDomain);
+    }
+  }, [targetDomain]);
   const [expandedResult, setExpandedResult] = useState<ScanResult | null>(null);
 
   // Filter results based on search query

@@ -963,9 +963,17 @@ class Database:
             'category_scores': category_scores
         }
 
-    def get_all_scans(self, db: Session) -> List[Dict]:
-        """Get list of all scans"""
-        scans = db.query(Repository).order_by(Repository.last_scanned.desc()).all()
+    def get_all_scans(self, db: Session, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """Get list of scans with pagination to avoid large payloads"""
+        limit = max(1, min(limit, 500))  # safety bounds
+        offset = max(0, offset)
+        scans = (
+            db.query(Repository)
+            .order_by(Repository.last_scanned.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
         return [
             {
                 'id': scan.id,
@@ -982,6 +990,20 @@ class Database:
                 'total_files_to_scan': scan.total_files_to_scan
             } for scan in scans
         ]
+
+    def delete_all_scans(self, db: Session) -> Dict[str, int]:
+        """Delete all scans and associated data"""
+        deleted_findings = db.query(Finding).delete()
+        deleted_results = db.query(ScanResult).delete()
+        deleted_category_scores = db.query(CategoryScore).delete()
+        deleted_repos = db.query(Repository).delete()
+        db.commit()
+        return {
+            "findings": deleted_findings,
+            "scan_results": deleted_results,
+            "category_scores": deleted_category_scores,
+            "repositories": deleted_repos,
+        }
 
 
 class CryptoScanner:
@@ -1771,10 +1793,10 @@ async def scan_repository_endpoint(scan_request: ScanRequest):
 
 
 @app.get('/api/scans', response_model=List[AllScansResponse])
-async def get_scans():
-    """Get list of all scans"""
+async def get_scans(limit: int = 100, offset: int = 0):
+    """Get list of scans (paginated)"""
     with get_db() as db:
-        scans = db_manager.get_all_scans(db)
+        scans = db_manager.get_all_scans(db, limit=limit, offset=offset)
         return scans
 
 
@@ -1897,6 +1919,57 @@ async def get_queue_status():
             }
         except Exception as e:
             raise APIError(status_code=500, error_code="internal_server_error", message=str(e))
+
+
+@app.delete('/api/scans/{scan_id}', status_code=status.HTTP_200_OK)
+async def delete_scan_endpoint(scan_id: int):
+    """Delete a scan and all its associated results from the database"""
+    with get_db() as db:
+        try:
+            repo = db.query(Repository).filter(Repository.id == scan_id).first()
+            if not repo:
+                raise APIError(status_code=404, error_code="scan_not_found", message=f"Scan ID {scan_id} not found")
+            
+            repo_url = repo.repo_url
+            
+            # Delete all associated results
+            db.query(Finding).filter(Finding.scan_result_id.in_(
+                db.query(ScanResult.id).filter(ScanResult.repo_id == scan_id)
+            )).delete()
+            db.query(ScanResult).filter(ScanResult.repo_id == scan_id).delete()
+            db.query(CategoryScore).filter(CategoryScore.repo_id == scan_id).delete()
+            
+            # Delete the repository record
+            db.delete(repo)
+            db.commit()
+            
+            logger.info(f"✓ Scan {scan_id} ({repo_url}) deleted successfully with all results")
+            
+            return {
+                "message": "Scan and all associated results deleted successfully",
+                "scan_id": scan_id,
+                "repo_url": repo_url
+            }
+        except APIError:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"✗ Error deleting scan {scan_id}: {e}", exc_info=True)
+            raise APIError(status_code=500, error_code="delete_failed", message=f"Failed to delete scan: {str(e)}")
+
+
+@app.delete('/api/scans', status_code=status.HTTP_200_OK)
+async def delete_all_scans_endpoint():
+    """Delete all scans and associated data"""
+    with get_db() as db:
+        try:
+            result = db_manager.delete_all_scans(db)
+            logger.info(f"Deleted all scans: {result}")
+            return {"message": "All scans deleted successfully", "deleted": result}
+        except Exception as e:
+            db.rollback()
+            logger.error(f"✗ Error deleting all scans: {e}", exc_info=True)
+            raise APIError(status_code=500, error_code="delete_failed", message=f"Failed to delete all scans: {str(e)}")
 
 
 @app.get("/health")

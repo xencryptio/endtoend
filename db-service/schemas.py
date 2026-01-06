@@ -13,6 +13,7 @@ class ScanBatchBase(BaseModel):
     batch_id: str
     total_urls: int = 0
     max_concurrent: int = 5
+    request_payload: Optional[Dict[str, Any]] = None
 
 class ScanBatchCreate(ScanBatchBase):
     status: str = "pending"
@@ -20,7 +21,7 @@ class ScanBatchCreate(ScanBatchBase):
 class ScanBatch(ScanBatchBase):
     id: int
     created_at: datetime
-    updated_at: Optional[datetime] = None # <-- ADD THIS
+    updated_at: Optional[datetime] = None
     successful_count: int = 0
     failed_count: int = 0
     status: str

@@ -545,7 +545,7 @@ sequenceDiagram
     RS-->>OB: Task status / results
     SS-->>OB: Task status / results
     OB-->>FE: SSE / progress events for batch
-
+```
 
 #### Key Responsibilities
 - **Bulk Operations:** Process large lists of assets

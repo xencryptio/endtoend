@@ -29,7 +29,7 @@ class DatabaseHandler:
                 logger.error(f"❌ Cannot connect to database service: {e}")
                 self.enabled = False
     
-    async def create_scan_batch(self, batch_id: str, total_urls: int, max_concurrent: int) -> bool:
+    async def create_scan_batch(self, batch_id: str, total_urls: int, max_concurrent: int, request_payload: dict = None) -> bool:
         """Create a new scan batch in database."""
         await self._ensure_connected()
         
@@ -42,7 +42,8 @@ class DatabaseHandler:
                 "batch_id": batch_id,
                 "total_urls": total_urls,
                 "max_concurrent": max_concurrent,
-                "status": "pending"
+                "status": "pending",
+                "request_payload": request_payload or {}
             }
             
             response = await call_service(
@@ -68,7 +69,7 @@ class DatabaseHandler:
         await self._ensure_connected()
         
         if not self.enabled:
-            logger.warning("Database disabled, skipping result save")
+            logger.warning(f"⚠️  Database disabled, skipping result save for batch {batch_id}")
             return False
         
         try:
@@ -90,6 +91,8 @@ class DatabaseHandler:
             }
             
             logger.info(f"💾 Saving result for {result.get('url')} to batch {batch_id}")
+            logger.debug(f"📤 Payload keys: {db_data.keys()}")
+            logger.debug(f"📤 scan_status: {db_data.get('scan_status')} (type: {type(db_data.get('scan_status')).__name__})")
             
             response = await call_service(
                 "POST",
@@ -103,10 +106,15 @@ class DatabaseHandler:
                 logger.info(f"✅ Result saved for {result.get('url')}")
             else:
                 logger.error(f"❌ Failed to save result: {response.status_code}")
+                try:
+                    error_detail = response.json()
+                    logger.error(f"❌ Error details: {error_detail}")
+                except:
+                    logger.error(f"❌ Response text: {response.text}")
             return success
             
         except Exception as e:
-            logger.exception("Exception saving result to DB")
+            logger.exception(f"Exception saving result to DB: {e}")
             return False
     
     async def update_batch_status(self, batch_id: str, status: str, successful: int = 0, failed: int = 0) -> bool:

@@ -261,6 +261,10 @@ services:
     container_name: frontend
     ports:
       - "3000:8080"
+    environment:
+      - VITE_DB_API_URL=http://localhost:8001
+      - VITE_SCAN_API_URL=http://localhost:8000
+      - VITE_REPO_SCAN_API_URL=http://localhost:8003
     networks:
       - xencrypt-network
     depends_on:

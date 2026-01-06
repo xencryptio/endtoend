@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Save, RotateCcw, Globe, Github } from "lucide-react";
@@ -141,6 +142,7 @@ const commonColumns: ColumnDef[] = [
 // ============================================================================
 
 const Scan = () => {
+  const location = useLocation();
   const [symmetricData, setSymmetricData] = useState<CryptoAlgorithm[]>([]);
   const [asymmetricData, setAsymmetricData] = useState<CryptoAlgorithm[]>([]);
   const [hashData, setHashData] = useState<CryptoAlgorithm[]>([]);
@@ -156,6 +158,30 @@ const Scan = () => {
   const [isPqcEdited, setIsPqcEdited] = useState(false);
 
   const initialCategorizedData = useRef<{ [key: string]: CryptoAlgorithm[] }>({});
+
+  // Handle navigation from Applications page
+  useEffect(() => {
+    const state = location.state as { defaultView?: ViewType; autoLoadDomain?: string; autoLoadRepo?: string; openHistory?: boolean } | null;
+    if (state?.defaultView) {
+      setView(state.defaultView);
+    }
+  }, [location]);
+
+  // Capture auto-load data once and clear navigation state to avoid re-triggering
+  const [pendingAutoLoadDomain, setPendingAutoLoadDomain] = useState<string | undefined>(undefined);
+  const [pendingAutoLoadRepo, setPendingAutoLoadRepo] = useState<string | undefined>(undefined);
+  const [forceHistoryTab, setForceHistoryTab] = useState<boolean>(false);
+
+  useEffect(() => {
+    const state = location.state as { defaultView?: ViewType; autoLoadDomain?: string; autoLoadRepo?: string; openHistory?: boolean } | null;
+    if (state?.autoLoadDomain || state?.autoLoadRepo) {
+      setPendingAutoLoadDomain(state.autoLoadDomain);
+      setPendingAutoLoadRepo(state.autoLoadRepo);
+      setForceHistoryTab(Boolean(state?.openHistory || state?.autoLoadDomain));
+      // Clear state so subsequent interactions aren't affected
+      window.history.replaceState({}, document.title, location.pathname);
+    }
+  }, [location]);
 
   useEffect(() => {
     const initializeData = async () => {
@@ -283,11 +309,14 @@ const Scan = () => {
           key="webscan"
           onBack={() => setView('dashboard')}
           apiBaseUrl={API_CONFIG.scanApi}
+          autoLoadDomain={pendingAutoLoadDomain}
+          initialTab={forceHistoryTab ? 'history' : 'scan'}
         />
       ) : view === 'gitscan' ? (
         <GitScan
           key="gitscan"
           onBack={() => setView('dashboard')}
+          autoLoadRepo={pendingAutoLoadRepo as any}
         />
       ) : view === 'dashboard' ? (
         // Dashboard View - Simple Navigation with UnifiedEntryCard
@@ -308,7 +337,7 @@ const Scan = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <UnifiedEntryCard
                 icon={Globe}
-                title="Web Scan"
+                title="TLS/SSL Scan"
                 subtitle="Scan your web assets"
                 description="Initiate scans on your public-facing websites and APIs to identify cryptographic weaknesses and compliance issues."
                 actionLabel="Start Scan"
@@ -317,7 +346,7 @@ const Scan = () => {
               />
               <UnifiedEntryCard
                 icon={Github}
-                title="Git Scan"
+                title="Repository Scan"
                 subtitle="Scan your repositories"
                 description="Analyze GitHub repositories for cryptographic algorithm usage and Post-Quantum Cryptography readiness."
                 actionLabel="Start Scan"

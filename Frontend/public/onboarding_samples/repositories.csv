@@ -1,0 +1,3 @@
+repo_url,branch_name,project_name,repo_name,scan_frequency
+https://github.com/example/repo1,main,ProjectA,repo1,daily
+https://github.com/example/repo2,develop,ProjectB,repo2,weekly

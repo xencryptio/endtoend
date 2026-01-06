@@ -234,6 +234,7 @@ class ScanRequest(BaseModel):
     domain: str
     max_concurrent: int = 5
     save_to_db: bool = True  # option to save to database
+    batch_id: Optional[str] = None  # optional: use existing batch instead of creating new one
     
     @validator('domain')
     def validate_and_parse_domains(cls, v):
@@ -879,7 +880,7 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
         # ✅ CRITICAL: Store COMPLETE transformed result in raw_response
         "raw_response": transformed_result,
         
-        "execution_time_seconds": transformed_result.get("scan_metadata", {}).get("timestamp")
+        "execution_time_seconds": 0  # Will be set by caller if needed, or default to 0
     }
 
 def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout: int, max_backoff_retries: int = 3) -> Dict[str, Any]:
@@ -913,7 +914,7 @@ def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout
     raise APIError(status_code=500, error_code="unexpected_error", message=f"Unexpected error in backoff handler for {domain}")
 
 def run_ssllabs_cli(domain: str, use_cache: bool = True, timeout: int = 300):
-    """Run ssllabs-scan CLI tool and return parsed JSON."""
+    """Run ssllabs-scan CLI tool and return parsed JSON. (Synchronous - use run_ssllabs_cli_async for async)"""
     try:
         # ssllabs-scan only accepts hostnames, so strip scheme for the CLI command
         parsed_url = urlparse(domain)
@@ -959,6 +960,11 @@ def run_ssllabs_cli(domain: str, use_cache: bool = True, timeout: int = 300):
     except FileNotFoundError:
         raise APIError(status_code=500, error_code="cli_not_found", message="ssllabs-scan not found")
 
+async def run_ssllabs_cli_async(domain: str, use_cache: bool = True, timeout: int = 300):
+    """Run ssllabs-scan CLI tool asynchronously in a thread executor to avoid blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, run_ssllabs_cli, domain, use_cache, timeout)
+
 def detect_protocol(url_or_domain: str) -> str:
     """
     Detect the protocol (https or http) by attempting a HEAD request.
@@ -994,7 +1000,14 @@ def detect_protocol(url_or_domain: str) -> str:
     logger.warning(f"Could not reach {domain_only}")
     return "unreachable"
 
-async def process_single_domain(domain: str, use_cache: bool = True, attempt: int = 1, timeout: int = 300) -> Dict[str, Any]:
+async def process_single_domain(
+    domain: str, 
+    use_cache: bool = True, 
+    attempt: int = 1, 
+    timeout: int = 300,
+    batch_id: str = None,
+    save_to_db: bool = False
+) -> Dict[str, Any]:
     """Process a single domain scan, with HTTP/HTTPS logic."""
     
     # 1. Protocol Detection
@@ -1042,7 +1055,7 @@ async def process_single_domain(domain: str, use_cache: bool = True, attempt: in
         if not is_resolvable:
             raise APIError(status_code=503, error_code="dns_resolution_failed", message=error_msg)
         
-        raw_result = run_ssllabs_cli(domain, use_cache=use_cache, timeout=timeout)
+        raw_result = await run_ssllabs_cli_async(domain, use_cache=use_cache, timeout=timeout)
         transformed_result = transform_scan_result(raw_result)
         
         # Score via remote service
@@ -1058,7 +1071,17 @@ async def process_single_domain(domain: str, use_cache: bool = True, attempt: in
         }
         transformed_result["scan_status"] = "completed"
         request_id = f"{domain}_{int(datetime.now().timestamp())}"
-        return format_result_for_frontend(transformed_result, request_id)
+        result = format_result_for_frontend(transformed_result, request_id)
+        
+        # Save to database if requested
+        if save_to_db and batch_id:
+            try:
+                await db_handler.save_scan_result(result, batch_id)
+                logger.info(f"✅ Saved result for {domain} to batch {batch_id}")
+            except Exception as e:
+                logger.error(f"Failed to save result for {domain}: {e}")
+        
+        return result
     
     except APIError:
         raise
@@ -1075,6 +1098,9 @@ async def scan_domain(request: ScanRequest):
     """
     logger.info("Entered /scan endpoint")
     try:
+        # Generate batch_id if not provided
+        batch_id = request.batch_id if request.batch_id else f"batch_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
+        
         # Use the raw domains from the validated model string
         domains = [d.strip() for d in request.domain.split(',')]
         
@@ -1121,7 +1147,12 @@ async def scan_domain(request: ScanRequest):
 
         if len(domains_to_scan) == 1 and not skipped_domains:
             # For a single domain that is HTTPS, use a longer default timeout.
-            result = await process_single_domain(domains_to_scan[0], timeout=600)
+            result = await process_single_domain(
+                domains_to_scan[0], 
+                timeout=600, 
+                batch_id=batch_id, 
+                save_to_db=request.save_to_db
+            )
             return result
         
         # Multi-domain with retry logic (HTTPS only)
@@ -1251,9 +1282,14 @@ async def scan_with_progress(request: ScanRequest):
         domains_to_scan = []  # Only HTTPS domains
         skipped_domains_list = []  # Track skipped for final summary
         
-        # Create batch in database if save_to_db is enabled
-        if request.save_to_db:
-            await db_handler.create_scan_batch(batch_id, len(domains), request.max_concurrent)
+        # Use provided batch_id or create a new one
+        if request.batch_id:
+            batch_id = request.batch_id
+            logger.info(f"Using existing batch_id: {batch_id}")
+        else:
+            # Create new batch in database if save_to_db is enabled
+            if request.save_to_db:
+                await db_handler.create_scan_batch(batch_id, len(domains), request.max_concurrent)
         
         # Send start event
         start_event = {
@@ -1916,6 +1952,341 @@ async def clear_all_scans_endpoint():
             error_code="clear_all_failed",
             message=f"Error clearing all data: {str(e)}"
         )
+
+
+# ============================================================
+# NEW QUEUE-BASED ARCHITECTURE ENDPOINTS
+# ============================================================
+
+@app.post("/create-scan-request")
+async def create_scan_request(request: ScanRequest):
+    """
+    Queue-based scan: Create a pending scan request in database.
+    Background worker will pick it up and process asynchronously.
+    
+    Returns batch_id that client can poll for status.
+    """
+    logger.info(f"Creating scan request for domains: {request.domain}")
+    
+    try:
+        # Generate IDs
+        batch_id = f"batch_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
+        domains = [d.strip() for d in request.domain.split(',') if d.strip()]
+        
+        if not domains:
+            raise APIError(400, "invalid_domains", "No valid domains provided")
+        
+        # Create batch in database with status "pending"
+        if request.save_to_db:
+            # Store the request payload so background worker can retrieve domains later
+            request_payload = {
+                "domains": domains,
+                "domain_string": request.domain,
+                "max_concurrent": request.max_concurrent
+            }
+            success = await db_handler.create_scan_batch(
+                batch_id, 
+                len(domains), 
+                request.max_concurrent,
+                request_payload=request_payload
+            )
+            if not success:
+                logger.error(f"Failed to create batch {batch_id} in database")
+                raise APIError(500, "batch_creation_failed", "Failed to create scan batch in database")
+        else:
+            logger.info(f"Batch {batch_id} created in memory (not saving to DB)")
+        
+        logger.info(f"✅ Scan request {batch_id} created and queued for processing")
+        
+        return {
+            "batch_id": batch_id,
+            "status": "pending",
+            "total_domains": len(domains),
+            "created_at": datetime.now().isoformat(),
+            "message": "Scan request queued. Poll /batch/{batch_id} for updates."
+        }
+    
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception(f"Error creating scan request: {str(e)}")
+        raise APIError(500, "request_creation_failed", f"Failed to create scan request: {str(e)}")
+
+
+async def execute_queued_scan(batch_id: str, domains_str: str, max_concurrent: int):
+    """
+    Background task to execute a queued scan.
+    Runs the existing scan logic and saves results to database.
+    """
+    logger.info(f"⚙️  Starting execution of queued scan {batch_id}")
+    
+    try:
+        # Update status to processing
+        await db_handler.update_batch_status(batch_id, "processing", 0, 0)
+        logger.info(f"📝 Batch {batch_id} status updated to processing")
+        
+        start_time = datetime.now()
+        
+        # Call the existing scan_domain function
+        logger.info(f"🔍 Calling scan_domain for batch {batch_id}")
+        result = await scan_domain(ScanRequest(
+            domain=domains_str,
+            max_concurrent=max_concurrent,
+            save_to_db=True
+        ))
+        
+        logger.info(f"📦 Scan result: {result}")
+        
+        # Extract results from response
+        successful_scans = result.get("successful_scans", [])
+        failed_scans = result.get("failed_scans", [])
+        summary = result.get("summary", {})
+        
+        successful_count = len(successful_scans)
+        failed_count = len(failed_scans)
+        
+        # Save successful results to database
+        for scan_result in successful_scans:
+            try:
+                result_data = {
+                    "url": scan_result.get("url"),
+                    "batch_id": batch_id,
+                    "scan_status": "success",
+                    "status": "completed",
+                    "execution_time_seconds": scan_result.get("execution_time_seconds", 0),
+                    "raw_response": scan_result,
+                    "requested_at": start_time.isoformat(),
+                    "tls_version": scan_result.get("tls_version"),
+                    "certificate_expiry": scan_result.get("certificate_expiry"),
+                    "public_key_size_bits": scan_result.get("public_key_size_bits"),
+                    "ephemeral_key_exchange": scan_result.get("ephemeral_key_exchange"),
+                    "ct_present": scan_result.get("ct_present"),
+                    "pqc_overall_score": scan_result.get("pqc_overall_score", 0),
+                    "pqc_overall_grade": scan_result.get("pqc_overall_grade", "F"),
+                }
+                
+                success = await db_handler.save_scan_result(result_data, batch_id)
+                if success:
+                    logger.info(f"✅ Saved result for {scan_result.get('url')}")
+                else:
+                    logger.error(f"❌ Failed to save result for {scan_result.get('url')}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error saving result: {str(e)}")
+        
+        # Save failed results to database
+        for failed_result in failed_scans:
+            try:
+                result_data = {
+                    "url": failed_result.get("url"),
+                    "batch_id": batch_id,
+                    "scan_status": failed_result.get("scan_status", "failed"),
+                    "status": "failed",
+                    "error_message": failed_result.get("error_message", "Scan failed"),
+                    "execution_time_seconds": failed_result.get("execution_time_seconds", 0),
+                    "raw_response": failed_result,
+                    "requested_at": start_time.isoformat(),
+                }
+                
+                success = await db_handler.save_scan_result(result_data, batch_id)
+                if success:
+                    logger.info(f"✅ Saved failed result for {failed_result.get('url')}")
+                else:
+                    logger.error(f"❌ Failed to save failed result for {failed_result.get('url')}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error saving failed result: {str(e)}")
+        
+        # Update final batch status
+        execution_time = (datetime.now() - start_time).total_seconds()
+        await db_handler.update_batch_status(batch_id, "completed", successful_count, failed_count)
+        
+        logger.info(f"✅ Batch {batch_id} completed: {successful_count} successful, {failed_count} failed in {execution_time:.1f}s")
+        
+    except Exception as e:
+        logger.exception(f"❌ Error executing queued scan {batch_id}: {str(e)}")
+        try:
+            await db_handler.update_batch_status(batch_id, "failed", 0, 0)
+        except:
+            pass
+
+
+@app.get("/batch/{batch_id}")
+async def get_batch_status(batch_id: str):
+    """
+    Poll to get batch status and results.
+    Statuses: pending → processing → completed/failed
+    """
+    logger.info(f"Polling batch status for: {batch_id}")
+    
+    try:
+        # Get batch from database
+        response = await call_service("GET", f"{db_handler.db_service_url}/scans/batch/{batch_id}", timeout=10)
+        
+        if response.status_code == 404:
+            raise APIError(404, "batch_not_found", f"Batch {batch_id} not found")
+        
+        if response.status_code != 200:
+            raise APIError(500, "batch_fetch_failed", f"Failed to fetch batch: {response.status_code}")
+        
+        batch_data = response.json()
+        logger.info(f"Batch {batch_id} status: {batch_data.get('status')}")
+        
+        return batch_data
+    
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception(f"Error fetching batch {batch_id}: {str(e)}")
+        raise APIError(500, "batch_fetch_error", f"Error fetching batch: {str(e)}")
+
+
+@app.post("/process-pending-scans")
+async def process_pending_scans():
+    """
+    Background task endpoint: Pick up pending scans and process them.
+    This should be called periodically by a scheduler or triggered by worker.
+    
+    Returns: Number of scans processed
+    """
+    logger.info("🔄 Processing pending scans from database queue...")
+    
+    try:
+        # Get all pending batches from database
+        response = await call_service(
+            "GET",
+            f"{db_handler.db_service_url}/scans/batch?status=pending",
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch pending batches: {response.status_code}")
+            return {"processed": 0, "error": "Failed to fetch pending batches"}
+        
+        pending_batches = response.json()
+        if not isinstance(pending_batches, list):
+            pending_batches = pending_batches.get('batches', [])
+        
+        logger.info(f"Found {len(pending_batches)} pending batches to process")
+        
+        processed_count = 0
+        for batch in pending_batches:
+            batch_id = batch.get('batch_id')
+            if not batch_id:
+                logger.warning("Batch without batch_id found, skipping")
+                continue
+            
+            try:
+                logger.info(f"🚀 Starting background processing for batch {batch_id}")
+                # Create background task (don't await, let it run async)
+                asyncio.create_task(process_batch_scan(batch_id, batch))
+                processed_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error queuing batch {batch_id}: {str(e)}")
+                # Mark batch as failed
+                try:
+                    await db_handler.update_batch_status(batch_id, "failed", 0, 1)
+                except:
+                    pass
+        
+        logger.info(f"✅ Queued {processed_count} pending scans for background processing")
+        return {
+            "processed": processed_count,
+            "pending_batches_found": len(pending_batches)
+        }
+    
+    except Exception as e:
+        logger.exception(f"Error in process_pending_scans: {str(e)}")
+        return {"processed": 0, "error": str(e)}
+
+
+async def process_batch_scan(batch_id: str, batch_data: dict):
+    """
+    Background worker task to process a single scan batch.
+    Executes the scan and saves results to database.
+    """
+    logger.info(f"⚙️  Starting processing of batch {batch_id}")
+    
+    try:
+        # Update status to processing
+        await db_handler.update_batch_status(batch_id, "processing", 0, 0)
+        logger.info(f"📝 Updated batch {batch_id} to processing status")
+        
+        # Extract domains from request_payload
+        request_payload = batch_data.get('request_payload', {})
+        domains = request_payload.get('domains', [])
+        domain_string = request_payload.get('domain_string', '')
+        max_concurrent = request_payload.get('max_concurrent', 5)
+        
+        if not domains:
+            logger.error(f"No domains found in batch {batch_id}")
+            await db_handler.update_batch_status(batch_id, "failed", 0, 1)
+            return
+        
+        logger.info(f"📌 Processing {len(domains)} domains: {domains}")
+        
+        start_time = datetime.now()
+        
+        # Call the existing scan_domain function with existing batch_id
+        logger.info(f"🔍 Calling scan_domain for batch {batch_id}")
+        result = await scan_domain(ScanRequest(
+            domain=domain_string,
+            max_concurrent=max_concurrent,
+            save_to_db=True,  # Results saved by scan_domain
+            batch_id=batch_id  # Pass existing batch_id to avoid creating duplicate
+        ))
+        
+        logger.info(f"📦 Scan result for {batch_id}: {result}")
+        
+        # Extract results from response - handle both single domain and multi-domain formats
+        if "successful_scans" in result and "failed_scans" in result:
+            # Multi-domain format
+            successful_scans = result.get("successful_scans", [])
+            failed_scans = result.get("failed_scans", [])
+        else:
+            # Single domain format - result is the scan object itself
+            status = result.get("status", "failed")
+            if status == "completed":
+                successful_scans = [result]
+                failed_scans = []
+            else:
+                successful_scans = []
+                failed_scans = [result]
+        
+        successful_count = len(successful_scans)
+        failed_count = len(failed_scans)
+        
+        logger.info(f"✅ Batch {batch_id} completed: {successful_count} successful, {failed_count} failed")
+        
+        # Update batch status to completed with counts
+        await db_handler.update_batch_status(batch_id, "completed", successful_count, failed_count)
+        
+    except Exception as e:
+        logger.exception(f"❌ Error processing batch {batch_id}: {str(e)}")
+        # Mark batch as failed
+        try:
+            await db_handler.update_batch_status(batch_id, "failed", 0, 1)
+        except:
+            pass
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background task to process pending scans every 10 seconds"""
+    logger.info("🚀 Starting scan processor background task...")
+    
+    async def scan_processor():
+        while True:
+            try:
+                await asyncio.sleep(10)  # Check every 10 seconds
+                await process_pending_scans()
+            except Exception as e:
+                logger.error(f"Error in scan processor: {str(e)}")
+                await asyncio.sleep(10)
+    
+    # Start as background task
+    asyncio.create_task(scan_processor())
 
 
 if __name__ == "__main__":

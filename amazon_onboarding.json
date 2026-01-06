@@ -1,0 +1,122 @@
+{
+  "organization": {
+    "organization_name": "Amazon Inc.",
+    "organization_email": "security@amazon.com"
+  },
+  "created_by": "onboarding@amazon.com",
+  "suborganizations": [
+    {
+      "suborganization_name": "Amazon Web Services (AWS)",
+      "applications": [
+        {
+          "application_name": "EC2",
+          "repositories": [
+            {"repo_url": "https://github.com/aws/aws-ec2-instance-connect-cli", "repo_name": "aws-ec2-instance-connect-cli", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/aws/amazon-ec2-metadata-mock", "repo_name": "amazon-ec2-metadata-mock", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/aws/aws-nitro-enclaves-cli", "repo_name": "aws-nitro-enclaves-cli", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/aws/ec2-spot-labs", "repo_name": "ec2-spot-labs", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/aws/amazon-ec2-instance-selector", "repo_name": "amazon-ec2-instance-selector", "branch_to_scan": "main"}
+          ],
+          "domains": [
+            {"domain": "console.aws.amazon.com"}
+          ],
+          "servers": [
+            {"hostname": "ec2-prod-1", "ip_address": "10.1.0.1", "operating_system": "Linux"},
+            {"hostname": "ec2-prod-2", "ip_address": "10.1.0.2", "operating_system": "Linux"}
+          ]
+        },
+        {
+          "application_name": "S3",
+          "repositories": [
+            {"repo_url": "https://github.com/aws/amazon-s3-find-and-forget", "repo_name": "amazon-s3-find-and-forget", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/aws/mountpoint-s3", "repo_name": "mountpoint-s3", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/aws/s3-connector-for-pytorch", "repo_name": "s3-connector-for-pytorch", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/awslabs/aws-s3-provisionedcapacity-java-sdk", "repo_name": "aws-s3-provisionedcapacity-java-sdk", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/awslabs/amazon-s3-resumable-upload", "repo_name": "amazon-s3-resumable-upload", "branch_to_scan": "mainline"}
+          ],
+          "domains": [
+            {"domain": "s3.console.aws.amazon.com"}
+          ],
+          "servers": [
+            {"hostname": "s3-storage-1", "ip_address": "10.1.1.1", "operating_system": "Linux"}
+          ]
+        }
+      ]
+    },
+    {
+      "suborganization_name": "Amazon Retail",
+      "applications": [
+        {
+          "application_name": "Online Store",
+          "repositories": [
+            {"repo_url": "https://github.com/amzn/selling-partner-api-models", "repo_name": "selling-partner-api-models", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/amzn/amazon-pay-api-sdk-python", "repo_name": "amazon-pay-api-sdk-python", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/amzn/amazon-pay-sdk-java", "repo_name": "amazon-pay-sdk-java", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/amzn/login-and-pay-with-amazon-sdk-python", "repo_name": "login-and-pay-with-amazon-sdk-python", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/amzn/amazon-payments-magento-2-plugin", "repo_name": "amazon-payments-magento-2-plugin", "branch_to_scan": "master"}
+          ],
+          "domains": [
+            {"domain": "www.amazon.com"}
+          ],
+          "servers": [
+            {"hostname": "retail-web-1", "ip_address": "10.2.0.1", "operating_system": "Linux"},
+            {"hostname": "retail-db-1", "ip_address": "10.2.0.2", "operating_system": "Linux"}
+          ]
+        },
+        {
+          "application_name": "Logistics",
+          "repositories": [
+            {"repo_url": "https://github.com/amzn/ion-java", "repo_name": "ion-java", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/amzn/ion-python", "repo_name": "ion-python", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/amzn/ion-go", "repo_name": "ion-go", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/amzn/ion-js", "repo_name": "ion-js", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/amzn/ion-c", "repo_name": "ion-c", "branch_to_scan": "master"}
+          ],
+          "domains": [
+            {"domain": "logistics.amazon.com"}
+          ],
+          "servers": [
+            {"hostname": "logistics-1", "ip_address": "10.2.1.1", "operating_system": "Linux"}
+          ]
+        }
+      ]
+    },
+    {
+      "suborganization_name": "Amazon Prime",
+      "applications": [
+        {
+          "application_name": "Prime Video",
+          "repositories": [
+            {"repo_url": "https://github.com/aws/aws-media-services-application-mapper", "repo_name": "aws-media-services-application-mapper", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/aws/amazon-ivs-player-web-sample", "repo_name": "amazon-ivs-player-web-sample", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/aws/aws-elemental-mediatailor-tools", "repo_name": "aws-elemental-mediatailor-tools", "branch_to_scan": "main"},
+            {"repo_url": "https://github.com/aws/aws-media-services-tools", "repo_name": "aws-media-services-tools", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/awslabs/amazon-ivs-react-native-player", "repo_name": "amazon-ivs-react-native-player", "branch_to_scan": "main"}
+          ],
+          "domains": [
+            {"domain": "www.primevideo.com"}
+          ],
+          "servers": [
+            {"hostname": "primevideo-stream-1", "ip_address": "10.3.0.1", "operating_system": "Linux"}
+          ]
+        },
+        {
+          "application_name": "Prime Music",
+          "repositories": [
+            {"repo_url": "https://github.com/alexa/alexa-skills-kit-sdk-for-nodejs", "repo_name": "alexa-skills-kit-sdk-for-nodejs", "branch_to_scan": "2.x"},
+            {"repo_url": "https://github.com/alexa/alexa-skills-kit-sdk-for-python", "repo_name": "alexa-skills-kit-sdk-for-python", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/alexa/alexa-cookbook", "repo_name": "alexa-cookbook", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/alexa/skill-sample-nodejs-audio-player", "repo_name": "skill-sample-nodejs-audio-player", "branch_to_scan": "master"},
+            {"repo_url": "https://github.com/alexa/alexa-skills-kit-sdk-for-java", "repo_name": "alexa-skills-kit-sdk-for-java", "branch_to_scan": "2.x"}
+          ],
+          "domains": [
+            {"domain": "music.amazon.com"}
+          ],
+          "servers": [
+            {"hostname": "primemusic-1", "ip_address": "10.3.1.1", "operating_system": "Linux"}
+          ]
+        }
+      ]
+    }
+  ]
+}

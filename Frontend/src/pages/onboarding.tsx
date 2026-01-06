@@ -474,6 +474,8 @@ const OnboardingPage = () => {
     const [windowsFiles, setWindowsFiles] = useState<FileInfo[]>([]);
     const [systemLoading, setSystemLoading] = useState(false);
 
+    // Onboarding UI moved to a dedicated page: /onboarding_nipun (state and handlers moved there)
+
     // Toast and Modal States
     const [toasts, setToasts] = useState<Toast[]>([]);
     const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
@@ -514,13 +516,24 @@ const OnboardingPage = () => {
         });
     };
 
+
+
+
+
+
+
+    // ---------------------------------------------------------------
+
     // Fetch jobs on mount and periodically
     useEffect(() => {
+        // Onboarding editor moved to a separate page; sample JSON handled there.
+
         if (view === 'dashboard') {
             loadJobs();
             const interval = setInterval(loadJobs, 30000);
             return () => clearInterval(interval);
         }
+
         if (view === 'system') {
             fetchAgentFiles();
         }
@@ -1094,6 +1107,7 @@ const OnboardingPage = () => {
                                         </div>
                                     </UnifiedCard>
                                 </TabsContent>
+
                             </Tabs>
                         )}
 
