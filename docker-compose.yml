@@ -148,7 +148,11 @@ services:
       - ./db-service:/app
     environment:
       - PYTHONUNBUFFERED=1
+      # Main database
       - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/scandb
+      # Additional databases for CSV export
+      - REPO_SCANNER_DB_URL=postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db
+      - SYSTEM_SCANNER_DB_URL=postgresql://scanuser:scanpass@postgres:5432/system_scanner_db
       - UVICORN_LOG_LEVEL=debug
     networks:
       - xencrypt-network

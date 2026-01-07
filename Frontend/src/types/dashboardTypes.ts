@@ -10,6 +10,8 @@ export interface CSVData {
   total_pqc_vulnerable_certificates: number;
   total_pqc_vulnerable_algorithms: number;
   "Sub Org": string;
+  "Organisation": string;
+  "Org Target Migration Data": string;
 }
 
 export interface GroupedData {

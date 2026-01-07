@@ -195,21 +195,23 @@ const Profile = () => {
     initializeData();
   }, []);
 
-  // Fetch applications data
+  // Fetch applications data when view changes to 'applications'
   useEffect(() => {
-    if (!showApplications) return;
+    if (view !== 'applications') return;
     setApplicationsLoading(true);
     setApplicationsError(null);
     fetchCryptographicProfiles()
       .then((data) => {
+        console.log('Applications data fetched:', data);
         setApplicationsData(data);
         setApplicationsLoading(false);
       })
       .catch((err) => {
+        console.error('Error fetching applications:', err);
         setApplicationsError(err.message || "Failed to fetch applications");
         setApplicationsLoading(false);
       });
-  }, [showApplications]);
+  }, [view]);
 
   const fetchAllAlgorithms = async () => {
     try {

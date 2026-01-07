@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
 import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -9,8 +8,25 @@ import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard, Unifie
 import { typography } from '@/lib/design-tokens';
 
 
+async function safeFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, options);
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  if (!contentType.includes("application/json")) {
+    const text = await response.text();
+    throw new Error(`Expected JSON but got ${contentType}: ${text.slice(0, 200)}`);
+  }
+
+  return response.json();
+}
+
 // Access environment variables
-const VITE_SYSTEM_SCAN_API_URL = import.meta.env.VITE_SYSTEM_SCAN_API_URL;
+const VITE_SYSTEM_SCAN_API_URL = import.meta.env.VITE_SYSTEM_SCAN_API_URL || 'http://localhost:9000';
 
 // Types
 interface Agent {
@@ -1055,9 +1071,6 @@ const RawJsonSection: React.FC<{ auditResults: any }> = ({ auditResults }) => (
 );
 
 const CryptoAuditDashboard: React.FC = () => {
-  const location = useLocation();
-  const focusIp = (location.state as any)?.focusIp || null;
-
   const [activeTab, setActiveTab] = useState<'dashboard' | 'downloads' | 'docs'>('dashboard');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -1086,8 +1099,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/stats`);
-      const data = await response.json();
+      const data = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/stats`);
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setStats(data);
         return data;
@@ -1101,8 +1113,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const fetchAgents = useCallback(async () => {
     try {
-      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/agents`);
-      const data = await response.json();
+      const data = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/agents`);
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setAgents(data.agents);
         return data.agents;
@@ -1116,8 +1127,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const fetchTasks = useCallback(async () => {
     try {
-      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/tasks`);
-      const data = await response.json();
+      const data = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/tasks`);
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setTasks(data.tasks);
         return data.tasks;
@@ -1132,8 +1142,7 @@ const CryptoAuditDashboard: React.FC = () => {
   const fetchAgentResults = useCallback(async (agentId: string) => {
     try {
       setError(null);
-      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/agent/${agentId}/results`);
-      const data = await response.json();
+      const data = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/agent/${agentId}/results`);
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         setAgentResults(prev => new Map(prev).set(agentId, data.results));
       }
@@ -1145,12 +1154,10 @@ const CryptoAuditDashboard: React.FC = () => {
 
   const fetchFiles = useCallback(async () => {
     try {
-      const [linuxResponse, windowsResponse] = await Promise.all([
-        fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/list/linux`),
-        fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/list/windows`)
+      const [linuxData, windowsData] = await Promise.all([
+        safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/list/linux`),
+        safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/files/list/windows`)
       ]);
-      const linuxData = await linuxResponse.json();
-      const windowsData = await windowsResponse.json();
 
       if (linuxData.success) setLinuxFiles(linuxData.files); // eslint-disable-line @typescript-eslint/no-unsafe-member-access
       if (windowsData.success) setWindowsFiles(windowsData.files); // eslint-disable-line @typescript-eslint/no-unsafe-member-access
@@ -1231,16 +1238,14 @@ const CryptoAuditDashboard: React.FC = () => {
   const triggerScan = async (agentId: string) => {
     setTriggeredScans(prev => new Set(prev).add(agentId));
     try {
-      const response = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/trigger-scan/${agentId}`, {
+      const data = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/trigger-scan/${agentId}`, {
         method: 'POST'
       });
-      const data = await response.json();
       if (data.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
         const poll = async (retries: number, delay: number) => {
           if (retries === 0) return;
 
-          const tasksResponse = await fetch(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/tasks`);
-          const tasksData = await tasksResponse.json();
+          const tasksData = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/admin/tasks`);
 
           if (tasksData.success) { // eslint-disable-line @typescript-eslint/no-unsafe-member-access
             setTasks(tasksData.tasks);
@@ -1332,14 +1337,6 @@ const CryptoAuditDashboard: React.FC = () => {
         agent.agent_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
         agent.ip_address.includes(searchQuery);
 
-      // If focusIp is set, prioritize matching by IP
-      if (focusIp && agent.ip_address === focusIp) {
-        return true;
-      }
-      if (focusIp) {
-        return false; // Don't show other agents if focusIp is set
-      }
-
       let matchesStatus = true;
       switch (statusFilter) {
         case 'all':
@@ -1361,7 +1358,7 @@ const CryptoAuditDashboard: React.FC = () => {
 
       return matchesSearch && matchesStatus;
     });
-  }, [agents, searchQuery, statusFilter, agentTaskInfo, focusIp]);
+  }, [agents, searchQuery, statusFilter, agentTaskInfo]);
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -1426,28 +1423,7 @@ const CryptoAuditDashboard: React.FC = () => {
   useEffect(() => {
     refreshAll();
     fetchFiles();
-    
-    // If focusIp is set, expand and load results for the matching agent
-    if (focusIp && agents.length > 0) {
-      const matchingAgent = agents.find(a => a.ip_address === focusIp);
-      if (matchingAgent && !expandedAgents.has(matchingAgent.agent_id)) {
-        const newExpanded = new Set(expandedAgents);
-        newExpanded.add(matchingAgent.agent_id);
-        setExpandedAgents(newExpanded);
-        
-        if (!agentResults.has(matchingAgent.agent_id)) {
-          setLoadingResults(prev => new Set(prev).add(matchingAgent.agent_id));
-          fetchAgentResults(matchingAgent.agent_id).then(() => {
-            setLoadingResults(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(matchingAgent.agent_id);
-              return newSet;
-            });
-          });
-        }
-      }
-    }
-  }, [focusIp]);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {

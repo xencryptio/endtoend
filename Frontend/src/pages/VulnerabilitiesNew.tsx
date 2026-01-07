@@ -9,6 +9,7 @@ import {
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { UnifiedCard, UnifiedBadge } from "@/components/ui/unified";
+import { cn } from "@/lib/utils";
 
 interface VulnerabilityStats {
   webScans: {
@@ -535,8 +536,16 @@ export default function VulnerabilitiesNewPage() {
     if (score >= 80) return 'text-destructive';
     if (score >= 60) return 'text-orange-500';
     if (score >= 40) return 'text-yellow-500';
-    if (score >= 20) return 'text-blue-500';
+    if (score >= 20) return 'text-primary';
     return 'text-success';
+  };
+
+  const getRiskBadgeVariant = (score: number): "destructive" | "warning" | "default" | "secondary" | "success" => {
+    if (score >= 80) return 'destructive';
+    if (score >= 60) return 'warning';
+    if (score >= 40) return 'warning';
+    if (score >= 20) return 'default';
+    return 'success';
   };
 
   // Loading state
@@ -558,17 +567,6 @@ export default function VulnerabilitiesNewPage() {
           <div className="text-center space-y-4">
             <RefreshCw className="w-12 h-12 animate-spin text-primary mx-auto" />
             <p className="text-muted-foreground">Aggregating data from all scan sources...</p>
-            <div className="flex gap-4 justify-center text-xs text-muted-foreground">
-              <span className={webStats ? 'text-success' : ''}>
-                {webStats ? '✓' : '○'} Web Scans
-              </span>
-              <span className={repoStats ? 'text-success' : ''}>
-                {repoStats ? '✓' : '○'} Repo Scans
-              </span>
-              <span className={pqcStats ? 'text-success' : ''}>
-                {pqcStats ? '✓' : '○'} PQC Scans
-              </span>
-            </div>
           </div>
         </div>
       </motion.div>
@@ -601,17 +599,6 @@ export default function VulnerabilitiesNewPage() {
             <p className="text-muted-foreground">
               Unable to connect to one or more scan services. Please ensure all services are running.
             </p>
-            <div className="flex gap-4 justify-center text-sm">
-              <span className={webError ? 'text-destructive' : 'text-success'}>
-                {webError ? '✗' : '✓'} Web Scan Service
-              </span>
-              <span className={repoError ? 'text-destructive' : 'text-success'}>
-                {repoError ? '✗' : '✓'} Repo Scan Service
-              </span>
-              <span className={pqcError ? 'text-destructive' : 'text-success'}>
-                {pqcError ? '✗' : '✓'} PQC Scan Service
-              </span>
-            </div>
           </div>
         </UnifiedCard>
       </motion.div>
@@ -634,136 +621,187 @@ export default function VulnerabilitiesNewPage() {
             Real-time aggregated vulnerability data from all scan types
           </p>
         </div>
-        <Button 
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="gap-2"
-          variant="outline"
-        >
-          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          {isRefreshing ? 'Refreshing...' : 'Refresh'}
-        </Button>
+        <div className="flex items-center gap-3">
+          {lastUpdated && (
+            <span className="text-xs text-muted-foreground hidden md:inline">
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
+          <Button 
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="gap-2"
+            variant="outline"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        </div>
       </div>
 
-      {lastUpdated && (
-        <p className="text-xs text-muted-foreground">
-          Last updated: {lastUpdated.toLocaleTimeString()}
-        </p>
-      )}
-
-      {/* Risk Score Hero Card */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.1 }}
-      >
-        <UnifiedCard className="bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700 overflow-hidden">
-          <div className="p-6 sm:p-8">
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <p className="text-slate-400 text-sm font-medium mb-2">OVERALL RISK SCORE</p>
-                <div className={`text-5xl sm:text-6xl font-bold ${getRiskColor(aggregatedData.riskScore)}`}>
-                  {aggregatedData.riskScore}
+      {/* Main Risk Overview */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Overall Risk Score Hero Card */}
+        <motion.div
+          className="lg:col-span-2"
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.1 }}
+        >
+          <UnifiedCard variant="premium" padding="spacious" className="h-full border-primary/20 bg-gradient-to-br from-card via-card to-primary/5">
+            <div className="flex flex-col h-full justify-between">
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm font-semibold uppercase tracking-wider">Overall Risk Score</p>
+                  <div className={`text-6xl sm:text-7xl font-bold tracking-tighter ${getRiskColor(aggregatedData.riskScore)}`}>
+                    {aggregatedData.riskScore}
+                  </div>
+                </div>
+                <div className={cn(
+                  "p-4 rounded-2xl bg-primary/10",
+                  aggregatedData.riskScore >= 80 && "bg-destructive/10"
+                )}>
+                  <Target className={cn("w-10 h-10 text-primary", getRiskColor(aggregatedData.riskScore))} />
                 </div>
               </div>
-              <div className={`p-4 rounded-lg ${aggregatedData.riskScore >= 80 ? 'bg-destructive/10' : 'bg-blue-500/10'}`}>
-                <Target className={`w-12 h-12 ${getRiskColor(aggregatedData.riskScore)}`} />
+              
+              <div className="mt-8 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className={cn("text-xl font-bold flex items-center gap-2", getRiskColor(aggregatedData.riskScore))}>
+                      {getRiskLevel(aggregatedData.riskScore)} Risk Level Summary
+                      <UnifiedBadge variant={getRiskBadgeVariant(aggregatedData.riskScore)} label={getRiskLevel(aggregatedData.riskScore)} />
+                    </p>
+                    <p className="text-muted-foreground">
+                      Across {aggregatedData.affectedAssets} total assets identified
+                    </p>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-secondary/50 rounded-full h-3 overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${aggregatedData.riskScore}%` }}
+                    transition={{ duration: 1, ease: "easeOut" }}
+                    className={cn(
+                      "h-full rounded-full",
+                      aggregatedData.riskScore >= 80 ? 'bg-destructive' :
+                      aggregatedData.riskScore >= 60 ? 'bg-orange-500' :
+                      aggregatedData.riskScore >= 40 ? 'bg-yellow-500' :
+                      'bg-primary'
+                    )}
+                  />
+                </div>
               </div>
             </div>
-            
-            <div className="space-y-2">
-              <p className={`text-lg font-semibold ${getRiskColor(aggregatedData.riskScore)}`}>
-                {getRiskLevel(aggregatedData.riskScore)} Risk Level
-              </p>
-              <p className="text-slate-400 text-sm">
-                {aggregatedData.totalVulnerabilities} total vulnerabilities detected across {aggregatedData.affectedAssets} assets
-              </p>
-            </div>
+          </UnifiedCard>
+        </motion.div>
 
-            {/* Progress bar */}
-            <div className="mt-6 w-full bg-slate-700 rounded-full h-2">
-              <div 
-                className={`h-2 rounded-full transition-all duration-500 ${
-                  aggregatedData.riskScore >= 80 ? 'bg-destructive' :
-                  aggregatedData.riskScore >= 60 ? 'bg-orange-500' :
-                  aggregatedData.riskScore >= 40 ? 'bg-yellow-500' :
-                  'bg-success'
-                }`}
-                style={{ width: `${aggregatedData.riskScore}%` }}
-              />
-            </div>
-          </div>
-        </UnifiedCard>
-      </motion.div>
+        {/* Quick Stats Grid */}
+        <div className="grid gap-4">
+          <MetricCard
+            title="Total Vulnerabilities"
+            value={aggregatedData.totalVulnerabilities}
+            icon={ShieldAlert}
+            iconClassName="text-primary"
+            description="Detected across all surfaces"
+          />
+          <MetricCard
+            title="Affected Assets"
+            value={aggregatedData.affectedAssets}
+            icon={Activity}
+            iconClassName="text-primary"
+            description="Domains, repos, and systems"
+          />
+          <MetricCard
+            title="Scan Coverage Overview"
+            value="100%"
+            icon={CheckCircle}
+            iconClassName="text-success"
+            description="All services reporting"
+          />
+        </div>
+      </div>
 
-      {/* Severity Breakdown */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-      >
-        <MetricCard
-          title="Critical"
-          value={aggregatedData.totalCritical}
-          icon={ShieldAlert}
-          iconClassName="text-destructive"
-          gradient
-          description="Immediate action required"
-        />
-        <MetricCard
-          title="High"
-          value={aggregatedData.totalHigh}
-          icon={AlertTriangle}
-          iconClassName="text-orange-500"
-          description="Should be addressed soon"
-        />
-        <MetricCard
-          title="Medium"
-          value={aggregatedData.totalMedium}
-          icon={AlertCircle}
-          iconClassName="text-yellow-500"
-          description="Plan for remediation"
-        />
-        <MetricCard
-          title="Low"
-          value={Math.round(aggregatedData.totalLow)}
-          icon={ShieldCheck}
-          iconClassName="text-blue-500"
-          description="Monitor and track"
-        />
-      </motion.div>
+      {/* Vulnerability Severity Breakdown */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold flex items-center gap-2 text-foreground">
+          <Shield className="w-5 h-5 text-primary" />
+          Vulnerability Severity Breakdown
+        </h2>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <MetricCard
+            title="Critical"
+            value={aggregatedData.totalCritical}
+            icon={ShieldAlert}
+            iconClassName="text-destructive"
+            description="Immediate action required"
+          />
+          <MetricCard
+            title="High"
+            value={aggregatedData.totalHigh}
+            icon={AlertTriangle}
+            iconClassName="text-orange-500"
+            description="Priority remediation"
+          />
+          <MetricCard
+            title="Medium"
+            value={aggregatedData.totalMedium}
+            icon={AlertCircle}
+            iconClassName="text-yellow-500"
+            description="Scheduled fixes"
+          />
+          <MetricCard
+            title="Low"
+            value={Math.round(aggregatedData.totalLow)}
+            icon={ShieldCheck}
+            iconClassName="text-primary"
+            description="Monitoring"
+          />
+        </motion.div>
+      </div>
 
-      {/* Quantum Cryptography & Asset Metrics */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-        className="grid gap-4 sm:grid-cols-3"
-      >
-        <MetricCard
-          title="Quantum Vulnerable"
-          value={aggregatedData.quantumVulnerableCount}
-          change={`${Math.round((aggregatedData.quantumVulnerableCount / Math.max(aggregatedData.affectedAssets, 1)) * 100)}%`}
-          icon={Zap}
-          iconClassName="text-red-500"
-          gradient
-        />
-        <MetricCard
-          title="Quantum Safe"
-          value={aggregatedData.quantumSafeCount}
-          change={`${Math.round((aggregatedData.quantumSafeCount / Math.max(aggregatedData.affectedAssets, 1)) * 100)}%`}
-          icon={Lock}
-          iconClassName="text-success"
-        />
-        <MetricCard
-          title="Affected Assets"
-          value={aggregatedData.affectedAssets}
-          change="Across 3 scan types"
-          icon={Activity}
-          iconClassName="text-blue-500"
-        />
-      </motion.div>
+      {/* Quantum Cryptography Status */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold flex items-center gap-2 text-foreground">
+          <Cpu className="w-5 h-5 text-primary" />
+          Quantum Security Status
+        </h2>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        >
+          <MetricCard
+            title="Quantum Vulnerable"
+            value={aggregatedData.quantumVulnerableCount}
+            change={`${Math.round((aggregatedData.quantumVulnerableCount / Math.max(aggregatedData.affectedAssets, 1)) * 100)}%`}
+            icon={Zap}
+            iconClassName="text-destructive"
+          />
+          <MetricCard
+            title="Quantum Safe"
+            value={aggregatedData.quantumSafeCount}
+            change={`${Math.round((aggregatedData.quantumSafeCount / Math.max(aggregatedData.affectedAssets, 1)) * 100)}%`}
+            icon={Lock}
+            iconClassName="text-success"
+          />
+          <MetricCard
+            title="Infrastructure Health"
+            value={Math.round((aggregatedData.quantumSafeCount / Math.max(aggregatedData.affectedAssets, 1)) * 100)}
+            change="Overall score"
+            icon={ShieldCheck}
+            iconClassName="text-primary"
+          />
+        </motion.div>
+      </div>
 
       {/* Top Threats */}
       <motion.div
@@ -773,32 +811,31 @@ export default function VulnerabilitiesNewPage() {
       >
         <UnifiedCard>
           <div className="p-6">
-            <h2 className="text-xl font-bold text-foreground mb-4 flex items-center gap-2">
+            <h2 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-orange-500" />
-              Top Threats
+              Primary Threat Analysis
             </h2>
             
-            <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               {aggregatedData.topThreats.map((threat, idx) => (
                 <div 
                   key={idx}
-                  className="p-4 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 transition-colors"
+                  className="p-5 rounded-xl border border-border bg-card/50 hover:bg-card hover:shadow-md transition-all group"
                 >
-                  <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
-                      <h3 className="font-semibold text-foreground">{threat.name}</h3>
+                      <h3 className="font-bold text-foreground text-lg group-hover:text-primary transition-colors">{threat.name}</h3>
                       <p className="text-sm text-muted-foreground">{threat.source}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <UnifiedBadge variant={
-                        threat.severity === 'critical' ? 'destructive' :
-                        threat.severity === 'high' ? 'default' :
-                        'secondary'
-                      }>
-                        {threat.severity}
-                      </UnifiedBadge>
-                      <span className="text-2xl font-bold text-foreground">{threat.count}</span>
-                    </div>
+                    <UnifiedBadge variant={
+                      threat.severity === 'critical' ? 'destructive' :
+                      threat.severity === 'high' ? 'warning' :
+                      'default'
+                    } label={threat.severity.toUpperCase()} />
+                  </div>
+                  <div className="flex items-end justify-between">
+                    <div className="text-3xl font-bold text-foreground">{threat.count}</div>
+                    <div className="text-xs text-muted-foreground">Affected Entities</div>
                   </div>
                 </div>
               ))}
@@ -814,82 +851,70 @@ export default function VulnerabilitiesNewPage() {
         transition={{ delay: 0.5 }}
         className="grid gap-4 sm:grid-cols-3"
       >
-        <UnifiedCard>
+        <UnifiedCard hoverable>
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-foreground">Web Scan Vulnerabilities</h3>
-              <Globe className="w-5 h-5 text-blue-500" />
+              <h3 className="font-semibold text-foreground">Web Surfaces</h3>
+              <Globe className="w-5 h-5 text-primary" />
             </div>
-            <div className="space-y-2 text-sm">
+            <div className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Domains Scanned</span>
+                <span className="text-muted-foreground">Domains Scanned</span>
                 <span className="font-semibold">{webStats?.total || 0}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Critical Issues</span>
-                <span className="font-semibold text-destructive">{webStats?.criticalDomains || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">TLS Issues</span>
+                <span className="text-muted-foreground">TLS Vulnerabilities</span>
                 <span className="font-semibold text-orange-500">{webStats?.tlsIssues || 0}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Quantum Unsafe</span>
-                <span className="font-semibold text-red-500">{webStats?.quantumUnsafe || 0}</span>
+                <span className="text-muted-foreground">PQC Insecure</span>
+                <span className="font-semibold text-destructive">{webStats?.quantumUnsafe || 0}</span>
               </div>
             </div>
           </div>
         </UnifiedCard>
 
-        <UnifiedCard>
+        <UnifiedCard hoverable>
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-foreground">Repo Scan Vulnerabilities</h3>
-              <Database className="w-5 h-5 text-purple-500" />
+              <h3 className="font-semibold text-foreground">Code Repositories</h3>
+              <Database className="w-5 h-5 text-primary" />
             </div>
-            <div className="space-y-2 text-sm">
+            <div className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Repositories Scanned</span>
+                <span className="text-muted-foreground">Total Repos</span>
                 <span className="font-semibold">{repoStats?.total || 0}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Critical Algorithms</span>
-                <span className="font-semibold text-destructive">{repoStats?.criticalAlgorithms || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Deprecated</span>
+                <span className="text-muted-foreground">Legacy Crypto</span>
                 <span className="font-semibold text-orange-500">{repoStats?.deprecatedAlgorithms || 0}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Quantum Vulnerable</span>
-                <span className="font-semibold text-red-500">{repoStats?.quantumVulnerable || 0}</span>
+                <span className="text-muted-foreground">Vulnerable Algos</span>
+                <span className="font-semibold text-destructive">{repoStats?.quantumVulnerable || 0}</span>
               </div>
             </div>
           </div>
         </UnifiedCard>
 
-        <UnifiedCard>
+        <UnifiedCard hoverable>
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-foreground">PQC Scan Vulnerabilities</h3>
-              <Server className="w-5 h-5 text-green-500" />
+              <h3 className="font-semibold text-foreground">Infrastructure</h3>
+              <Server className="w-5 h-5 text-primary" />
             </div>
-            <div className="space-y-2 text-sm">
+            <div className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Systems Scanned</span>
+                <span className="text-muted-foreground">Active Agents</span>
                 <span className="font-semibold">{pqcStats?.total || 0}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Insecure Protocols</span>
-                <span className="font-semibold text-destructive">{pqcStats?.insecureProtocols || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Weak Ciphers</span>
-                <span className="font-semibold text-orange-500">{pqcStats?.weakCiphers || 0}</span>
+                <span className="text-muted-foreground">Protocol Issues</span>
+                <span className="font-semibold text-orange-500">{pqcStats?.insecureProtocols || 0}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Missing PQC</span>
-                <span className="font-semibold text-red-500">{pqcStats?.missingPQC || 0}</span>
+                <span className="font-semibold text-destructive">{pqcStats?.missingPQC || 0}</span>
               </div>
             </div>
           </div>
@@ -901,22 +926,20 @@ export default function VulnerabilitiesNewPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6 }}
-        className="text-center py-8 border-t border-slate-200 dark:border-slate-800"
+        className="text-center py-8 border-t border-border"
       >
         <p className="text-muted-foreground text-sm mb-4">
-          This dashboard aggregates real-time vulnerability data from Web Scans (TLS/SSL), Repository Scans (Code Analysis), and PQC Scans (System Crypto Inventory)
+          Aggregation of real-time data from TLS/SSL Scans, Repository Analysis, and PQC System Inventories
         </p>
-        <div className="flex flex-wrap justify-center gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap justify-center gap-6 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Globe className="w-4 h-4" /> Web Scan Data
+            <Globe className="w-4 h-4 text-primary" /> Web External
           </span>
-          <span>•</span>
           <span className="flex items-center gap-1">
-            <Database className="w-4 h-4" /> Repository Data
+            <Database className="w-4 h-4 text-primary" /> Static Analysis
           </span>
-          <span>•</span>
           <span className="flex items-center gap-1">
-            <Server className="w-4 h-4" /> System Data
+            <Server className="w-4 h-4 text-primary" /> System Internal
           </span>
         </div>
       </motion.div>

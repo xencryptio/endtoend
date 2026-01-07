@@ -61,8 +61,23 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_BACKEND_URL}/apps`)
-      .then((res) => res.json())
+    const backendUrl = "https://backend-ed29.onrender.com/api/apps";
+    console.log("Fetching dashboard data from:", backendUrl);
+
+    fetch(backendUrl)
+      .then(async (res) => {
+        const text = await res.text();
+        try {
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status} - ${text.slice(0, 200)}`);
+          }
+          return JSON.parse(text);
+        } catch (e) {
+          console.error("❌ Backend did not return valid JSON:");
+          console.error(text);
+          throw new Error("Invalid JSON response or Server Error");
+        }
+      })
       .then((apps: CSVData[]) => {
         setData(apps);
         const chart = generateTimelineChart(apps);
@@ -71,7 +86,7 @@ export default function Dashboard() {
           setOrgName(apps[0]["Organisation"]);
         }
       })
-      .catch(console.error);
+      .catch((e) => console.error("Dashboard fetch failed:", e));
   }, []);
 
   const grouped = useMemo(() => groupDataBySubOrg(data), [data]);

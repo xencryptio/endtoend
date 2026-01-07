@@ -74,7 +74,24 @@ const toastVariants = {
 
 // API base URLs
 const BATCH_API_BASE = 'http://localhost:8008';  // Excel Batch Scanner API
-const AGENT_API_BASE = 'http://localhost:9000';  // Crypto Audit API Server
+const AGENT_API_BASE = import.meta.env.VITE_SYSTEM_SCAN_API_URL || 'http://localhost:9000';  // Crypto Audit API Server
+
+async function safeFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, options);
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  if (!contentType.includes("application/json")) {
+    const text = await response.text();
+    throw new Error(`Expected JSON but got ${contentType}: ${text.slice(0, 200)}`);
+  }
+
+  return response.json();
+}
 
 // ============================================================================ 
 // HELPER COMPONENTS
@@ -542,12 +559,10 @@ const OnboardingPage = () => {
     const fetchAgentFiles = async () => {
         setSystemLoading(true);
         try {
-            const [linuxResponse, windowsResponse] = await Promise.all([
-                fetch(`${AGENT_API_BASE}/api/v1/files/list/linux`),
-                fetch(`${AGENT_API_BASE}/api/v1/files/list/windows`)
+            const [linuxData, windowsData] = await Promise.all([
+                safeFetch(`${AGENT_API_BASE}/api/v1/files/list/linux`),
+                safeFetch(`${AGENT_API_BASE}/api/v1/files/list/windows`)
             ]);
-            const linuxData = await linuxResponse.json();
-            const windowsData = await windowsResponse.json();
             
             if (linuxData.success) setLinuxFiles(linuxData.files);
             if (windowsData.success) setWindowsFiles(windowsData.files);

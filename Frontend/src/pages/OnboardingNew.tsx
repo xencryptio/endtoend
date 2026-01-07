@@ -238,6 +238,11 @@ export default function OnboardingNew() {
         const SYSTEM_SCAN_API = import.meta.env.VITE_SYSTEM_SCAN_API_URL || 'http://localhost:9000';
         const agentsRes = await fetch(`${SYSTEM_SCAN_API}/api/v1/admin/agents`);
         if (agentsRes.ok) {
+          const contentType = agentsRes.headers.get("content-type");
+          if (!contentType?.includes("application/json")) {
+            const text = await agentsRes.text();
+            throw new Error(`Expected JSON from ${SYSTEM_SCAN_API}, but got ${contentType}. Response: ${text.slice(0, 100)}`);
+          }
           const agentsData = await agentsRes.json();
           const agents = agentsData.success && agentsData.agents ? agentsData.agents : [];
           agents.forEach((agent: any) => {
