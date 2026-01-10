@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 const fetchVulnerabilities = async (): Promise<RawApiData[]> => {
-  const response = await fetch(`${import.meta.env.VITE_API_URL}/apps2`);
+  const response = await fetch(`${"https://backend-ed29.onrender.com/api"}/apps2`);
   if (!response.ok) {
     throw new Error(`API Error: ${response.status} ${response.statusText}`);
   }

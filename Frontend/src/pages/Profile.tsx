@@ -31,7 +31,7 @@ interface ApiCryptoAlgorithm {
 
 // API configuration - centralized backend URLs
 const API_CONFIG = {
-  cryptoApi: import.meta.env.VITE_BACKEND_URL,
+  cryptoApi: "https://backend-1-v77y.onrender.com/api",
 };
 
 // API fetching and data processing
