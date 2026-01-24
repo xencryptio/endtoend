@@ -1,44 +1,34 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { getAllDashboards } from "@/api/dashboard";
-import { MetricCard } from "@/components/dashboard/MetricCard";
-import RiskBreakdown from "@/components/dashboard/RiskBreakdown";
-import { RiskDistributionChart } from "@/components/dashboard/RiskDistributionChart";
-import { VulnerabilityChart } from "@/components/dashboard/VulnerabilityChart";
-import { SubOrgCards } from "@/components/dashboard/SubOrgCards";
-import {
-  calculateAveragePQC,
-  countSecureApps,
-  getTotalVulnerabilities,
-} from "@/utils/dashboardUtils";
+import { getSubOrgDashboard } from "@/api/dashboard";
+import { MetricCard } from "./MetricCard";
+import RiskBreakdown from "./RiskBreakdown";
+import { RiskDistributionChart } from "./RiskDistributionChart";
+import { VulnerabilityChart } from "./VulnerabilityChart";
 import {
   Activity,
   Shield,
   AlertTriangle,
   CheckCircle,
-  TrendingUp,
-  Building2
+  ArrowLeft,
+  Building2,
 } from "lucide-react";
-import type { OrganizationDashboard } from "@/types/dashboardTypes";
+import type { SubOrgDashboard as SubOrgDashboardType } from "@/types/dashboardTypes";
 
-export default function Dashboard() {
-  const [selectedOrg, setSelectedOrg] = useState<OrganizationDashboard | null>(null);
+export default function SubOrgDashboard() {
+  const { subOrgId } = useParams<{ subOrgId: string }>();
+  const navigate = useNavigate();
 
-  // ===== FETCH DASHBOARD-2 DATA =====
-  const { data: dashboards, isLoading, error } = useQuery({
-    queryKey: ["dashboard-home"],
-    queryFn: getAllDashboards,
+  // ===== FETCH SUB-ORG DATA =====
+  const { data: subOrgData, isLoading, error } = useQuery<SubOrgDashboardType>({
+    queryKey: ["suborg-dashboard", subOrgId],
+    queryFn: () => getSubOrgDashboard(subOrgId!),
+    enabled: !!subOrgId,
   });
 
-  // ===== AUTO-SELECT FIRST ORG =====
-  useEffect(() => {
-    if (dashboards && dashboards.length > 0 && !selectedOrg) {
-      setSelectedOrg(dashboards[0]);
-    }
-  }, [dashboards, selectedOrg]);
-
-  // ===== THEME TRANSITION INJECTION (Dashboard-1 style) =====
+  // ===== THEME TRANSITION (Dashboard-1 style) =====
   useEffect(() => {
     const styleId = "theme-transition-style";
     if (document.getElementById(styleId)) return;
@@ -57,7 +47,7 @@ export default function Dashboard() {
     document.head.appendChild(style);
   }, []);
 
-  // ===== LOADING STATE (Dashboard-1 animation) =====
+  // ===== LOADING STATE =====
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -72,27 +62,22 @@ export default function Dashboard() {
   }
 
   // ===== ERROR STATE =====
-  if (error) {
+  if (error || !subOrgData) {
     return (
       <div className="p-8 text-center">
-        <p className="text-red-500">Failed to load dashboard data</p>
-        <p className="text-sm text-muted-foreground mt-2">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </p>
+        <p className="text-red-500">Failed to load sub-organization data</p>
+        <button
+          onClick={() => navigate("/")}
+          className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+        >
+          Back to Dashboard
+        </button>
       </div>
     );
   }
 
-  if (!selectedOrg) {
-    return (
-      <div className="p-8 text-center text-muted-foreground">
-        No organization data available
-      </div>
-    );
-  }
-
-  // ===== COMPUTE METRICS FROM DASHBOARD-2 DATA =====
-  const { summary, applications, risk_distribution, organization_name } = selectedOrg;
+  // ===== EXTRACT DATA =====
+  const { suborganization_name, summary, applications, risk_distribution } = subOrgData;
 
   return (
     <motion.div
@@ -102,7 +87,7 @@ export default function Dashboard() {
       exit={{ opacity: 0, y: -20 }}
       transition={{ duration: 0.3 }}
     >
-      {/* ===== HEADER (Dashboard-1 styling) ===== */}
+      {/* ===== HEADER WITH BACK BUTTON ===== */}
       <motion.header
         initial="hidden"
         animate="visible"
@@ -113,32 +98,53 @@ export default function Dashboard() {
             transition: { staggerChildren: 0.15 },
           },
         }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+        className="space-y-4"
       >
+        {/* Back Button */}
+        <motion.button
+          variants={{
+            hidden: { opacity: 0, x: -20 },
+            visible: { opacity: 1, x: 0 },
+          }}
+          onClick={() => navigate("/")}
+          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors group"
+        >
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+          <span className="text-sm font-medium">Back to Organization Dashboard</span>
+        </motion.button>
+
+        {/* Title */}
         <motion.div
           variants={{
             hidden: { opacity: 0, y: 20 },
             visible: { opacity: 1, y: 0 },
           }}
+          className="flex items-center gap-3"
         >
-          <div className="relative h-9 flex items-center">
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
+            <Building2 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
             <AnimatePresence mode="wait">
               <motion.h2
-                key={organization_name}
+                key={suborganization_name}
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
                 transition={{ duration: 0.2 }}
-                className="text-3xl font-bold tracking-tight text-foreground absolute whitespace-nowrap"
+                className="text-3xl font-bold tracking-tight text-foreground"
               >
-                {organization_name} Overview
+                {suborganization_name}
               </motion.h2>
             </AnimatePresence>
+            <p className="text-sm text-muted-foreground mt-1">
+              Sub-Organization Security Posture
+            </p>
           </div>
         </motion.div>
       </motion.header>
 
-      {/* ===== METRIC CARDS (Dashboard-1 UI + Dashboard-2 data) ===== */}
+      {/* ===== METRIC CARDS ===== */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -193,33 +199,17 @@ export default function Dashboard() {
         {/* Top Vulnerabilities */}
         <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-foreground mb-4">
-            Top Vulnerable Applications
+            Application Vulnerabilities
           </h3>
           <VulnerabilityChart applications={applications} />
         </div>
       </motion.div>
 
-      {/* ===== SUB-ORGANIZATIONS SECTION ===== */}
+      {/* ===== APPLICATIONS TABLE ===== */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="bg-card rounded-xl border border-border p-6 shadow-sm"
-      >
-        <div className="flex items-center gap-2 mb-6">
-          <Building2 className="w-5 h-5 text-primary" />
-          <h3 className="text-lg font-semibold text-foreground">
-            Sub-Organizations
-          </h3>
-        </div>
-        <SubOrgCards applications={applications} />
-      </motion.div>
-
-      {/* ===== APPLICATIONS TABLE (Dashboard-2 data, Dashboard-1 styling) ===== */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
       >
         <RiskBreakdown data={applications} />
       </motion.div>

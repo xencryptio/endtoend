@@ -1,60 +1,57 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LucideIcon } from "lucide-react";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 interface MetricCardProps {
   title: string;
   value: string | number;
-  change?: string;
-  changeType?: "positive" | "negative" | "neutral";
   icon: LucideIcon;
-  gradient?: boolean;
-  iconClassName?: string;
+  trend?: {
+    value: number;
+    isPositive: boolean;
+  };
+  className?: string;
+  iconBgColor?: string;
+  iconColor?: string;
 }
 
-export function MetricCard({ 
-  title, 
-  value, 
-  change, 
-  changeType = "neutral", 
+export function MetricCard({
+  title,
+  value,
   icon: Icon,
-  gradient = false,
-  iconClassName
+  trend,
+  className,
+  iconBgColor = "bg-blue-50",
+  iconColor = "text-blue-600"
 }: MetricCardProps) {
-  const changeColors = {
-    positive: "text-success",
-    negative: "text-destructive", 
-    neutral: "text-muted-foreground"
-  };
-
   return (
-    <Card
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
       className={cn(
-        "relative overflow-hidden transition-all duration-200 rounded-xl p-4",
-        "bg-glass-light dark:bg-glass-dark backdrop-blur-md",
-        "hover:shadow-lg dark:hover:shadow-xl", // Enhanced hover effect for dark mode
-        "border border-border dark:border-white/10", // Optional: subtle border for visibility
-        gradient && "bg-gradient-to-br from-card to-accent/10"
+        "bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-shadow",
+        className
       )}
     >
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {title}
-        </CardTitle>
-        <Icon className={cn("h-4 w-4 text-primary", iconClassName)} />
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl lg:text-3xl font-bold text-foreground">{value}</div>
-        {change && (
-          <p className={cn("text-xs mt-1", changeColors[changeType])}>
-            {change}
-          </p>
-        )}
-      </CardContent>
-
-      {gradient && (
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
-      )}
-    </Card>
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
+          <p className="text-3xl font-bold text-foreground">{value}</p>
+          {trend && (
+            <div className={cn(
+              "flex items-center gap-1 text-sm font-medium",
+              trend.isPositive ? "text-green-600" : "text-red-600"
+            )}>
+              <span>{trend.isPositive ? "↑" : "↓"}</span>
+              <span>{Math.abs(trend.value)}%</span>
+            </div>
+          )}
+        </div>
+        <div className={cn("p-3 rounded-lg", iconBgColor)}>
+          <Icon className={cn("w-6 h-6", iconColor)} />
+        </div>
+      </div>
+    </motion.div>
   );
 }

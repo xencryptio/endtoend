@@ -22,6 +22,8 @@ import Onboarding from "./pages/onboarding";
 import OnboardingNipun from "./pages/onboarding_nipun";
 import ONboardingData from "./pages/ONboardingData";
 import OnboardingNew from "./pages/OnboardingNew";
+import SubOrgDashboard from './components/dashboard/SubOrgDashboard'; // New Import
+import ApplicationDashboard from './components/dashboard/ApplicationDashboard'; // New Import
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -35,7 +37,16 @@ const AnimatedRoutes = () => {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
+        {/* Main Dashboard - Organization View */}
         <Route path="/" element={<Dashboard />} />
+        
+        {/* Sub-Organization View */}
+        <Route path="/suborg/:subOrgId" element={<SubOrgDashboard />} />
+        
+        {/* Application View */}
+        <Route path="/app/:appId" element={<ApplicationDashboard />} />
+
+        {/* Existing routes */}
         <Route path="/applications" element={<Applications />} />
         <Route path="/vulnerabilities" element={<Vulnerabilities />} />
         <Route path="/vulnerabilities-new" element={<VulnerabilitiesNew />} />
@@ -51,6 +62,8 @@ const AnimatedRoutes = () => {
         <Route path="/onboarding_nipun" element={<OnboardingNipun />} />
         {/* <Route path="/onboarding-data" element={<ONboardingData />} /> */}
         <Route path="/onboarding-new" element={<OnboardingNew />} />
+        
+        {/* 404 Fallback */}
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AnimatePresence>
