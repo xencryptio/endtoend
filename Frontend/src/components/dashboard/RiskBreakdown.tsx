@@ -3,18 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-interface CSVData {
-  application: string;
-  pqc_ready: number;
-  vulnerabilities: number;
-  risk_level: "Low" | "Medium" | "High" | "Very High";
-  status: string;
-  alg_changes: number;
-  cert_changes: number;
-  total_pqc_vulnerable_certificates: number;
-  total_pqc_vulnerable_algorithms: number;
-  "Sub Org": string;
-}
+import { OrgApplicationListItem } from "@/types";
 
 interface GroupedData {
   subOrg: string;
@@ -22,7 +11,7 @@ interface GroupedData {
   avgVulnerabilities: number;
   mostCommonStatus: string;
   riskDistribution: Record<string, number>;
-  apps: CSVData[];
+  apps: OrgApplicationListItem[];
 }
 
 const riskColors: Record<string, string> = {
@@ -41,7 +30,7 @@ const badgeColor = (level: string) =>
     ? "bg-orange-100 text-orange-800"
     : "bg-destructive/10 text-destructive";
 
-const RiskBreakdown: React.FC<{ data: CSVData[] }> = ({ data }) => {
+const RiskBreakdown: React.FC<{ data: OrgApplicationListItem[] }> = ({ data }) => {
   const [expandedSubOrgs, setExpandedSubOrgs] = useState<Record<string, boolean>>({});
 
   const grouped: GroupedData[] = useMemo(() => {
