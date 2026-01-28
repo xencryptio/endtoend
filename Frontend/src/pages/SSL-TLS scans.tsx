@@ -2,168 +2,44 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Save, RotateCcw, Globe, Github } from "lucide-react";
-import { CryptoTable, CryptoAlgorithm, ColumnDef } from "@/components/profile/crypto table";
+import { Globe, Github } from "lucide-react";
 import {
-  UnifiedCard,
   UnifiedEntryCard,
-  UnifiedBackButton,
 } from "@/components/ui/unified";
 import { typography } from "@/lib/design-tokens";
 import WebScan from '@/components/scan/webscan';
 import GitScan from "@/components/git-scan/git-scan";
-import { apiFetch } from '@/lib/api';
 
-// ============================================================================
-// INTERFACES & TYPES
-// ============================================================================
 
-interface ApiCryptoAlgorithm {
-  Section: string;
-  Algorithm_Name: string;
-  Variant: string;
-  Purpose: string;
-  Usage_Context: string;
-  Status_Today: string;
-  PQC_Status: string;
-  Priority: string;
-  Classical_Recommended: string;
-  Quantum_Recommended: string;
-  NIST_Reference: string;
-  Notes: string;
-}
 
-type ViewType = 'dashboard' | 'tables' | 'webscan' | 'gitscan';
+
+type ViewType = 'dashboard' | 'webscan' | 'gitscan';
 
 // ============================================================================
 // API CONFIGURATION
 // ============================================================================
 
 const API_CONFIG = {
-  cryptoApi: import.meta.env.VITE_BACKEND_URL,
   scanApi: import.meta.env.VITE_SCAN_API_URL
 };
 
-// ============================================================================
-// API FUNCTIONS
-// ============================================================================
 
-const fetchDataFromAPI = async (): Promise<ApiCryptoAlgorithm[]> => {
-  try {
-    const response = await apiFetch(`${API_CONFIG.cryptoApi}/apps3`);
-    console.log('✓ API data fetched successfully');
-    return response.data || [];
-  } catch (error) {
-    console.error('✗ Failed to fetch data from API:', error);
-    return [];
-  }
-};
-
-const transformApiData = (apiData: ApiCryptoAlgorithm[]): CryptoAlgorithm[] => {
-  return apiData.map((item, index) => ({
-    id: `${item.Algorithm_Name}-${index}`,
-    algorithm_name: item.Algorithm_Name,
-    variant: item.Variant,
-    purpose: item.Purpose,
-    usage_context: item.Usage_Context ? item.Usage_Context.split(',').map(s => s.trim()) : [],
-    status_today: item.Status_Today,
-    pqc_status: item.PQC_Status,
-    priority: item.Priority,
-    classical_recommended: item.Classical_Recommended,
-    quantum_recommended: item.Quantum_Recommended,
-    nist_reference: item.NIST_Reference ? item.NIST_Reference.split(',').map(s => s.trim()) : [],
-    notes: item.Notes,
-    section: item.Section,
-    visible: false,
-  }));
-};
-
-const categorizeApiData = (transformedData: CryptoAlgorithm[]) => {
-  const categories: { [key: string]: CryptoAlgorithm[] } = {
-    symmetric: [],
-    asymmetric: [],
-    hash: [],
-    mac_kdf: [],
-    pqc: [],
-  };
-  
-  const keywordMap = {
-    pqc: ['kyber', 'dilithium', 'falcon', 'sphincs', 'ntru', 'bike'],
-    mac_kdf: ['hmac', 'cmac', 'pbkdf2', 'hkdf', 'argon', 'bcrypt', 'scrypt', 'gcm', 'ccm', 'chacha20', 'poly1305'],
-    asymmetric: ['rsa', 'ecc', 'dsa', 'diffie-hellman', 'x25519', 'ed25519'],
-    hash: ['sha', 'md5'],
-    symmetric: ['aes', 'des', 'rc4', 'rc5', 'blowfish', 'camellia', 'seed'],
-  };  
-
-  transformedData.forEach(item => {
-    const section = item.section?.toLowerCase() || '';
-    if (section.includes('asymmetric')) {
-      categories.asymmetric.push(item);
-    } else if (section.includes('symmetric')) {
-      categories.symmetric.push(item);
-    } else if (section.includes('hash')) {
-      categories.hash.push(item);
-    } else if (section.includes('mac') || section.includes('kdf')) {
-      categories.mac_kdf.push(item);
-    } else if (section.includes('post-quantum')) {
-      categories.pqc.push(item);
-    } else {
-      const name = item.algorithm_name.toLowerCase();
-      let found = false;
-      for (const category in keywordMap) {
-        if (keywordMap[category].some(keyword => name.includes(keyword))) {
-          categories[category as keyof typeof categories].push(item);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        console.warn(`Could not categorize: ${item.algorithm_name}`);
-      }
-    }
-  });
-
-  return categories;
-};
-
-const commonColumns: ColumnDef[] = [
-  { key: "algorithm_name", header: "Algorithm" },
-  { key: "variant", header: "Variant" },
-  { key: "purpose", header: "Purpose" },
-  { key: "priority", header: "Priority" },
-  { key: "usage_context", header: "Usage Context" },
-  { key: "status_today", header: "Status" },
-  { key: "pqc_status", header: "PQC Status" },
-  { key: "notes", header: "Notes" },
-];
 
 // ============================================================================
 // MAIN SCAN COMPONENT (DASHBOARD CONTROLLER)
 // ============================================================================
 
 const Scan = () => {
-  const location = useLocation();
-  const [symmetricData, setSymmetricData] = useState<CryptoAlgorithm[]>([]);
-  const [asymmetricData, setAsymmetricData] = useState<CryptoAlgorithm[]>([]);
-  const [hashData, setHashData] = useState<CryptoAlgorithm[]>([]);
-  const [macKdfData, setMacKdfData] = useState<CryptoAlgorithm[]>([]);
-  const [pqcData, setPqcData] = useState<CryptoAlgorithm[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<ViewType>('dashboard');
-
-  const [isSymmetricEdited, setIsSymmetricEdited] = useState(false);
-  const [isAsymmetricEdited, setIsAsymmetricEdited] = useState(false);
-  const [isHashEdited, setIsHashEdited] = useState(false);
-  const [isMacKdfEdited, setIsMacKdfEdited] = useState(false);
-  const [isPqcEdited, setIsPqcEdited] = useState(false);
-
-  const initialCategorizedData = useRef<{ [key: string]: CryptoAlgorithm[] }>({});
-
+  const location = useLocation();
   // Handle navigation from Applications page
   useEffect(() => {
     const state = location.state as { defaultView?: ViewType; autoLoadDomain?: string; autoLoadRepo?: string; openHistory?: boolean } | null;
     if (state?.defaultView) {
-      setView(state.defaultView);
+      // Filter out invalid views like 'tables' if they come from old links
+      if (state.defaultView === 'webscan' || state.defaultView === 'gitscan' || state.defaultView === 'dashboard') {
+        setView(state.defaultView);
+      }
     }
   }, [location]);
 
@@ -183,113 +59,7 @@ const Scan = () => {
     }
   }, [location]);
 
-  useEffect(() => {
-    const initializeData = async () => {
-      try {
-        const apiData = await fetchDataFromAPI();
-        const transformedData = transformApiData(apiData);
-        const categorizedData = categorizeApiData(transformedData);
 
-        const withVisible = (data: CryptoAlgorithm[], count: number) =>
-          data.map((item, index) => ({ ...item, visible: index < count }));
-
-        const initialSymmetric = withVisible(categorizedData.symmetric || [], 3);
-        const initialAsymmetric = withVisible(categorizedData.asymmetric || [], 3);
-        const initialHash = withVisible(categorizedData.hash || [], 3);
-        const initialMacKdf = withVisible(categorizedData.mac_kdf || [], 3);
-        const initialPqc = withVisible(categorizedData.pqc || [], 3);
-
-        initialCategorizedData.current = { 
-          symmetric: initialSymmetric, 
-          asymmetric: initialAsymmetric, 
-          hash: initialHash, 
-          mac_kdf: initialMacKdf, 
-          pqc: initialPqc 
-        };
-
-        setSymmetricData(initialSymmetric);
-        setAsymmetricData(initialAsymmetric);
-        setHashData(initialHash);
-        setMacKdfData(initialMacKdf);
-        setPqcData(initialPqc);
-
-      } catch (error) {
-        console.error('✗ Error initializing profile data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initializeData();
-  }, []);
-
-  const handleSaveChanges = () => {
-    console.log("Saving all changes...");
-    console.log("Symmetric:", symmetricData);
-    console.log("Asymmetric:", asymmetricData);
-    console.log("Hash:", hashData);
-    console.log("MAC/KDF:", macKdfData);
-    console.log("PQC:", pqcData);
-  };
-
-  const handleReset = () => {
-    setSymmetricData([...(initialCategorizedData.current.symmetric || [])]);
-    setAsymmetricData([...(initialCategorizedData.current.asymmetric || [])]);
-    setHashData([...(initialCategorizedData.current.hash || [])]);
-    setMacKdfData([...(initialCategorizedData.current.mac_kdf || [])]);
-    setPqcData([...(initialCategorizedData.current.pqc || [])]);
-    setIsSymmetricEdited(false);
-    setIsAsymmetricEdited(false);
-    setIsHashEdited(false);
-    setIsMacKdfEdited(false);
-    setIsPqcEdited(false);
-    console.log("All tables reset to original state.");
-  };
-
-  const onSymmetricUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setSymmetricData(d);
-    setIsSymmetricEdited(true);
-  }, []);
-  const onSymmetricReset = useCallback(() => {
-    setSymmetricData([...(initialCategorizedData.current.symmetric || [])]);
-    setIsSymmetricEdited(false);
-  }, []);
-
-  const onAsymmetricUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setAsymmetricData(d);
-    setIsAsymmetricEdited(true);
-  }, []);
-  const onAsymmetricReset = useCallback(() => {
-    setAsymmetricData([...(initialCategorizedData.current.asymmetric || [])]);
-    setIsAsymmetricEdited(false);
-  }, []);
-
-  const onHashUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setHashData(d);
-    setIsHashEdited(true);
-  }, []);
-  const onHashReset = useCallback(() => {
-    setHashData([...(initialCategorizedData.current.hash || [])]);
-    setIsHashEdited(false);
-  }, []);
-
-  const onMacKdfUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setMacKdfData(d);
-    setIsMacKdfEdited(true);
-  }, []);
-  const onMacKdfReset = useCallback(() => {
-    setMacKdfData([...(initialCategorizedData.current.mac_kdf || [])]);
-    setIsMacKdfEdited(false);
-  }, []);
-
-  const onPqcUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setPqcData(d);
-    setIsPqcEdited(true);
-  }, []);
-  const onPqcReset = useCallback(() => {
-    setPqcData([...(initialCategorizedData.current.pqc || [])]);
-    setIsPqcEdited(false);
-  }, []);
 
   const cardVariants = {
     hidden: { opacity: 0, y: 20 },
@@ -318,7 +88,7 @@ const Scan = () => {
           onBack={() => setView('dashboard')}
           autoLoadRepo={pendingAutoLoadRepo as any}
         />
-      ) : view === 'dashboard' ? (
+      ) : (
         // Dashboard View - Simple Navigation with UnifiedEntryCard
         <motion.div
           key="dashboard"
@@ -354,74 +124,6 @@ const Scan = () => {
                 variant="premium"
               />
             </div>
-          </div>
-        </motion.div>
-      ) : (
-        // Tables View - Cryptography Management
-        <motion.div
-          key="tables"
-          variants={cardVariants}
-          initial="hidden"
-          animate="visible"
-          exit="exit"
-          transition={{ duration: 0.3 }}
-          className="p-4 sm:p-6"
-        >
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold">Cryptography Profile Management</h1>
-            <UnifiedBackButton onClick={() => setView('dashboard')} label="Back to Dashboard" />
-          </div>
-
-          <div className="space-y-8">
-            <CryptoTable 
-              title="Symmetric Algorithms" 
-              data={symmetricData} 
-              columns={commonColumns} 
-              isEdited={isSymmetricEdited}
-              onUpdate={onSymmetricUpdate}
-              onReset={onSymmetricReset}
-            />
-            <CryptoTable 
-              title="Asymmetric Algorithms" 
-              data={asymmetricData} 
-              columns={commonColumns} 
-              isEdited={isAsymmetricEdited} 
-              onUpdate={onAsymmetricUpdate}
-              onReset={onAsymmetricReset}
-            />
-            <CryptoTable 
-              title="Hash Functions" 
-              data={hashData} 
-              columns={commonColumns} 
-              isEdited={isHashEdited} 
-              onUpdate={onHashUpdate}
-              onReset={onHashReset}
-            />
-            <CryptoTable 
-              title="MACs & KDFs" 
-              data={macKdfData} 
-              columns={commonColumns} 
-              isEdited={isMacKdfEdited} 
-              onUpdate={onMacKdfUpdate}
-              onReset={onMacKdfReset}
-            />
-            <CryptoTable 
-              title="Post-Quantum Cryptography" 
-              data={pqcData} 
-              columns={commonColumns} 
-              isEdited={isPqcEdited} 
-              onUpdate={onPqcUpdate}
-              onReset={onPqcReset}
-            />
-          </div>
-
-          <div className="mt-8 flex justify-end gap-4">
-            <Button onClick={handleSaveChanges}>
-              <Save className="h-4 w-4 mr-2" /> Save Changes
-            </Button>
-            <Button variant="outline" onClick={handleReset}>
-              <RotateCcw className="h-4 w-4 mr-2" /> Reset All
-            </Button>
           </div>
         </motion.div>
       )}
