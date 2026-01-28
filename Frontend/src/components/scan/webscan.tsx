@@ -467,7 +467,7 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
     console.log(`📊 Loaded ${batches.length} batches from database`);
     console.log(`📋 Batches:`, batches);
     
-    // ✅ FIX: Load execution times for completed batches
+    // ✅ FIX: Load execution times AND detailed results for completed batches
     const batchesWithExecutionTime = await Promise.all(
       batches.map(async (batch: any) => {
         if (batch.status === 'completed' && batch.batch_id) {
@@ -476,9 +476,9 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
             const totalExecutionTime = details.reduce((sum: number, result: any) => 
               sum + (result.execution_time_seconds || 0), 0
             );
-            return { ...batch, execution_time_seconds: totalExecutionTime };
+            return { ...batch, execution_time_seconds: totalExecutionTime, detailedResults: details };
           } catch (error) {
-            console.warn(`Failed to load execution time for batch ${batch.batch_id}:`, error);
+            console.warn(`Failed to load details for batch ${batch.batch_id}:`, error);
             return batch;
           }
         }
@@ -529,13 +529,13 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
         status: batch.status as 'pending' | 'processing' | 'completed' | 'failed',
         requested_at: batch.created_at,
         total_urls: totalUrls,
-        execution_time_seconds: batch.execution_time_seconds || 0, // ✅ Use pre-loaded execution time from batch details
+        execution_time_seconds: batch.execution_time_seconds || 0,
         scan_status: batch.status === 'completed' ? 'success' : 'failed',
         successful_count: batch.successful_count || 0,
         failed_count: batch.failed_count || 0,
         error_message: batch.status === 'failed' ? 'Batch processing failed' : undefined,
         finalDomainProgress: {},
-        detailedResults: [] // Will be loaded on demand
+        detailedResults: batch.detailedResults || [] // ✅ Use pre-loaded detailed results
       };
     });
     
@@ -716,6 +716,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
   const [expandedProgress, setExpandedProgress] = useState<Set<string>>(new Set());
   const [roundHistory, setRoundHistory] = useState<RoundInfo[]>([]);
   const [currentRound, setCurrentRound] = useState(1);const [viewingResultsFor, setViewingResultsFor] = useState<string | null>(null);
+  const [expandedDomainUrl, setExpandedDomainUrl] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false); // Track if we've already auto-loaded
 
@@ -1321,8 +1322,11 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
       return (
         <ResultsDetailPage
           scan={scanToView}
-          onBack={() => setViewingResultsFor(null)}
-          targetDomain={autoLoadDomain}
+          onBack={() => {
+            setViewingResultsFor(null);
+            setExpandedDomainUrl(null);
+          }}
+          targetDomain={autoLoadDomain || expandedDomainUrl || undefined}
         />
       );
     }
@@ -1544,8 +1548,34 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
               </UnifiedCard>
             ) : (
               <div className="space-y-4">
-                {scanHistory.map((scan) => {
+                {/* Flatten scan history to show domain-wise results */}
+                {scanHistory.flatMap((scan) => {
+                  // If scan has detailed results (individual domains), show each domain separately
+                  if (scan.detailedResults && scan.detailedResults.length > 0) {
+                    return scan.detailedResults.map((domainScan, idx) => ({
+                      ...domainScan,
+                      parentBatch: scan,
+                      domainIndex: idx,
+                      isIndividualDomain: true
+                    }));
+                  }
+                  // Otherwise show the batch as-is
+                  return [{
+                    ...scan,
+                    parentBatch: scan,
+                    domainIndex: 0,
+                    isIndividualDomain: false
+                  }];
+                }).filter(item => item && item.parentBatch).map((scan) => {
+                  const isIndividualDomain = scan.isIndividualDomain === true;
+                  const parentBatch = scan.parentBatch || scan;
+                  
                   const executionTime = (() => {
+                    // For individual domain scans, show their execution time
+                    if (isIndividualDomain && scan.execution_time_seconds) {
+                      return `${scan.execution_time_seconds.toFixed(2)}s`;
+                    }
+                    
                     if (scan.detailedResults && scan.detailedResults.length > 0) {
                       const totalTime = scan.detailedResults.reduce((sum, result) => {
                         return sum + (result.execution_time_seconds || 0);
@@ -1564,14 +1594,15 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                   })();
 
                   const deleteLogic = async () => {
-                    const batchId = scan.batch_id || scan.request_id;
+                    // For individual domain results, delete the entire parent batch
+                    const batchId = parentBatch.batch_id || parentBatch.request_id;
                     showMessage('Deleting scan batch...', 'info');
                     
                     const success = await deleteScanBatch(apiBaseUrl, batchId);
                     
                     if (success) {
                       setScanHistory(prev => 
-                        prev.filter(s => s.request_id !== scan.request_id)
+                        prev.filter(s => s.request_id !== parentBatch.request_id)
                       );
                       showMessage('Scan batch deleted successfully', 'success');
                     } else {
@@ -1582,6 +1613,11 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                   // Determine quantum readiness status for completed scans
                   const getQuantumStatus = () => {
                     if (scan.status !== 'completed') return scan.status.toUpperCase();
+                    
+                    // For individual domains, check their specific quantum analysis
+                    if (isIndividualDomain && scan.raw_response?.pqc_analysis) {
+                      return scan.raw_response.pqc_analysis.quantum_ready ? 'QUANTUM READY' : 'NOT QUANTUM READY';
+                    }
                     
                     // Check if any detailed result has quantum analysis
                     if (scan.detailedResults && scan.detailedResults.length > 0) {
@@ -1601,17 +1637,30 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                     return scan.status.toUpperCase();
                   };
 
-                  const domainLabel =
-                    scan.primary_domain ||
-                    (scan.domain_list && scan.domain_list.length === 1 ? scan.domain_list[0] : undefined) ||
-                    (scan.detailedResults && scan.detailedResults.length === 1 ? scan.detailedResults[0].url : undefined);
+                  // For domain-wise display, show the actual domain
+                  const domainLabel = isIndividualDomain 
+                    ? scan.url
+                    : (scan.primary_domain ||
+                      (scan.domain_list && scan.domain_list.length === 1 ? scan.domain_list[0] : undefined) ||
+                      (scan.detailedResults && scan.detailedResults.length === 1 ? scan.detailedResults[0].url : undefined));
+                  
                   const shouldShowDomainHint = !domainLabel && scan.total_urls === 1;
+                  
+                  // Generate unique key for domain-wise display
+                  const uniqueKey = isIndividualDomain 
+                    ? `${parentBatch.request_id}-${scan.domainIndex}-${scan.url}`
+                    : scan.request_id;
+
+                  // Prepare metrics for individual domains
+                  const pqcScore = scan.raw_response?.pqc_analysis?.overall_score?.toFixed(1) || 'N/A';
+                  const pqcGrade = scan.raw_response?.pqc_analysis?.overall_grade || 'N/A';
+                  const quantumStatus = scan.raw_response?.pqc_analysis?.quantum_ready ? 'Quantum Ready' : 'Not Ready';
 
                   return (
                     <UnifiedResultCard
-                      key={scan.request_id}
-                      title={`Request ID: ${scan.request_id}`}
-                      description={new Date(scan.requested_at).toLocaleString()}
+                      key={uniqueKey}
+                      title={isIndividualDomain ? scan.url : `Request ID: ${scan.request_id}`}
+                      description={isIndividualDomain ? '' : new Date(scan.requested_at || parentBatch.requested_at).toLocaleString()}
                       status={
                         scan.status === 'completed' ? 'success' :
                         scan.status === 'failed' || scan.error_message ? 'error' :
@@ -1619,23 +1668,48 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                       }
                       statusLabel={getQuantumStatus()}
                       icon={getStatusIcon(scan.status)}
-                      metrics={[
+                      metrics={isIndividualDomain ? [
+                        { 
+                          label: "PQC Score", 
+                          value: pqcScore,
+                          valueClassName: getGradeColor(pqcGrade)
+                        },
+                        { 
+                          label: "Grade", 
+                          value: pqcGrade,
+                          valueClassName: getGradeColor(pqcGrade)
+                        },
+                        { 
+                          label: "Status", 
+                          value: quantumStatus,
+                          valueClassName: scan.raw_response?.pqc_analysis?.quantum_ready ? 'text-success' : 'text-destructive'
+                        }
+                      ] : [
                         { label: "URLs", value: scan.total_urls },
                         { label: "Execution Time", value: executionTime }
                       ]}
                       actions={[
-                        ...((scan.status === 'completed' || (scan.status === 'failed' && scan.detailedResults && scan.detailedResults.length > 0)) ? [{
+                        ...((scan.status === 'completed' || (scan.status === 'failed' && (isIndividualDomain || (scan.detailedResults && scan.detailedResults.length > 0)))) ? [{
                           label: "View Results",
                           icon: <Eye size={16} />,
-                          onClick: () => handleLoadBatchDetails(scan.request_id),
+                          onClick: () => {
+                            if (isIndividualDomain) {
+                              // For individual domains, directly open the domain detail modal
+                              setExpandedDomainUrl(scan.url);
+                              handleLoadBatchDetails(parentBatch.request_id);
+                            } else {
+                              // For batches, show the batch results page
+                              handleLoadBatchDetails(scan.request_id);
+                            }
+                          },
                           variant: "outline" as const
                         }] : []),
                         ...((scan.status === 'failed' || scan.status === 'pending' || scan.status === 'processing') ? [{
-                          label: retryingId === scan.request_id ? "Retrying..." : "Retry",
-                          icon: retryingId === scan.request_id ? <RefreshCw size={16} className="animate-spin" /> : <RotateCcw size={16} />,
-                          onClick: () => retryScan(scan),
+                          label: retryingId === parentBatch.request_id ? "Retrying..." : "Retry",
+                          icon: retryingId === parentBatch.request_id ? <RefreshCw size={16} className="animate-spin" /> : <RotateCcw size={16} />,
+                          onClick: () => retryScan(parentBatch),
                           variant: "outline" as const,
-                          disabled: retryingId === scan.request_id
+                          disabled: retryingId === parentBatch.request_id
                         }] : []),
                         {
                           label: "Delete",
@@ -1645,7 +1719,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                         }
                       ]}
                     >
-                      {(domainLabel || shouldShowDomainHint) && (
+                      {!isIndividualDomain && (domainLabel || shouldShowDomainHint) && (
                         <div className="mb-3 text-sm">
                           <span className="font-semibold text-foreground">Domain:</span>{' '}
                           <span className="text-muted-foreground break-all">
@@ -1653,8 +1727,9 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                           </span>
                         </div>
                       )}
+                      
                       {/* PROGRESS DISPLAY */}
-                      {scan.status === 'processing' && expandedProgress.has(scan.request_id) && (
+                      {scan.status === 'processing' && expandedProgress.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
                         <motion.div
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
@@ -1676,46 +1751,71 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
 
                       {/* SUMMARY DISPLAY */}
                       {(scan.status === 'completed' || scan.status === 'failed') && 
-                        expandedSummary.has(scan.request_id) && (
+                        expandedSummary.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
                           <motion.div
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
                             exit={{ opacity: 0, height: 0 }}
                             className="mt-4 col-span-full border-t pt-4"
                           >
-                            <ProgressDisplay 
+                            {/* For individual domains, show their specific results */}
+                            {isIndividualDomain ? (
+                              <ProgressDisplay 
                                 scanProgress={{ 
-                                total: scan.total_urls, 
-                                completed: scan.total_urls 
+                                  total: 1, 
+                                  completed: 1 
+                                }}
+                                domainProgress={{
+                                  [scan.url]: {
+                                    status: scan.scan_status?.toLowerCase() === 'success' || scan.scan_status?.toLowerCase() === 'completed' 
+                                      ? 'completed' 
+                                      : scan.scan_status?.toLowerCase() === 'http_skipped' 
+                                      ? 'http_skipped' 
+                                      : 'failed',
+                                    duration: scan.execution_time_seconds,
+                                    error: scan.error_message,
+                                    round: 1
+                                  }
+                                }}
+                                processingDomains={{}}
+                                roundHistory={[]}
+                                isActiveProgress={false}
+                              />
+                            ) : (
+                              <ProgressDisplay 
+                                scanProgress={{ 
+                                  total: scan.total_urls, 
+                                  completed: scan.total_urls 
                                 }}
                                 domainProgress={(() => {
-                                const progress: {[key: string]: DomainProgressInfo} = {};
-                                
-                                scan.detailedResults?.forEach((result) => {
+                                  const progress: {[key: string]: DomainProgressInfo} = {};
+                                  
+                                  scan.detailedResults?.forEach((result) => {
                                     const domain = result.url;
                                     
                                     const scanStatus = result.scan_status?.toLowerCase();
                                     let status = 'failed';
                                     if (scanStatus === 'success' || scanStatus === 'completed') {
-                                    status = 'completed';
+                                      status = 'completed';
                                     } else if (scanStatus === 'http_skipped') {
-                                    status = 'http_skipped';
+                                      status = 'http_skipped';
                                     }
                                     
                                     progress[domain] = {
-                                    status: status,
-                                    duration: result.execution_time_seconds,
-                                    error: result.error_message,
-                                    round: (result as any).round || 1
+                                      status: status,
+                                      duration: result.execution_time_seconds,
+                                      error: result.error_message,
+                                      round: (result as any).round || 1
                                     };
-                                });
-                                
-                                return progress;
+                                  });
+                                  
+                                  return progress;
                                 })()}
                                 processingDomains={{}}
                                 roundHistory={[]}
                                 isActiveProgress={false}
-                            />
+                              />
+                            )}
                           </motion.div>
                         )}
                     </UnifiedResultCard>

@@ -34,7 +34,7 @@ import {
 // -------------------
 const menuItems = [
   { title: "Dashboard", url: "/", icon: Home },
-  { title: "Applications", url: "/onboarding", icon: Server },
+  { title: "Applications", url: "/applications", icon: Server },
   { title: "Vulnerabilities_old", url: "/vulnerabilities", icon: Shield },
   { title: "Vulnerabilities", url: "/vulnerabilities-new", icon: Shield },
   { title: "Profile", url: "/profile", icon: User },

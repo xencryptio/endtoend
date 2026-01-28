@@ -512,6 +512,8 @@ const ExpandedDetailModal: React.FC<{
     result.quantum_grade ??
     'N/A';
 
+  const quantumReady = result.raw_response?.pqc_analysis?.quantum_ready ?? false;
+
   return (
     <>
       {/* Backdrop */}
@@ -566,7 +568,7 @@ const ExpandedDetailModal: React.FC<{
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Status</div>
+                    <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Grade</div>
                     <div className={`text-3xl font-bold mt-2 ${getGradeColor(pqcGrade as string)}`}>
                       {pqcGrade}
                     </div>
@@ -574,8 +576,17 @@ const ExpandedDetailModal: React.FC<{
                   <div>
                     <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">Status</div>
                     <div className="text-2xl font-bold mt-2 flex items-center justify-center gap-2">
-                      <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center"><Check className="w-3 h-3 text-emerald-600" /></div>
-                      <span>Ready</span>
+                      {quantumReady ? (
+                        <>
+                          <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center"><Check className="w-3 h-3 text-emerald-600" /></div>
+                          <span className="text-success">Ready</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-5 h-5 rounded-full bg-rose-500/20 flex items-center justify-center"><X className="w-3 h-3 text-rose-600" /></div>
+                          <span className="text-destructive">Not Ready</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -644,6 +655,7 @@ const DomainCard: React.FC<{
   const isHttpSkipped = result.scan_status === 'http_skipped';
   const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? 'N/A';
   const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? 'N/A';
+  const quantumReady = result.raw_response?.pqc_analysis?.quantum_ready ?? false;
 
   return (
     <Card 
@@ -704,7 +716,9 @@ const DomainCard: React.FC<{
               </div>
               <div className="bg-muted/30 p-3 rounded-lg text-center">
                 <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Status</div>
-                <div className="font-bold text-sm text-emerald-600">Ready</div>
+                <div className={`font-bold text-sm ${quantumReady ? 'text-success' : 'text-destructive'}`}>
+                  {quantumReady ? 'Ready' : 'Not Ready'}
+                </div>
               </div>
             </div>
           )}
@@ -734,6 +748,20 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack, tar
     }
   }, [targetDomain]);
   const [expandedResult, setExpandedResult] = useState<ScanResult | null>(null);
+  const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
+
+  // Auto-expand the modal if targetDomain is provided (only once)
+  useEffect(() => {
+    if (targetDomain && scan.detailedResults && !hasAutoExpanded) {
+      const matchingResult = scan.detailedResults.find(
+        result => result.url.toLowerCase() === targetDomain.toLowerCase()
+      );
+      if (matchingResult) {
+        setExpandedResult(matchingResult);
+        setHasAutoExpanded(true);
+      }
+    }
+  }, [targetDomain, scan.detailedResults, hasAutoExpanded]);
 
   // Filter results based on search query
   const filteredResults = useMemo(() => {
