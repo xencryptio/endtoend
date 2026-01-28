@@ -1,0 +1,1370 @@
+================================================================================
+                    XENCRYPTIO END-TO-END PROJECT DOCUMENTATION
+                        Complete API Endpoints & Frontend Mapping
+================================================================================
+
+PROJECT OVERVIEW
+================================================================================
+Xencryptio is a microservices-based security scanning platform that performs 
+comprehensive Post-Quantum Cryptography (PQC) readiness assessments including:
+- TLS/SSL scanning for websites
+- Repository scanning for cryptographic algorithms
+- System/Agent scanning for installed cryptography
+- Unified PQC scoring across all scan types
+- Multi-organization onboarding and management
+
+Architecture: Docker-based microservices with PostgreSQL database
+Frontend: React + TypeScript + Vite
+Backend: Python FastAPI services
+
+================================================================================
+                           MICROSERVICES OVERVIEW
+================================================================================
+
+Service Port Map:
+┌──────────────────────────────┬──────┬─────────────────────────────────────┐
+│ Service Name                 │ Port │ Purpose                             │
+├──────────────────────────────┼──────┼─────────────────────────────────────┤
+│ Frontend                     │ 3000 │ React UI                            │
+│ DB Service                   │ 8001 │ Central database API & dashboard    │
+│ Crypto/TLS Scanner           │ 8000 │ SSL/TLS domain scanning             │
+│ Repository Scanner           │ 8003 │ GitHub repository scanning          │
+│ Onboarding Service           │ 8008 │ Batch onboarding & Excel uploads    │
+│ System Scanner (Agent API)   │ 9000 │ Agent-based system scanning         │
+│ Universal Scoring Service    │ 9500 │ Centralized PQC scoring engine      │
+│ PostgreSQL Database          │ 5432 │ Data persistence                    │
+│ Adminer (DB GUI)             │ 8080 │ Database management interface       │
+└──────────────────────────────┴──────┴─────────────────────────────────────┘
+
+
+================================================================================
+                        1. DB SERVICE API (PORT 8001)
+================================================================================
+Base URL: http://localhost:8001
+Purpose: Central database service for storing and retrieving all scan results
+
+--------------------------------------------------------------------------------
+HEALTH & ROOT
+--------------------------------------------------------------------------------
+GET  /health
+     → Health check endpoint
+     Returns: {"status": "ok"}
+
+GET  /
+     → API documentation and endpoint listing
+
+--------------------------------------------------------------------------------
+TLS/SSL SCAN BATCH ENDPOINTS
+--------------------------------------------------------------------------------
+POST /scans/batch
+     Body: {batch_id, total_urls, max_concurrent, status, requested_at}
+     → Create new scan batch
+     Returns: ScanBatch object
+
+GET  /scans/batch?skip=0&limit=100&status=pending
+     → Get all scan batches with optional status filter
+     Status values: 'pending', 'processing', 'completed', 'failed'
+     Returns: List[ScanBatch]
+
+GET  /scans/batch/{batch_id}
+     → Get specific batch with all normalized results
+     Returns: ScanBatchWithNormalizedResults
+
+PUT  /scans/batch/{batch_id}
+     Body: {status, successful_count, failed_count}
+     → Update batch status and counts
+
+DELETE /scans/batch/{batch_id}
+     → Delete batch and all associated results
+
+--------------------------------------------------------------------------------
+INDIVIDUAL SCAN RESULT ENDPOINTS
+--------------------------------------------------------------------------------
+POST /scans/result
+     Body: {batch_id, url, status, raw_response, ...}
+     → Store individual scan result
+
+GET  /scans/results?batch_id=xxx&status=completed&skip=0&limit=100
+     → Get scan results with filtering
+     Returns: List[ScanResultWithNormalized]
+
+GET  /scans/result/{result_id}
+     → Get specific scan result with normalized fields + raw_response
+     Returns: ScanResultWithNormalized
+
+DELETE /scans/result/{result_id}
+     → Delete single scan result
+
+GET  /scans/search?pqc_grade=A&quantum_ready=true&tls_version=TLS%201.3
+     → Search scans by normalized fields (efficient queries)
+     Query params: pqc_grade, quantum_ready, tls_version, status
+     Returns: List[ScanResultWithNormalized]
+
+GET  /scans/stats
+     → Get database statistics using normalized fields
+     Returns: Aggregated statistics
+
+DELETE /scans/clear-all
+     → DANGER: Delete ALL scan data from database
+
+--------------------------------------------------------------------------------
+ONBOARDING & ORGANIZATION ENDPOINTS
+--------------------------------------------------------------------------------
+POST /organizations
+     Body: {organization_name, organization_email, ...}
+     → Create single organization
+
+GET  /organizations
+     → List all organizations
+     Returns: List[Organization]
+
+GET  /organizations/{org_id}
+     → Get specific organization details
+
+DELETE /organizations/{org_id}
+     → Delete organization and all related data
+
+POST /organizations/{org_id}/suborganizations
+     Body: {suborganization_name}
+     → Create sub-organization under parent org
+
+GET  /organizations/{org_id}/suborganizations
+     → List sub-organizations
+
+POST /suborganizations/{suborg_id}/applications
+     Body: {application_name}
+     → Create application under sub-organization
+
+GET  /suborganizations/{suborg_id}/applications
+     → List applications for sub-organization
+
+POST /organizations/{org_id}/repositories/bulk
+     Body: List[{repo_name, repo_url, branch_to_scan, ...}]
+     → Bulk create repositories
+
+GET  /organizations/{org_id}/repositories
+     → List repositories by organization
+
+GET  /suborganizations/{suborg_id}/repositories
+     → List repositories by sub-organization
+
+GET  /applications/{app_id}/repositories
+     → List repositories by application
+
+POST /organizations/{org_id}/servers/bulk
+     Body: List[{hostname, ip_address, operating_system, ...}]
+     → Bulk create servers
+
+GET  /organizations/{org_id}/servers
+     → List servers by organization
+
+POST /organizations/{org_id}/domains/bulk
+     Body: List[{domain}]
+     → Bulk create domains
+
+GET  /organizations/{org_id}/domains
+     → List domains by organization
+
+GET  /applications/{app_id}/domains
+     → List domains by application
+
+GET  /suborganizations/{suborg_id}/domains
+     → List domains by sub-organization
+
+--------------------------------------------------------------------------------
+ONBOARDING BATCH TRACKING
+--------------------------------------------------------------------------------
+POST /onboarding-batches
+     Body: {organization_id, organization_name, total_repos, total_domains, ...}
+     → Create onboarding batch record
+
+GET  /onboarding-batches?limit=100
+     → List all onboarding batches
+
+GET  /onboarding-batches/{batch_id}
+     → Get specific onboarding batch details
+
+PUT  /onboarding-batches/{batch_id}/scan-ids
+     Body: {repo_scan_job_id, tls_scan_batch_id}
+     → Update scan IDs after triggering scans
+
+DELETE /onboarding-batches/{batch_id}
+     → Delete onboarding batch record
+
+--------------------------------------------------------------------------------
+DASHBOARD API ENDPOINTS
+--------------------------------------------------------------------------------
+GET  /api/dashboard
+     → Get all organization dashboards
+     Returns: List[OrganizationDashboard] with summary, applications, risk_distribution
+
+GET  /api/suborg/{suborg_id}/dashboard
+     → Get sub-organization dashboard
+     Returns: SubOrgDashboard with applications and metrics
+
+GET  /api/app/{app_id}/dashboard
+     → Get application-level dashboard
+     Returns: ApplicationDetail with repositories, domains, servers
+
+--------------------------------------------------------------------------------
+EXPORT ENDPOINTS
+--------------------------------------------------------------------------------
+GET  /export/batch/{batch_id}/csv
+     → Export batch results as CSV
+
+GET  /export/batch/{batch_id}/json
+     → Export batch results as JSON
+
+GET  /export/all/csv
+     → Export all scan results as CSV
+
+POST /export/unified-csv
+     Body: {batch_ids: [...]}
+     → Export multiple service results as unified CSV (TLS, Repo, Agent)
+
+
+================================================================================
+                     2. CRYPTO/TLS SCANNER API (PORT 8000)
+================================================================================
+Base URL: http://localhost:8000
+Purpose: SSL/TLS domain scanning using SSL Labs API
+
+--------------------------------------------------------------------------------
+CORE SCANNING ENDPOINTS
+--------------------------------------------------------------------------------
+POST /scan
+     Body: {domain: "example.com,example2.com", max_concurrent: 5, save_to_db: true}
+     → Scan domains with retry logic, filters out HTTP domains
+     Returns: {summary, successful_scans, failed_scans}
+
+POST /scan-with-progress
+     Body: {domain: "example.com", max_concurrent: 5, save_to_db: true}
+     → Scan with Server-Sent Events (SSE) for real-time progress
+     Returns: SSE stream with events:
+       - start: Initial scan info
+       - domain_processing: Domain scan started
+       - domain_complete: Domain scan finished
+       - round_start: New retry round started
+       - complete: All scans finished
+       - cancelled: Scan cancelled
+
+POST /create-scan-request
+     Body: {domain: "example.com", max_concurrent: 5, save_to_db: true}
+     → Queue scan request (database-centric architecture)
+     Returns: {batch_id, status: "pending"}
+
+POST /process-pending-scans
+     → Process queued scans (called periodically)
+     Picks up scans with status=pending and executes them
+
+GET  /cancel-scan/{request_id}
+     → Cancel ongoing scan
+
+--------------------------------------------------------------------------------
+RESULT RETRIEVAL ENDPOINTS
+--------------------------------------------------------------------------------
+GET  /batch/{batch_id}
+     → Check batch status and statistics
+     Returns: {batch_id, status, successful_count, failed_count, execution_time_seconds}
+
+GET  /results/batch/{batch_id}
+     → Get all results for a batch
+     Returns: {results: List[ScanResult]}
+
+GET  /batches?limit=100
+     → Get all batches
+
+DELETE /batches/{batch_id}
+     → Delete specific batch
+
+DELETE /batches/clear-all
+     → Clear all scan data
+
+GET  /health
+     → Health check
+
+--------------------------------------------------------------------------------
+CACHE & UTILITY
+--------------------------------------------------------------------------------
+POST /clear-cache
+     → Clear SSL Labs cache
+
+GET  /
+     → API documentation
+
+
+================================================================================
+                    3. REPOSITORY SCANNER API (PORT 8003)
+================================================================================
+Base URL: http://localhost:8003
+Purpose: Scan GitHub repositories for cryptographic algorithms
+
+--------------------------------------------------------------------------------
+SCAN MANAGEMENT
+--------------------------------------------------------------------------------
+POST /api/scan
+     Body: {repo_url: "https://github.com/user/repo", branch_name: "main"}
+     → Queue repository scan
+     Returns: {scan_id, status: "pending"}
+
+POST /api/scans/{scan_id}/execute
+     → Execute pending scan (background processing)
+     Updates scan status to "in_progress" then "completed"
+
+GET  /api/scans?limit=200
+     → Get all scans (paginated)
+     Returns: List of scan summaries
+
+GET  /api/scans/{scan_id}
+     → Get detailed scan results including:
+       - algorithms: Dict of found algorithms with scoring
+       - quantum_readiness_percentage
+       - category_scores: Scores by algorithm type
+     Returns: Complete scan details
+
+DELETE /api/scans/{scan_id}
+     → Delete scan and all results
+
+DELETE /api/scans
+     → Delete all scans
+
+--------------------------------------------------------------------------------
+ALGORITHM & FINDING DETAILS
+--------------------------------------------------------------------------------
+GET  /api/scans/{scan_id}/algorithm/{algorithm_name}/findings
+     → Get all code findings for specific algorithm
+     Returns: List[{file_path, line_number, context, match_text}]
+
+--------------------------------------------------------------------------------
+VALIDATION & UTILITIES
+--------------------------------------------------------------------------------
+POST /api/validate-url
+     Body: {repo_url}
+     → Validate repository URL format
+     Returns: {valid: bool, normalized_url, platform}
+
+POST /api/fetch-branches
+     Body: {repo_url}
+     → Fetch available branches for repository
+     Returns: {branches: List[str], default_branch}
+
+GET  /api/pending-scans
+     → Get list of pending scans in queue
+
+
+================================================================================
+                   4. ONBOARDING SERVICE API (PORT 8008)
+================================================================================
+Base URL: http://localhost:8008
+Purpose: Batch onboarding, Excel uploads, GitHub discovery
+
+--------------------------------------------------------------------------------
+BATCH ONBOARDING
+--------------------------------------------------------------------------------
+POST /api/onboarding/submit
+     Body: OnboardingPayload (JSON)
+       {
+         organization: {...},
+         suborganizations: [{applications: [{repositories, domains, servers}]}],
+         created_by: "email"
+       }
+     → Submit complete onboarding data
+     → Triggers scans for domains and repositories
+     Returns: {
+       organization_id,
+       repo_scan_job_id,
+       tls_scan_batch_id,
+       batch_id
+     }
+
+--------------------------------------------------------------------------------
+GITHUB INTEGRATION
+--------------------------------------------------------------------------------
+POST /api/github/discover
+     Body: {github_url: "https://github.com/username"}
+     → Discover public repositories from GitHub account
+     Returns: {username, total_public_repos, repositories: [{name, branches, ...}]}
+
+POST /api/repo-scan/batch-from-github
+     Body: {repos: [{repo_url, branch_name}]}
+     → Batch scan selected GitHub repositories
+     Returns: {job_id}
+
+--------------------------------------------------------------------------------
+EXCEL BATCH SCANNING
+--------------------------------------------------------------------------------
+POST /api/tls-scan/batch
+     Body: FormData with Excel file
+     Columns: domain, description
+     → Upload Excel file with domains for TLS scanning
+     Returns: {job_id}
+
+POST /api/repo-scan/batch
+     Body: FormData with Excel file
+     Columns: repo_url, branch_name
+     → Upload Excel file with repositories
+     Returns: {job_id}
+
+--------------------------------------------------------------------------------
+JOB MANAGEMENT
+--------------------------------------------------------------------------------
+GET  /api/batch-jobs
+     → Get all batch scanning jobs
+     Returns: List[{job_id, scan_type, status, total_items, completed_items}]
+
+GET  /api/batch-jobs/{job_id}/stream
+     → SSE stream for real-time job progress
+
+GET  /api/batch-jobs/{job_id}/export
+     → Export job results as Excel
+
+DELETE /api/batch-jobs/{job_id}
+     → Delete batch job
+
+
+================================================================================
+                  5. SYSTEM SCANNER API (PORT 9000)
+================================================================================
+Base URL: http://localhost:9000
+Purpose: Agent-based system scanning for installed cryptography
+
+--------------------------------------------------------------------------------
+AGENT MANAGEMENT
+--------------------------------------------------------------------------------
+POST /api/v1/register
+     Body: {hostname, ip_address, os_info}
+     → Register new agent
+     Returns: {agent_id, registration_token}
+
+GET  /api/v1/admin/agents
+     → Get all registered agents
+     Returns: {success: true, agents: List[Agent]}
+
+GET  /api/v1/admin/agent/{agent_id}
+     → Get specific agent details
+
+DELETE /api/v1/admin/agent/{agent_id}
+     → Unregister agent
+
+--------------------------------------------------------------------------------
+TASK MANAGEMENT
+--------------------------------------------------------------------------------
+POST /api/v1/admin/agent/{agent_id}/task
+     → Create scan task for agent
+     Returns: {task_id}
+
+GET  /api/v1/tasks
+     → Get pending tasks for calling agent
+
+GET  /api/v1/admin/tasks
+     → Get all tasks (admin endpoint)
+
+GET  /api/v1/admin/task/{task_id}
+     → Get specific task details
+
+--------------------------------------------------------------------------------
+RESULTS SUBMISSION & RETRIEVAL
+--------------------------------------------------------------------------------
+POST /api/v1/submit
+     Body: {agent_id, task_id, audit_results}
+     → Agent submits scan results
+     → Results are scored via Universal Scoring Service
+     Returns: {result_id}
+
+GET  /api/v1/admin/results
+     → Get all scan results
+
+GET  /api/v1/admin/result/{result_id}
+     → Get specific result details
+
+GET  /api/v1/admin/agent/{agent_id}/results
+     → Get all results for specific agent
+
+--------------------------------------------------------------------------------
+STATISTICS & MONITORING
+--------------------------------------------------------------------------------
+GET  /api/v1/admin/stats
+     → Get system statistics
+     Returns: {
+       agents: {total, active, inactive},
+       tasks: {total, pending, in_progress, completed},
+       results: {total}
+     }
+
+GET  /api/v1/heartbeat
+     Body: {agent_id}
+     → Agent heartbeat to maintain active status
+
+--------------------------------------------------------------------------------
+AGENT FILE DOWNLOADS
+--------------------------------------------------------------------------------
+GET  /api/v1/files/list/{os_type}
+     os_type: "linux" or "windows"
+     → List available agent files
+
+GET  /api/v1/files/download-zip/{os_type}
+     → Download agent package as ZIP
+
+
+================================================================================
+               6. UNIVERSAL SCORING SERVICE API (PORT 9500)
+================================================================================
+Base URL: http://localhost:9500
+Purpose: Centralized PQC scoring for all scan types
+
+--------------------------------------------------------------------------------
+SCORING ENDPOINTS
+--------------------------------------------------------------------------------
+POST /api/v1/score/tls-scan
+     Body: {
+       scoring_type: "tls",
+       algorithms: [{name, algorithm_type, key_size, position, context}],
+       metadata: {source, domain, protocols},
+       raw_response: {...}
+     }
+     → Score TLS scan results
+     Returns: Comprehensive scoring with overall_score, grades, quantum_ready
+
+POST /api/v1/score/repository
+     Body: {
+       scoring_type: "repository",
+       algorithms: [{name, algorithm_type, occurrences, context}],
+       metadata: {source}
+     }
+     → Score repository scan results
+     Returns: Category scores, overall grade, quantum readiness
+
+POST /api/v1/score/agent-audit
+     Body: {
+       scoring_type: "agent",
+       algorithms: [{name, algorithm_type, source, context}],
+       metadata: {os_type, timestamp}
+     }
+     → Score agent audit results
+     Returns: Scored algorithms with security levels
+
+POST /api/v1/score/generic
+     Body: {
+       scoring_type: "generic",
+       algorithms: [{name, algorithm_type}]
+     }
+     → Generic algorithm scoring
+
+POST /api/v1/score/algorithms
+     Body: {algorithms: [algorithm_names]}
+     → Batch score multiple algorithms
+     Returns: List of scored algorithms
+
+GET  /api/v1/score/health
+     → Health check for scoring service
+
+GET  /
+     → Service documentation and available endpoints
+
+
+================================================================================
+                        FRONTEND PAGES & API MAPPING
+================================================================================
+
+Frontend Environment Variables:
+--------------------------------
+VITE_API_URL=http://localhost:8001
+VITE_DB_API_URL=http://localhost:8001
+VITE_SCAN_API_URL=http://localhost:8000
+VITE_SCAN_SERVICE_URL=http://localhost:8000
+VITE_TLS_SCAN_API_URL=http://localhost:8000
+VITE_REPO_SCAN_API_URL=http://localhost:8003
+VITE_SYSTEM_SCAN_API_URL=http://localhost:9000
+
+--------------------------------------------------------------------------------
+1. DASHBOARD PAGE (/)
+   Route: /
+   File: Frontend/src/pages/Dashboard.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+  → GET http://localhost:8001/api/dashboard
+    Used by: getAllDashboards() from src/api/dashboard.ts
+    Purpose: Fetch organization-level metrics, applications, risk distribution
+    Data displayed:
+      - Total Applications
+      - Total Vulnerabilities  
+      - Secure Applications
+      - PQC Readiness %
+      - Risk Distribution Chart
+      - Top Vulnerable Applications
+      - Sub-Organizations Cards
+      - Applications Risk Breakdown Table
+
+--------------------------------------------------------------------------------
+2. SUB-ORGANIZATION DASHBOARD
+   Route: /suborg/:subOrgId
+   File: Frontend/src/components/dashboard/SubOrgDashboard.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+  → GET http://localhost:8001/api/suborg/{subOrgId}/dashboard
+    Used by: getSubOrgDashboard(subOrgId) from src/api/dashboard.ts
+    Purpose: Get sub-org specific metrics and applications
+    Data displayed:
+      - Sub-org name and metrics
+      - Applications list with scores
+      - Vulnerability breakdown
+
+--------------------------------------------------------------------------------
+3. APPLICATION DASHBOARD
+   Route: /app/:appId
+   File: Frontend/src/components/dashboard/ApplicationDashboard.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+  → GET http://localhost:8001/api/app/{appId}/dashboard
+    Used by: getAppDashboard(appId) from src/api/dashboard.ts
+    Purpose: Get application-specific details
+    Data displayed:
+      - Application name and metrics
+      - Repository scan results
+      - Domain scan results
+      - Server/agent status
+
+--------------------------------------------------------------------------------
+4. TLS/SSL SCAN PAGE
+   Route: /SSL-TLS scans
+   File: Frontend/src/pages/SSL-TLS scans.tsx
+   Component: Frontend/src/components/scan/webscan.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+
+  SCAN TAB:
+  → POST http://localhost:8000/create-scan-request
+    Body: {domain, max_concurrent, save_to_db}
+    Purpose: Queue new TLS scan
+    
+  → GET http://localhost:8000/batch/{batch_id}
+    Purpose: Poll batch status every 1 second until completed
+    
+  → GET http://localhost:8000/cancel-scan/{request_id}
+    Purpose: Cancel ongoing scan
+
+  HISTORY TAB:
+  → GET http://localhost:8001/scans/batch?limit=100
+    Purpose: Get all scan batches from database
+    
+  → GET http://localhost:8001/scans/batch/{batch_id}
+    Purpose: Get detailed results for specific batch
+    
+  → DELETE http://localhost:8001/scans/batch/{batch_id}
+    Purpose: Delete scan batch
+    
+  → GET http://localhost:8001/scans/batch/{batch_id}/export/csv
+    Purpose: Export results as CSV
+
+Data Displayed:
+  - Domain input form
+  - Real-time scan progress
+  - Scan history table with filters
+  - Detailed results per domain:
+    * PQC Score & Grade
+    * TLS Version
+    * Cipher Suites
+    * Certificate Details
+    * Key Exchange Algorithms
+    * Quantum Readiness Status
+
+--------------------------------------------------------------------------------
+5. REPOSITORY SCAN PAGE
+   Route: /SSL-TLS scans (Git Scan tab)
+   File: Frontend/src/components/git-scan/git-scan.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+
+  SCAN TAB:
+  → POST http://localhost:8003/api/validate-url
+    Body: {repo_url}
+    Purpose: Validate repository URL
+    
+  → POST http://localhost:8003/api/fetch-branches
+    Body: {repo_url}
+    Purpose: Get available branches
+    
+  → POST http://localhost:8003/api/scan
+    Body: {repo_url, branch_name}
+    Purpose: Start repository scan
+    
+  HISTORY TAB:
+  → GET http://localhost:8003/api/scans?limit=200
+    Purpose: Get all repository scans
+    
+  → GET http://localhost:8003/api/scans/{scan_id}
+    Purpose: Get detailed scan results
+    
+  → GET http://localhost:8003/api/scans/{scan_id}/algorithm/{algorithm_name}/findings
+    Purpose: Get code findings for specific algorithm
+    
+  → DELETE http://localhost:8003/api/scans/{scan_id}
+    Purpose: Delete scan
+    
+  → DELETE http://localhost:8003/api/scans
+    Purpose: Delete all scans
+
+Data Displayed:
+  - Repository URL input with branch selection
+  - Scan queue and progress
+  - Scan history with filters
+  - Algorithm breakdown by category
+  - PQC Readiness Score
+  - Security grades per algorithm
+  - Code findings with line numbers
+  - Quantum-safe vs vulnerable counts
+
+--------------------------------------------------------------------------------
+6. SYSTEM/AGENT SCAN PAGE (PQC Scans)
+   Route: /PQC-Scans
+   File: Frontend/src/pages/PQC-Scans.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+
+  AGENTS TAB:
+  → GET http://localhost:9000/api/v1/admin/agents
+    Purpose: Get all registered agents
+    
+  → POST http://localhost:9000/api/v1/admin/agent/{agent_id}/task
+    Purpose: Create scan task for agent
+    
+  → DELETE http://localhost:9000/api/v1/admin/agent/{agent_id}
+    Purpose: Unregister agent
+
+  TASKS TAB:
+  → GET http://localhost:9000/api/v1/admin/tasks
+    Purpose: Get all scan tasks
+    
+  → GET http://localhost:9000/api/v1/admin/task/{task_id}
+    Purpose: Get task details
+
+  RESULTS TAB:
+  → GET http://localhost:9000/api/v1/admin/agent/{agent_id}/results
+    Purpose: Get scan results for agent
+    
+  → GET http://localhost:9000/api/v1/admin/result/{result_id}
+    Purpose: Get detailed result
+
+  STATISTICS:
+  → GET http://localhost:9000/api/v1/admin/stats
+    Purpose: Get system stats (agents, tasks, results counts)
+
+  AGENT SETUP:
+  → GET http://localhost:9000/api/v1/files/list/linux
+    → GET http://localhost:9000/api/v1/files/list/windows
+    Purpose: List available agent files
+    
+  → GET http://localhost:9000/api/v1/files/download-zip/linux
+    → GET http://localhost:9000/api/v1/files/download-zip/windows
+    Purpose: Download agent packages
+
+Data Displayed:
+  - Agent list with status (active/inactive)
+  - Agent details (hostname, IP, OS, last seen)
+  - Task queue and execution status
+  - Audit results by agent:
+    * System context (OS, kernel)
+    * OpenSSL configuration
+    * TLS/SSL settings
+    * Certificate stores
+    * Installed crypto software
+    * PQC readiness scores
+
+--------------------------------------------------------------------------------
+7. ONBOARDING PAGE
+   Route: /onboarding-new
+   File: Frontend/src/pages/OnboardingNew.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+
+  ORGANIZATION LIST:
+  → GET http://localhost:8001/organizations
+    Purpose: Get all organizations
+    
+  ORGANIZATION DETAILS:
+  → GET http://localhost:8001/organizations/{org_id}/suborganizations
+    Purpose: Get sub-organizations
+    
+  → GET http://localhost:8001/suborganizations/{suborg_id}/applications
+    Purpose: Get applications
+    
+  → GET http://localhost:8001/applications/{app_id}/repositories
+    Purpose: Get repositories for application
+    
+  → GET http://localhost:8001/applications/{app_id}/domains
+    Purpose: Get domains for application
+    
+  → GET http://localhost:8001/organizations/{org_id}/servers
+    Purpose: Get servers for organization
+    
+  → GET http://localhost:9000/api/v1/admin/agents
+    Purpose: Get agent status for servers (match by IP)
+
+  SCAN RESULTS:
+  → GET http://localhost:8003/api/scans?limit=500
+    Purpose: Get all repository scans (to match with repos)
+    
+  → GET http://localhost:8003/api/scans/{scan_id}
+    Purpose: Get detailed repository scan results
+    
+  → GET http://localhost:8000/results/batch/{batch_id}
+    Purpose: Get TLS scan results (to match with domains)
+    
+  → GET http://localhost:8000/batches?limit=100
+    Purpose: Search all TLS batches for domain scans
+    
+  → GET http://localhost:8001/onboarding-batches?limit=100
+    Purpose: Get onboarding batch records
+
+Data Displayed:
+  - Organization selection
+  - Sub-organizations tree
+  - Applications with:
+    * Repository scan status and vulnerabilities
+    * Domain TLS scan results and PQC grades
+    * Server status and agent activity
+  - Quick scan triggers
+  - Export functionality
+
+--------------------------------------------------------------------------------
+8. ONBOARDING SUBMISSION (Old)
+   Route: /onboarding_nipun
+   File: Frontend/src/pages/onboarding.tsx
+--------------------------------------------------------------------------------
+APIs Called:
+
+  GITHUB DISCOVERY:
+  → POST http://localhost:8008/api/github/discover
+    Body: {github_url}
+    Purpose: Discover repositories from GitHub account
+    
+  → POST http://localhost:8008/api/repo-scan/batch-from-github
+    Body: {repos: [{repo_url, branch_name}]}
+    Purpose: Batch scan selected repositories
+
+  BATCH SCANNING:
+  → POST http://localhost:8008/api/tls-scan/batch
+    Body: FormData with Excel file (columns: domain, description)
+    Purpose: Batch TLS scan from Excel
+    
+  → POST http://localhost:8008/api/repo-scan/batch
+    Body: FormData with Excel file (columns: repo_url, branch_name)
+    Purpose: Batch repository scan from Excel
+
+  JOB MONITORING:
+  → GET http://localhost:8008/api/batch-jobs
+    Purpose: Get all batch jobs
+    
+  → GET http://localhost:8008/api/batch-jobs/{job_id}/stream
+    Purpose: SSE stream for job progress
+    
+  → GET http://localhost:8008/api/batch-jobs/{job_id}/export
+    Purpose: Export job results
+    
+  → DELETE http://localhost:8008/api/batch-jobs/{job_id}
+    Purpose: Delete batch job
+
+  AGENT SETUP:
+  → GET http://localhost:9000/api/v1/files/list/linux
+    → GET http://localhost:9000/api/v1/files/list/windows
+    Purpose: List agent files
+    
+  → GET http://localhost:9000/api/v1/files/download-zip/linux
+    → GET http://localhost:9000/api/v1/files/download-zip/windows
+    Purpose: Download agent packages
+
+Data Displayed:
+  - Excel upload for batch scanning
+  - GitHub account discovery
+  - Batch job progress tracking
+  - Agent download links
+  - Configuration instructions
+
+
+================================================================================
+                         DATA FLOW ARCHITECTURE
+================================================================================
+
+ONBOARDING FLOW:
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. User submits onboarding data (JSON/Excel)                           │
+│    → POST /api/onboarding/submit (Onboarding Service:8008)             │
+│                                                                          │
+│ 2. Onboarding Service processes and saves to DB                        │
+│    → POST /organizations (DB Service:8001)                             │
+│    → POST /organizations/{id}/suborganizations                         │
+│    → POST /suborganizations/{id}/applications                          │
+│    → POST /organizations/{id}/repositories/bulk                        │
+│    → POST /organizations/{id}/domains/bulk                             │
+│    → POST /organizations/{id}/servers/bulk                             │
+│    → POST /onboarding-batches (tracking record)                        │
+│                                                                          │
+│ 3. Trigger scans for all assets                                        │
+│    Repositories:                                                        │
+│    → POST /api/scan (Repo Scanner:8003) for each repo                  │
+│                                                                          │
+│    Domains:                                                             │
+│    → POST /create-scan-request (TLS Scanner:8000)                      │
+│                                                                          │
+│ 4. Update onboarding batch with scan IDs                               │
+│    → PUT /onboarding-batches/{id}/scan-ids                             │
+│                                                                          │
+│ 5. Frontend polls for results                                           │
+│    → GET /organizations/{id}/... (DB Service)                           │
+│    → GET /api/scans/{id} (Repo Scanner)                                │
+│    → GET /batch/{id} (TLS Scanner)                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+TLS SCAN FLOW (Queue-Based):
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. User requests scan                                                   │
+│    → POST /create-scan-request (Crypto Scanner:8000)                   │
+│                                                                          │
+│ 2. Create batch in DB with status="pending"                            │
+│    → POST /scans/batch (DB Service:8001)                               │
+│    Returns: batch_id                                                    │
+│                                                                          │
+│ 3. Frontend starts polling                                              │
+│    → GET /batch/{batch_id} every 1 second                              │
+│                                                                          │
+│ 4. Scanner processes pending batch                                      │
+│    → Updates status: pending → processing → completed                  │
+│    → For each domain:                                                   │
+│       • Runs SSL Labs scan                                              │
+│       • Calls Universal Scoring Service                                 │
+│         POST /api/v1/score/tls-scan (Scoring Service:9500)             │
+│       • Saves result:                                                   │
+│         POST /scans/result (DB Service:8001)                            │
+│                                                                          │
+│ 5. Frontend detects completion                                          │
+│    → GET /scans/batch/{batch_id} (DB Service) for detailed results     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+REPOSITORY SCAN FLOW:
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. User submits repo URL                                               │
+│    → POST /api/scan (Repo Scanner:8003)                                │
+│                                                                          │
+│ 2. Create scan record with status="pending"                            │
+│    → Stored in repo_scanner_db                                          │
+│                                                                          │
+│ 3. Scanner processes in background                                      │
+│    → Clone repository                                                   │
+│    → Scan files for crypto patterns                                    │
+│    → Extract algorithms with occurrences                                │
+│    → Call Universal Scoring Service                                     │
+│      POST /api/v1/score/repository (Scoring Service:9500)              │
+│    → Save results with scores                                           │
+│                                                                          │
+│ 4. Frontend polls for results                                           │
+│    → GET /api/scans/{scan_id}                                           │
+│                                                                          │
+│ 5. View detailed findings                                               │
+│    → GET /api/scans/{scan_id}/algorithm/{name}/findings                │
+└─────────────────────────────────────────────────────────────────────────┘
+
+AGENT SCAN FLOW:
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. Deploy agent to target system                                       │
+│    → Download from GET /api/v1/files/download-zip/{os_type}            │
+│                                                                          │
+│ 2. Agent registers with server                                          │
+│    → POST /api/v1/register (System Scanner:9000)                       │
+│      Body: {hostname, ip_address, os_info}                              │
+│      Returns: {agent_id, registration_token}                            │
+│                                                                          │
+│ 3. Admin creates scan task                                              │
+│    → POST /api/v1/admin/agent/{agent_id}/task                          │
+│      Returns: {task_id}                                                 │
+│                                                                          │
+│ 4. Agent polls for tasks                                                │
+│    → GET /api/v1/tasks                                                  │
+│                                                                          │
+│ 5. Agent executes audit script                                          │
+│    • Linux: Checks OpenSSL, SSH, certificates                           │
+│    • Windows: Checks CryptoAPI, TLS, cert stores                        │
+│                                                                          │
+│ 6. Agent submits results                                                │
+│    → POST /api/v1/submit                                                │
+│      Body: {agent_id, task_id, audit_results}                           │
+│                                                                          │
+│ 7. Server scores results                                                │
+│    → POST /api/v1/score/agent-audit (Scoring Service:9500)             │
+│    → Saves scored results to system_scanner_db                          │
+│                                                                          │
+│ 8. Frontend displays results                                            │
+│    → GET /api/v1/admin/agent/{agent_id}/results                        │
+│    → GET /api/v1/admin/result/{result_id}                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+                           DATABASES STRUCTURE
+================================================================================
+
+Database Names:
+  1. scandb - Main DB service database (TLS scan results, onboarding data)
+  2. repo_scanner_db - Repository scan results
+  3. system_scanner_db - Agent scan results
+  4. crypto_scanner_db - TLS scanner internal cache (rarely used)
+
+--------------------------------------------------------------------------------
+SCANDB (Main Database) - Key Tables
+--------------------------------------------------------------------------------
+scan_batches:
+  - batch_id (PK)
+  - total_urls
+  - status (pending/processing/completed/failed)
+  - successful_count, failed_count
+  - requested_at, completed_at
+
+scan_results:
+  - id (PK)
+  - batch_id (FK)
+  - url, status
+  - raw_response (JSONB) - Complete scan data
+  - Normalized fields for fast querying:
+    * pqc_overall_score, pqc_overall_grade
+    * pqc_quantum_ready (boolean)
+    * tls_version
+    * kex_score, cipher_score, signature_score
+
+organizations:
+  - id, organization_name, organization_email
+  - total_repositories, total_domains, total_servers
+
+suborganizations:
+  - id, suborganization_name
+  - organization_id (FK)
+
+applications:
+  - id, application_name
+  - suborganization_id (FK)
+
+repositories:
+  - id, repo_name, repo_url, branch_to_scan
+  - application_id (FK)
+
+domains:
+  - id, domain
+  - application_id (FK)
+
+servers:
+  - id, hostname, ip_address, operating_system
+  - application_id (FK)
+
+onboarding_batches:
+  - id, organization_id, organization_name
+  - repo_scan_job_id, tls_scan_batch_id
+  - total_repos, total_domains, total_servers
+  - created_at, created_by
+
+--------------------------------------------------------------------------------
+REPO_SCANNER_DB - Key Tables
+--------------------------------------------------------------------------------
+repositories:
+  - id (PK)
+  - repo_url, repo_hash, branch_name
+  - scan_status (pending/in_progress/completed/failed)
+  - total_files, total_algorithms
+  - quantum_safe_count, quantum_vulnerable_count
+  - overall_security_score, overall_grade
+
+scan_results:
+  - id (PK)
+  - repo_id (FK)
+  - algorithm, algorithm_type, category
+  - occurrences, files_affected
+  - quantum_safe (boolean)
+  - quantum_resistance_type (fully_resistant/grover_resistant/vulnerable)
+  - base_score, final_score, grade
+  - deprecated (boolean)
+
+findings:
+  - id (PK)
+  - scan_result_id (FK)
+  - file_path, line_number
+  - context, match_text
+
+category_scores:
+  - id (PK)
+  - repo_id (FK)
+  - category_type (kex/signature/symmetric/hash)
+  - score, grade, algorithm_count
+
+--------------------------------------------------------------------------------
+SYSTEM_SCANNER_DB - Key Tables
+--------------------------------------------------------------------------------
+agents:
+  - agent_id (PK)
+  - hostname, ip_address, os_info
+  - registered_at, last_seen
+  - status (active/inactive)
+
+tasks:
+  - task_id (PK)
+  - agent_id (FK)
+  - status (pending/in_progress/completed)
+  - created_at, started_at, completed_at
+
+audit_results:
+  - result_id (PK)
+  - agent_id (FK), task_id (FK)
+  - audit_results (JSONB) - Complete audit data
+  - received_at, submitted_at
+
+
+================================================================================
+                        SCORING ALGORITHM DETAILS
+================================================================================
+
+Universal Scoring Service Logic:
+--------------------------------
+
+1. ALGORITHM CLASSIFICATION:
+   Each algorithm is classified by:
+   - algorithm_type: kex, signature, symmetric, hash
+   - quantum_resistance_type:
+     * fully_resistant: PQC algorithms (Kyber, Dilithium, etc.)
+     * grover_resistant: Symmetric with sufficient key size
+     * vulnerable: RSA, ECDSA, traditional DH
+     * deprecated: DES, RC4, MD5, SHA1
+
+2. SCORING FACTORS:
+   - Base Score: Intrinsic algorithm security (0-100)
+   - Key Size Multiplier: Adjusts score based on key length
+   - Position Weight: Higher priority algorithms scored higher (TLS)
+   - Occurrence Weight: Frequency of use (Repository scans)
+   - Deprecation Penalty: Heavily penalizes weak algorithms
+
+3. GRADE CALCULATION:
+   A+: 95-100 (Fully PQC ready)
+   A:  85-94  (Strong quantum resistance)
+   B:  70-84  (Moderate resistance with large keys)
+   C:  50-69  (Some quantum vulnerability)
+   D:  30-49  (Significant vulnerability)
+   F:  0-29   (Critically vulnerable)
+
+4. QUANTUM READINESS:
+   - quantum_ready: All critical algorithms are quantum-resistant
+   - hybrid_ready: Mix of quantum-safe and transitional algorithms
+   - vulnerable: Relies on quantum-vulnerable algorithms
+
+5. COMPONENT SCORES:
+   TLS Scans:
+   - KEX (Key Exchange): Weight 40%
+   - Signature: Weight 30%
+   - Symmetric: Weight 20%
+   - Hash: Weight 10%
+
+   Repository Scans:
+   - Weighted by occurrences
+   - Category-specific grading
+   - Overall readiness percentage
+
+   Agent Scans:
+   - OpenSSL configuration
+   - Installed certificates
+   - TLS/SSL settings
+   - SSH configuration
+
+
+================================================================================
+                        ERROR HANDLING PATTERNS
+================================================================================
+
+All services use consistent error response format:
+{
+  "detail": {
+    "error": "error_code",
+    "message": "Human-readable message",
+    "timestamp": "ISO 8601 timestamp"
+  }
+}
+
+Common Error Codes:
+  - validation_error: Request validation failed (422)
+  - not_found: Resource not found (404)
+  - internal_error: Server error (500)
+  - batch_not_found: Scan batch not found (404)
+  - rate_limited: SSL Labs rate limit (429)
+  - dns_resolution_failed: Domain unreachable (503)
+
+Retry Strategies:
+  - TLS Scanner: 3 rounds with exponential backoff
+  - Repository Scanner: Queue-based, automatic retry
+  - Agent Scanner: Configurable timeout, manual retry
+
+
+================================================================================
+                        DEPLOYMENT CONFIGURATION
+================================================================================
+
+Docker Compose Setup:
+  - All services run in xencrypt-network
+  - Health checks on critical services
+  - Automatic restart policies
+  - Volume persistence for database
+
+Environment Variables Required:
+  DB Service:
+    - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/scandb
+    - REPO_SCANNER_DB_URL, SYSTEM_SCANNER_DB_URL
+
+  TLS Scanner:
+    - DB_SERVICE_URL=http://db-service:8001
+    - SCORING_SERVICE_URL=http://universal-scoring-service:9500
+
+  Repo Scanner:
+    - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db
+    - SCORING_SERVICE_URL=http://universal-scoring-service:9500
+
+  System Scanner:
+    - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/system_scanner_db
+    - SCORING_SERVICE_URL=http://universal-scoring-service:9500
+
+  Frontend:
+    - VITE_DB_API_URL=http://localhost:8001
+    - VITE_SCAN_API_URL=http://localhost:8000
+    - VITE_REPO_SCAN_API_URL=http://localhost:8003
+    - VITE_SYSTEM_SCAN_API_URL=http://localhost:9000
+
+
+================================================================================
+                           AUTHENTICATION
+================================================================================
+
+Current Status: NO AUTHENTICATION
+  - All endpoints are open
+  - For production deployment, add:
+    * JWT tokens for API authentication
+    * Role-based access control (admin, user, agent)
+    * API key authentication for agent communication
+
+
+================================================================================
+                         USEFUL DEVELOPMENT COMMANDS
+================================================================================
+
+Start All Services:
+  docker compose up -d --build
+
+View Logs:
+  docker compose logs -f [service-name]
+  
+  Services: postgres, db-service, crypto-scanner, repo-scanner, 
+            onboarding, system-scan, universal-scoring-service, frontend
+
+Restart Individual Service:
+  docker compose restart [service-name]
+
+Access Database:
+  http://localhost:8080 (Adminer)
+  Or: docker exec -it postgres psql -U scanuser -d scandb
+
+Clear All Data:
+  DELETE http://localhost:8001/scans/clear-all (TLS scans)
+  DELETE http://localhost:8003/api/scans (Repo scans)
+  
+Database Reset:
+  docker compose down -v  (DELETES ALL DATA)
+  docker compose up -d
+
+
+================================================================================
+                              TESTING WORKFLOW
+================================================================================
+
+1. Test TLS Scanner:
+   curl -X POST http://localhost:8000/create-scan-request \
+     -H "Content-Type: application/json" \
+     -d '{"domain":"google.com","max_concurrent":5,"save_to_db":true}'
+
+2. Test Repository Scanner:
+   curl -X POST http://localhost:8003/api/scan \
+     -H "Content-Type: application/json" \
+     -d '{"repo_url":"https://github.com/torvalds/linux","branch_name":"master"}'
+
+3. Test Agent Registration:
+   curl -X POST http://localhost:9000/api/v1/register \
+     -H "Content-Type: application/json" \
+     -d '{"hostname":"test-agent","ip_address":"192.168.1.100","os_info":"Linux"}'
+
+4. Test Onboarding:
+   See test_auto_scan.json for complete payload example
+
+
+================================================================================
+                         KNOWN ISSUES & LIMITATIONS
+================================================================================
+
+1. SSL Labs Rate Limiting:
+   - Max 25 domains per 24 hours from single IP
+   - Use cache where possible
+   - Implement exponential backoff
+
+2. Repository Cloning:
+   - Large repositories take significant time
+   - Memory intensive for file scanning
+   - Consider timeout adjustments
+
+3. Agent Communication:
+   - No automatic agent discovery
+   - Manual deployment required
+   - Firewall rules must allow agent-to-server communication
+
+4. Frontend Polling:
+   - 1-second polling may be excessive for large batches
+   - Consider WebSocket upgrade for production
+
+5. Data Normalization:
+   - Domain matching requires careful normalization
+   - www. prefix handling
+   - Protocol stripping consistency
+
+
+================================================================================
+                      FUTURE ENHANCEMENTS ROADMAP
+================================================================================
+
+1. Real-time Communication:
+   - Replace polling with WebSockets
+   - SSE for all long-running operations
+
+2. Enhanced Analytics:
+   - Trend analysis over time
+   - Compliance reporting (NIST, PCI-DSS)
+   - Risk scoring improvements
+
+3. Integrations:
+   - CI/CD pipeline integration
+   - Slack/Teams notifications
+   - SIEM integration
+
+4. Performance:
+   - Caching layer (Redis)
+   - Background job queue (Celery)
+   - Database query optimization
+
+5. Security:
+   - OAuth 2.0 / OpenID Connect
+   - API rate limiting
+   - Audit logging
+
+
+================================================================================
+                           SUPPORT & CONTACT
+================================================================================
+
+Documentation Version: 1.0
+Last Updated: 2026-01-28
+
+For issues, questions, or contributions:
+  - Review README.md in project root
+  - Check QUEUE_ARCHITECTURE.md for queue-based scanning details
+  - See docker-compose.yml for service configuration
+
+
+================================================================================
+                              END OF DOCUMENTATION
+================================================================================
