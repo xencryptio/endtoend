@@ -467,8 +467,27 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
     console.log(`📊 Loaded ${batches.length} batches from database`);
     console.log(`📋 Batches:`, batches);
     
+    // ✅ FIX: Load execution times for completed batches
+    const batchesWithExecutionTime = await Promise.all(
+      batches.map(async (batch: any) => {
+        if (batch.status === 'completed' && batch.batch_id) {
+          try {
+            const details = await loadBatchDetails(normalizedBaseUrl, batch.batch_id);
+            const totalExecutionTime = details.reduce((sum: number, result: any) => 
+              sum + (result.execution_time_seconds || 0), 0
+            );
+            return { ...batch, execution_time_seconds: totalExecutionTime };
+          } catch (error) {
+            console.warn(`Failed to load execution time for batch ${batch.batch_id}:`, error);
+            return batch;
+          }
+        }
+        return batch;
+      })
+    );
+    
     // Convert batches to ScanResult format
-    const result = batches.map((batch: any) => {
+    const result = batchesWithExecutionTime.map((batch: any) => {
       // ✅ FIX: Calculate total from successful + failed counts
       const totalUrls = (batch.successful_count || 0) + (batch.failed_count || 0);
       const rp = batch.request_payload || {};
@@ -510,7 +529,7 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
         status: batch.status as 'pending' | 'processing' | 'completed' | 'failed',
         requested_at: batch.created_at,
         total_urls: totalUrls,
-        execution_time_seconds: 0, // ✅ FIXED: Default to 0 instead of undefined, will be updated when results are loaded
+        execution_time_seconds: batch.execution_time_seconds || 0, // ✅ Use pre-loaded execution time from batch details
         scan_status: batch.status === 'completed' ? 'success' : 'failed',
         successful_count: batch.successful_count || 0,
         failed_count: batch.failed_count || 0,
@@ -680,7 +699,7 @@ const connectSSEWithPost = async (
 // ============================================================================
 
 const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, initialTab }) => {
-  const [activeTab, setActiveTab] = useState<'scan' | 'history'>(initialTab || 'scan');
+  const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'onboarded'>(initialTab || 'scan');
   const [urls, setUrls] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanResult[]>([]);
@@ -1332,22 +1351,6 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={async () => {
-            try {
-              const historicalScans = await loadHistoricalScans(apiBaseUrl);
-              if (historicalScans && historicalScans.length >= 0) {
-                setScanHistory(historicalScans);
-                showMessage('Scan history refreshed', 'success');
-              } else {
-                showMessage('No scan history found', 'info');
-              }
-            } catch (err) {
-              console.error('Refresh failed', err);
-              showMessage('Failed to refresh scan history', 'error');
-            }
-          }}>
-            <RefreshCw className="w-4 h-4 mr-2" /> Refresh
-          </Button>
           <UnifiedBackButton onClick={onBack} label="Back" />
         </div>
       </div>
@@ -1389,68 +1392,89 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
         >
           Scan History ({scanHistory.length})
         </button>
+        <button
+          onClick={() => setActiveTab('onboarded')}
+          className={`px-6 py-3 border-b-2 transition-colors ${
+            activeTab === 'onboarded'
+              ? 'border-primary text-primary'
+              : 'border-transparent hover:text-primary'
+          }`}
+        >
+          Onboarded Domains
+        </button>
       </div>
 
       <AnimatePresence mode="wait">
-        {activeTab === 'scan' ? (
+        {activeTab === 'scan' && (
           <motion.div
             key="scan-tab"
             variants={cardVariants}
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="space-y-6"
           >
-            <div className="grid md:grid-cols-2 gap-6 items-start">
-              <UnifiedCard padding="default">
-                <div className="mb-4">
-                  <h3 className="font-semibold text-lg">Manually Enter Domains</h3>
-                  <p className="text-muted-foreground text-sm">
-                    Type or paste domains directly.
+            <UnifiedCard variant="premium" padding="spacious" className="mb-12">
+              <div className="mb-6 pb-5 border-b">
+                <h2 className="text-2xl font-bold tracking-tight">TLS/SSL Crypto Scan</h2>
+                <p className="text-sm text-muted-foreground font-medium leading-relaxed">
+                  Analyze domains for TLS configuration, cryptographic algorithms, and PQC readiness
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6 items-start mb-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2.5 uppercase tracking-wider" htmlFor="urls">
+                    Domain Input
+                  </label>
+                  <textarea
+                    id="urls"
+                    value={urls}
+                    onChange={(e) => setUrls(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { handleScanSubmit(e as any); } }}
+                    placeholder="example.com&#10;google.com, github.com"
+                    className="w-full p-3 border rounded-lg min-h-[150px] resize-y bg-background"
+                    disabled={!!uploadedFile}
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+                    Enter domains separated by <strong>commas</strong>, <strong>spaces</strong>, or <strong>new lines</strong>
                   </p>
                 </div>
-                <textarea
-                  id="urls"
-                  value={urls}
-                  onChange={(e) => setUrls(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { handleScanSubmit(e as any); } }}
-                  placeholder="example.com&#10;google.com, github.com"
-                  className="w-full p-3 border rounded-lg min-h-[150px] resize-y bg-background"
-                  disabled={!!uploadedFile}
-                />
-                <p className="text-sm text-muted-foreground mt-2">
-                  Enter domains separated by <strong>commas</strong>, <strong>spaces</strong>, or <strong>new lines</strong>.
-                </p>
-              </UnifiedCard>
 
-              <UnifiedCard padding="default">
-                <UnifiedFileInput
-                  label="Upload a .txt File"
-                  accept=".txt"
-                  helperText="File must be .txt, < 1MB. One URL per line. Lines starting with # are ignored."
-                  selectedFile={uploadedFile}
-                  onFileSelect={handleFileSelect}
-                  onFileRemove={removeFile}
-                  maxSize={1}
-                  dragAndDrop={true}
-                />
-              </UnifiedCard>
-            </div>
-            <div className="mt-6">
-                <Button
-                  onClick={handleScanSubmit}
-                  disabled={isScanning || (!urls && !uploadedFile)}
-                  className="w-full sm:w-auto"
-                >
-                  <UnifiedActionLoading
-                    isLoading={isScanning}
-                    loadingText="Scanning..."
-                    defaultText="Start Crypto Scan"
-                    icon={<Play className="h-4 w-4 mr-2" />}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2.5 uppercase tracking-wider">
+                    Upload File
+                  </label>
+                  <UnifiedFileInput
+                    label=""
+                    accept=".txt"
+                    helperText="File must be .txt, < 1MB. One URL per line. Lines starting with # are ignored."
+                    selectedFile={uploadedFile}
+                    onFileSelect={handleFileSelect}
+                    onFileRemove={removeFile}
+                    maxSize={1}
+                    dragAndDrop={true}
                   />
-                </Button>            </div>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleScanSubmit}
+                disabled={isScanning || (!urls && !uploadedFile)}
+                size="lg"
+                className="w-full"
+              >
+                <UnifiedActionLoading
+                  isLoading={isScanning}
+                  loadingText="Submitting Scan..."
+                  defaultText="Start Crypto Scan"
+                  icon={<Shield className="w-5 h-5 mr-2" />}
+                />
+              </Button>
+            </UnifiedCard>
           </motion.div>
-        ) : (
+        )}
+
+        {activeTab === 'history' && (
           <motion.div
             key="history-tab"
             variants={cardVariants}
@@ -1460,7 +1484,12 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
             className="space-y-6"
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Scan History</h3>
+              <div>
+                <h3 className="text-lg font-semibold">Scan History</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {scanHistory.length} total scans
+                </p>
+              </div>
               <div className="flex gap-2">
                 <Button 
                   variant="outline" 
@@ -1481,7 +1510,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                   }}
                   size="sm"
                 >
-                  🔄 Refresh
+                  <RefreshCw className="w-4 h-4 mr-2" /> Refresh
                 </Button>
                 <Button 
                   variant="outline" 
@@ -1527,11 +1556,9 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                         : 'N/A';
                     }
               
-                    // ✅ FIXED: Show execution time if available, "Loading..." if completed but not loaded, "N/A" if pending/failed
+                    // Show execution time if available, otherwise N/A
                     if (scan.execution_time_seconds !== undefined && scan.execution_time_seconds > 0) {
                       return `${scan.execution_time_seconds.toFixed(2)}s`;
-                    } else if (scan.status === 'completed' && scan.execution_time_seconds === 0) {
-                      return 'Loading...';
                     }
                     return 'N/A';
                   })();
@@ -1597,12 +1624,6 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                         { label: "Execution Time", value: executionTime }
                       ]}
                       actions={[
-                        ...(scan.status === 'processing' ? [{
-                          label: expandedProgress.has(scan.request_id) ? 'Hide Progress' : 'View Progress',
-                          icon: <Activity size={16} />,
-                          onClick: () => toggleProgress(scan.request_id),
-                          variant: "outline" as const
-                        }] : []),
                         ...((scan.status === 'completed' || (scan.status === 'failed' && scan.detailedResults && scan.detailedResults.length > 0)) ? [{
                           label: "View Results",
                           icon: <Eye size={16} />,
@@ -1704,10 +1725,17 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
             )}
           </motion.div>
         )}
-      </AnimatePresence>
 
-      {/* Onboarding Domains Section - MOVED TO BOTTOM */}
-      <div className="mt-16 mb-8">
+        {/* Onboarded Domains Tab */}
+        {activeTab === 'onboarded' && (
+          <motion.div
+            key="onboarded-tab"
+            variants={cardVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
+            <div className="mt-8 mb-8">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-2xl font-bold">Onboarded Domains</h2>
@@ -1831,7 +1859,10 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
             ))}
           </div>
         )}
-      </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

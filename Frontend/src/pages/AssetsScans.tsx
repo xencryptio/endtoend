@@ -1459,7 +1459,22 @@ const CryptoAuditDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
-
+      {/* Page Header */}
+      <div className="bg-card border-b">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-primary/10 dark:bg-primary/20">
+              <Cpu className="w-8 h-8 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">PQC Scans</h1>
+              <p className="text-sm text-muted-foreground font-medium leading-relaxed mt-1">
+                Monitor crypto audit scans across your agent fleet and analyze system cryptographic configurations
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <nav className="bg-card border-b">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">

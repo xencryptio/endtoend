@@ -51,7 +51,7 @@ import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle,
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { UnifiedCard, UnifiedBadge, UnifiedBackButton, UnifiedRefreshButton, UnifiedInlineRefresh, UnifiedActionLoading } from '@/components/ui/unified';
+import { UnifiedCard, UnifiedBadge, UnifiedBackButton, UnifiedRefreshButton, UnifiedInlineRefresh, UnifiedActionLoading, UnifiedResultCard } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 import { Scan, StatusType } from './types';
 import ScanResultsDetail from './ScanResultsDetail';
@@ -98,6 +98,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const [retryingId, setRetryingId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'onboarded'>('scan');
 
   useEffect(() => {
     loadHistory();
@@ -506,111 +507,108 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
       const getStatusBadge = () => {
         switch (scan.scan_status) {
           case 'pending':
-            return <UnifiedBadge variant="warning" label="Queued" />;
+            return 'warning';
           case 'in_progress':
-            return <UnifiedBadge variant="info" label="In Progress" />;
+            return 'info';
           case 'completed':
-            return <UnifiedBadge variant="success" label="Completed" />;
+            return 'success';
           case 'failed':
-            return <UnifiedBadge variant="error" label="Failed" />;
+            return 'error';
           case 'cached':
-            return <UnifiedBadge variant="success" label="Cached" />;
+            return 'success';
           default:
-            return <UnifiedBadge variant="neutral" label={scan.scan_status || 'Unknown'} />;
+            return 'neutral';
         }
       };
 
+      const getStatusLabel = () => {
+        switch (scan.scan_status) {
+          case 'pending':
+            return 'Queued';
+          case 'in_progress':
+            return 'In Progress';
+          case 'completed':
+            return 'Completed';
+          case 'failed':
+            return 'Failed';
+          case 'cached':
+            return 'Cached';
+          default:
+            return scan.scan_status || 'Unknown';
+        }
+      };
+
+      const getStatusIcon = () => {
+        switch (scan.scan_status) {
+          case 'pending':
+            return <Clock className="h-5 w-5" />;
+          case 'in_progress':
+            return <RefreshCw className="h-5 w-5 animate-spin" />;
+          case 'completed':
+          case 'cached':
+            return <CheckCircle className="h-5 w-5" />;
+          case 'failed':
+            return <XCircle className="h-5 w-5" />;
+          default:
+            return <Shield className="h-5 w-5" />;
+        }
+      };
+
+      // Format metrics from scan results
+      const quantumReadinessDisplay = scan.quantum_readiness_percentage !== undefined && scan.quantum_readiness_percentage !== null
+        ? `${Math.round(scan.quantum_readiness_percentage)}%`
+        : 'N/A';
+      
+      const riskLevelDisplay = scan.overall_grade !== undefined && scan.overall_grade !== null
+        ? scan.overall_grade
+        : 'N/A';
+
+      const securityScoreDisplay = scan.overall_security_score !== undefined && scan.overall_security_score !== null
+        ? `${Math.round(scan.overall_security_score)}/100`
+        : 'N/A';
+
       return (
-        <>
-          <tr
-            className="border-b hover:bg-muted/50 transition-all duration-200 group"
-          >
-            <td className="px-6 py-5 text-sm text-foreground font-medium">
-              <div className="break-words text-xs leading-tight" title={scan.repo_url}>
-                {formatRepoName(scan.repo_url)}
-              </div>
-            </td>
-            <td className="px-6 py-5 text-sm">
-              <UnifiedBadge variant="neutral" label={scan.branch_name || 'main'} pill={false} />
-            </td>
-            <td className="px-6 py-5 text-sm">
-              <UnifiedBadge variant="neutral" label={scan.platform || 'Unknown'} pill={false} />
-            </td>
-            <td className="px-6 py-5 text-sm">
-                {getStatusBadge()}
-                {scan.current_status && (
-                    <div className="text-xs text-muted-foreground mt-1">{scan.current_status}</div>
-                )}
-            </td>
-            <td className="px-6 py-5 text-sm font-medium">{fileCountDisplay}</td>
-            <td className="px-6 py-5 text-sm text-success font-semibold">
-              {scan.quantum_safe_count || '-'}
-            </td>
-            <td className="px-6 py-5 text-sm text-destructive font-semibold">
-              {scan.quantum_vulnerable_count || '-'}
-            </td>
-            <td className="px-6 py-5 text-sm font-medium flex gap-2">
-              {canView ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleViewResults(scan.id);
-                  }}
-                >
-                  <Eye className="w-4 h-4 mr-2" />
-                  View Results
-                </Button>
-              ) : scan.scan_status === 'failed' || scan.scan_status === 'in_progress' || scan.scan_status === 'pending' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    retryScan(scan);
-                  }}
-                  disabled={retryingId === scan.id}
-                >
-                  {retryingId === scan.id ? (
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                  ) : (
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                  )}
-                  Retry
-                </Button>
-              ) : (
-                <Button
-                  disabled
-                  variant="secondary"
-                  size="sm"
-                >
-                  {scan.scan_status === 'pending'
-                    ? 'Queued'
-                    : scan.scan_status === 'in_progress'
-                    ? 'Scanning...'
-                    : 'Unknown'}
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteScan(scan.id);
-                }}
-                disabled={deletingId === scan.id}
-                className="hover:bg-destructive hover:text-destructive-foreground"
-              >
-                {deletingId === scan.id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
-                )}
-              </Button>
-            </td>
-          </tr>
-        </>
+        <UnifiedResultCard
+          key={scan.id}
+          title={formatRepoName(scan.repo_url)}
+          description={`${scan.platform || 'Unknown'} • Branch: ${scan.branch_name || 'main'} • ${fileCountDisplay} files`}
+          status={getStatusBadge()}
+          statusLabel={getStatusLabel()}
+          icon={getStatusIcon()}
+          metrics={[
+            { label: "Quantum Readiness", value: quantumReadinessDisplay, valueClassName: "text-primary" },
+            { label: "Risk Level", value: riskLevelDisplay, valueClassName: "text-warning" },
+            { label: "Security Score", value: securityScoreDisplay, valueClassName: "text-success" }
+          ]}
+          actions={[
+            ...(canView ? [{
+              label: "View Results",
+              icon: <Eye className="w-4 h-4 mr-2" />,
+              onClick: () => handleViewResults(scan.id),
+              variant: "outline" as const
+            }] : []),
+            ...((scan.scan_status === 'failed' || scan.scan_status === 'in_progress' || scan.scan_status === 'pending') ? [{
+              label: retryingId === scan.id ? "Retrying..." : "Retry",
+              icon: retryingId === scan.id ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />,
+              onClick: () => retryScan(scan),
+              variant: "outline" as const,
+              disabled: retryingId === scan.id
+            }] : []),
+            {
+              label: "Delete",
+              icon: deletingId === scan.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />,
+              onClick: () => deleteScan(scan.id),
+              variant: "destructive" as const,
+              disabled: deletingId === scan.id
+            }
+          ]}
+        >
+          {scan.current_status && (
+            <div className="text-sm text-muted-foreground mb-2">
+              {scan.current_status}
+            </div>
+          )}
+        </UnifiedResultCard>
       );
     };
 
@@ -629,11 +627,11 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg">
-                <Shield className="w-6 h-6 text-primary-foreground" />
+              <div className="p-3 bg-primary/10 dark:bg-primary/30 rounded-lg">
+                <Shield className="h-8 w-8 text-primary" />
               </div>
               <div>
-                <h1 className={typography.h1}>Crypto Scanner</h1>
+                <h1 className="text-2xl font-bold">Crypto Scanner</h1>
                 <p className="text-muted-foreground">Post-Quantum Cryptography Security Analysis</p>
               </div>
             </div>
@@ -653,6 +651,41 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
           </Alert>
         )}
 
+        {/* Tab Navigation */}
+        <div className="flex mb-6 border-b">
+          <button
+            onClick={() => setActiveTab('scan')}
+            className={`px-6 py-3 border-b-2 transition-colors ${
+              activeTab === 'scan'
+                ? 'border-primary text-primary'
+                : 'border-transparent hover:text-primary'
+            }`}
+          >
+            New Scan
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`px-6 py-3 border-b-2 transition-colors ${
+              activeTab === 'history'
+                ? 'border-primary text-primary'
+                : 'border-transparent hover:text-primary'
+            }`}
+          >
+            Scan History ({scans.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('onboarded')}
+            className={`px-6 py-3 border-b-2 transition-colors ${
+              activeTab === 'onboarded'
+                ? 'border-primary text-primary'
+                : 'border-transparent hover:text-primary'
+            }`}
+          >
+            Onboarded Repositories
+          </button>
+        </div>
+
+        {activeTab === 'scan' && (
         <UnifiedCard variant="premium" padding="spacious" className="mb-12">
           <div className="mb-6 pb-5 border-b">
             <h2 className={typography.h2}>Repository Scan</h2>
@@ -774,18 +807,14 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
               </Button>
             </div>
         </UnifiedCard>
+        )}
 
+        {activeTab === 'history' && (
         <UnifiedCard>
           <div className="p-8">
             <div className="flex justify-between items-center mb-6 pb-5 border-b">
               <div>
                 <h2 className="text-2xl font-bold text-foreground tracking-tight">Scan History</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {scans.length} total • 
-                  <span className="text-success"> {scans.filter(s => s.scan_status === 'completed' || s.scan_status === 'cached').length} completed</span> • 
-                  <span className="text-destructive"> {scans.filter(s => s.scan_status === 'failed').length} failed</span> • 
-                  <span className="text-warning"> {scans.filter(s => s.scan_status === 'pending' || s.scan_status === 'in_progress').length} in progress</span>
-                </p>
                 <UnifiedInlineRefresh
                   isRefreshing={isRefreshing && !autoRefresh}
                   label=""
@@ -811,67 +840,35 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
               </div>
             </div>
 
-            <div className="overflow-x-auto rounded-xl border">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-muted/80">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Repository
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Branch
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Platform
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Files
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Quantum Safe
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Vulnerable
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-16">
-                        <div className="flex flex-col items-center justify-center space-y-4">
-                            <Loader2 className="w-8 h-8 text-primary animate-spin" />
-                            <p className="text-sm font-semibold text-muted-foreground">Loading scan history...</p>
-                        </div>
-                    </td>
-                  </tr>
-                ) : scans.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-16">
-                        <div className="flex flex-col items-center justify-center space-y-4">
-                            <Shield className="w-12 h-12 text-muted-foreground" />
-                            <p className="text-base font-medium text-foreground">No scans yet</p>
-                            <p className="text-sm text-muted-foreground">Start by scanning your first repository above</p>
-                        </div>
-                    </td>
-                  </tr>
-                ) : (
-                  scans.map((scan) => <ScanRow key={scan.id} scan={scan} />)
-                )}
-              </tbody>
-            </table>
-          </div>
+            <div className="overflow-x-auto rounded-xl">
+              {isLoading ? (
+                <div className="text-center py-16">
+                  <div className="flex flex-col items-center justify-center space-y-4">
+                    <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                    <p className="text-sm font-semibold text-muted-foreground">Loading scan history...</p>
+                  </div>
+                </div>
+              ) : scans.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="flex flex-col items-center justify-center space-y-4">
+                    <Shield className="w-12 h-12 text-muted-foreground" />
+                    <p className="text-base font-medium text-foreground">No scans yet</p>
+                    <p className="text-sm text-muted-foreground">Start by scanning your first repository above</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {scans.map((scan) => <ScanRow key={scan.id} scan={scan} />)}
+                </div>
+              )}
+            </div>
         </div>
         </UnifiedCard>
+        )}
 
-        {/* Onboarding Repositories Section - MOVED TO BOTTOM */}
-        <UnifiedCard className="mt-16">
+        {/* Onboarded Repositories Section */}
+        {activeTab === 'onboarded' && (
+        <UnifiedCard>
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -1022,6 +1019,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
             )}
           </div>
         </UnifiedCard>
+        )}
       </div>
     </div>
   );

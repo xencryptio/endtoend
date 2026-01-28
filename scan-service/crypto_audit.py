@@ -1049,6 +1049,7 @@ async def process_single_domain(
         return format_result_for_frontend(transformed_result, request_id)
 
     # 3. Proceed with HTTPS scan
+    scan_start_time = datetime.now()  # ✅ Track scan start time
     try:
         # Only check DNS, not HTTP connectivity
         is_resolvable, error_msg = quick_domain_check(domain, timeout=2)
@@ -1072,6 +1073,12 @@ async def process_single_domain(
         transformed_result["scan_status"] = "completed"
         request_id = f"{domain}_{int(datetime.now().timestamp())}"
         result = format_result_for_frontend(transformed_result, request_id)
+        
+        # ✅ Calculate execution time
+        scan_end_time = datetime.now()
+        execution_time = (scan_end_time - scan_start_time).total_seconds()
+        result["execution_time_seconds"] = round(execution_time, 2)
+        logger.info(f"⏱️  Scan for {domain} took {execution_time:.2f} seconds")
         
         # Save to database if requested
         if save_to_db and batch_id:

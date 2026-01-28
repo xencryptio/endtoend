@@ -974,8 +974,20 @@ class Database:
             .limit(limit)
             .all()
         )
-        return [
-            {
+        result = []
+        for scan in scans:
+            # Calculate quantum readiness percentage for each scan
+            total_crypto_occurrences = sum(sr.occurrences for sr in scan.scan_results)
+            quantum_safe_occurrences = sum(
+                sr.occurrences for sr in scan.scan_results
+                if sr.quantum_safe == True
+            )
+            quantum_readiness_percentage = (
+                (quantum_safe_occurrences / total_crypto_occurrences * 100)
+                if total_crypto_occurrences > 0 else 0
+            )
+            
+            result.append({
                 'id': scan.id,
                 'repo_url': scan.repo_url,
                 'repo_hash': scan.repo_hash,
@@ -984,12 +996,15 @@ class Database:
                 'last_scanned': scan.last_scanned,
                 'scan_status': scan.scan_status,
                 'total_files': scan.total_files,
-                'quantum_safe_count': scan.quantum_safe_count,  # ✅ RENAMED
-                'quantum_vulnerable_count': scan.quantum_vulnerable_count,  # ✅ RENAMED
+                'quantum_safe_count': scan.quantum_safe_count,
+                'quantum_vulnerable_count': scan.quantum_vulnerable_count,
                 'current_status': scan.current_status,
-                'total_files_to_scan': scan.total_files_to_scan
-            } for scan in scans
-        ]
+                'total_files_to_scan': scan.total_files_to_scan,
+                'overall_security_score': scan.overall_security_score,
+                'overall_grade': scan.overall_grade,
+                'quantum_readiness_percentage': round(quantum_readiness_percentage, 2)
+            })
+        return result
 
     def delete_all_scans(self, db: Session) -> Dict[str, int]:
         """Delete all scans and associated data"""
@@ -1383,6 +1398,9 @@ class AllScansResponse(BaseModel):
     quantum_vulnerable_count: int  # ✅ RENAMED
     current_status: str
     total_files_to_scan: int
+    overall_security_score: Optional[float] = None
+    overall_grade: Optional[str] = None
+    quantum_readiness_percentage: Optional[float] = None
 
 class QueueStatusResponse(BaseModel):
     pending_count: int

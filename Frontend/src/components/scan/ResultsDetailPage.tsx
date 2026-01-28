@@ -169,7 +169,7 @@ const ComponentScoreCard: React.FC<{ name: string; data: ComponentScore }> = ({ 
           <div>
             <div className="font-medium capitalize">{name}</div>
             <div className="text-xs text-slate-500 font-semibold uppercase tracking-wider">
-              {data.pqc_percentage}% PQC ΓÇó {data.quantum_safe_count} quantum-safe
+              {data.pqc_percentage}% PQC • {data.quantum_safe_count} quantum-safe
             </div>
           </div>
         </div>
@@ -230,9 +230,12 @@ const PQCAnalysisSection: React.FC<{ analysis: any }> = ({ analysis }) => {
 
       <div className="space-y-3">
         <h5 className="font-semibold text-sm">Component Analysis</h5>
-        {Object.entries(analysis.components).map(([key, value]: [string, any]) => (
-          <ComponentScoreCard key={key} name={key} data={value} />
-        ))}
+        {Object.entries(analysis.components)
+          .map(([key, value]: [string, any]) => {
+            // Rename 'kex' to 'Key Exchange' for display
+            const displayName = key === 'kex' ? 'Key Exchange' : key;
+            return <ComponentScoreCard key={key} name={displayName} data={value} />;
+          })}
       </div>
     </DetailSection>
   );
