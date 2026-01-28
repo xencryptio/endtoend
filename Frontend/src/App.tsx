@@ -16,12 +16,9 @@ import Settings from "./pages/Settings";
 import MigrationAssist from "./pages/migrationassist";
 import Integration from "./pages/integration";
 import Scan from "./pages/SSL-TLS scans";
-import SystemScan from "./pages/PQC-Scans";
+import SystemScan from "./pages/AssetsScans";
 import Readinessanalysis from "./pages/Readinessanalysis";
 import Onboarding from "./pages/onboarding";
-import OnboardingNipun from "./pages/onboarding_nipun";
-import ONboardingData from "./pages/ONboardingData";
-import OnboardingNew from "./pages/OnboardingNew";
 import SubOrgDashboard from './components/dashboard/SubOrgDashboard'; // New Import
 import ApplicationDashboard from './components/dashboard/ApplicationDashboard'; // New Import
 import NotFound from "./pages/NotFound";
@@ -51,17 +48,14 @@ const AnimatedRoutes = () => {
         <Route path="/vulnerabilities" element={<Vulnerabilities />} />
         <Route path="/vulnerabilities-new" element={<VulnerabilitiesNew />} />
         <Route path="/profile" element={<Profile />} />
-        <Route path="/SSL-TLS scans" element={<Scan />} />
-        <Route path="/PQC-Scans" element={<SystemScan />} />
+        <Route path="/scans" element={<Scan />} />
+        <Route path="/assets-scans" element={<SystemScan />} />
         <Route path="/Readinessanalysis" element={<Readinessanalysis />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/migrationAssist" element={<MigrationAssist />} />
         <Route path="/integration" element={<Integration />} />
-        {/* <Route path="/onboarding" element={<Onboarding />} /> */}
-        <Route path="/onboarding_nipun" element={<OnboardingNipun />} />
-        {/* <Route path="/onboarding-data" element={<ONboardingData />} /> */}
-        <Route path="/onboarding-new" element={<OnboardingNew />} />
+        <Route path="/onboarding" element={<Onboarding />} />
         
         {/* 404 Fallback */}
         <Route path="*" element={<NotFound />} />

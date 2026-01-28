@@ -54,6 +54,9 @@ export interface Algorithm {
     total_files_to_scan: number;
     quantum_safe_count: number; // ✅ RENAMED
     quantum_vulnerable_count: number; // ✅ RENAMED
+    overall_security_score: number; // Security score 0-100
+    overall_grade: string; // Letter grade A-F
+    quantum_readiness_percentage: number; // Quantum readiness 0-100
     current_status: string;
   }
   
