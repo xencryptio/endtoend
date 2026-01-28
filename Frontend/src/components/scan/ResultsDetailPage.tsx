@@ -498,7 +498,8 @@ const DetailedSections: React.FC<{ result: any }> = ({ result }) => {
 const ExpandedDetailModal: React.FC<{
   result: ScanResult;
   onClose: () => void;
-}> = ({ result, onClose }) => {
+  onBack: () => void;
+}> = ({ result, onClose, onBack }) => {
   const isSuccess = result.scan_status?.toLowerCase() === 'completed';
   const pqcScore =
     (result as any).pqc_overall_score ?? // Top-level first
@@ -631,11 +632,18 @@ const ExpandedDetailModal: React.FC<{
             <p className="text-xs text-muted-foreground">
               Click outside or press the close button to dismiss
             </p>
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button variant="outline" onClick={onClose}>
-                <X className="h-4 w-4 mr-2" /> Close
-              </Button>
-            </motion.div>
+            <div className="flex gap-2">
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button variant="outline" onClick={onBack}>
+                  <ArrowLeft className="h-4 w-4 mr-2" /> Back
+                </Button>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button variant="outline" onClick={onClose}>
+                  <X className="h-4 w-4 mr-2" /> Close
+                </Button>
+              </motion.div>
+            </div>
           </div>
         </Card>
       </motion.div>
@@ -914,6 +922,7 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack, tar
           <ExpandedDetailModal
             result={expandedResult}
             onClose={() => setExpandedResult(null)}
+            onBack={onBack}
           />
         )}
       </AnimatePresence>
