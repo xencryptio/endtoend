@@ -57,7 +57,8 @@ def get_crypto_characteristics(crypto_data):
         characteristics.append("uses_sha512_signature")
     
     # Public key algorithm information
-    pub_key_algo = crypto_data.get("public_key_algorithm", "").lower()
+    pub_key_algo = crypto_data.get("public_key_algorithm")
+    pub_key_algo = pub_key_algo.lower() if pub_key_algo else ""
     if "rsa" in pub_key_algo:
         characteristics.append("rsa_algorithm")
     elif "ecdsa" in pub_key_algo:
@@ -120,7 +121,7 @@ def extract_crypto_info_only(cert_data):
         return None
     
     crypto_info = {
-        "key_algorithm": cert_data.get("public_key_algorithm"),
+        "key_algorithm": cert_data.get("public_key_algorithm") or "N/A",
         "key_size": cert_data.get("public_key_bits"),
         "signature_algorithm": cert_data.get("signature_algorithm"),
         "characteristics": get_crypto_characteristics(cert_data),

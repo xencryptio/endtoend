@@ -22,6 +22,10 @@ from logging_config import setup_logging
 from logging_middleware import correlation_middleware
 from dashboard.router import router as dashboard_router
 from export.router import router as export_router
+from vulnerabilities.router import router as vulnerabilities_router
+
+from database import get_scandb_session, get_repo_scanner_session, get_system_scanner_session
+
 
 setup_logging("DB-SERVICE", logging.DEBUG)
 log = logging.getLogger(__name__)
@@ -39,15 +43,35 @@ app.add_middleware(
 
 app.include_router(dashboard_router)
 app.include_router(export_router)
+app.include_router(vulnerabilities_router)
+
 
 
 @app.get("/health")
-def health_check():
+def health_check(db: Session = Depends(get_db)):
     """
     Health check endpoint for Docker and service monitoring.
     Returns 200 OK if service is up.
     """
-    return {"status": "ok"}
+    try:
+        # Test database connection with a simple query
+        result = db.execute(text("SELECT 1"))
+        db.commit()
+        log.info("Database connected")
+        log.info("Service ready")
+        
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        log.error(f"Health check error: {str(e)}")
+        raise APIError(
+            status_code=503, 
+            error_code="db_connection_failed",
+            message=f"Database connection failed: {str(e)}"
+        )
 
 # List domains by application
 @app.get("/applications/{app_id}/domains", response_model=List[onboard_schemas.Domain])
@@ -631,24 +655,6 @@ def get_batch_with_results(batch_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         log.exception("Batch with results retrieval failed")
         raise APIError(status_code=500, error_code="batch_results_retrieval_failed", message=f"Batch {batch_id} with results retrieval failed: {str(e)}")
-        # Test database connection with a simple query
-        result = db.execute(text("SELECT 1"))
-        db.commit()
-        log.info("Database connected")
-        log.info("Service ready")
-        
-        return {
-            "status": "healthy",
-            "database": "connected",
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        log.error(f"Health check error: {str(e)}")
-        raise APIError(
-            status_code=503, 
-            error_code="db_connection_failed",
-            message=f"Database connection failed: {str(e)}"
-        )
 
 # ============================================================
 # ONBOARDING BATCH ENDPOINTS
@@ -816,7 +822,6 @@ def root():
             "DELETE /scans/clear-all": "Clear ALL data (dangerous)",
             "GET /scans/stats": "Get database statistics",
             "GET /health": "Health check",
-            "Mount /export": "Export endpoints (see /export/docs)",
-            "Mount /api": "Dashboard endpoints (see /api/docs)"
+            "Mount /export": "Export endpoints (see /export/docs)"
         }
     }

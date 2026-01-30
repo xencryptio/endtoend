@@ -36,3 +36,35 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# --- Additional Database Connections ---
+
+REPO_SCANNER_DB_URL = os.getenv("REPO_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db")
+SYSTEM_SCANNER_DB_URL = os.getenv("SYSTEM_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db")
+
+repo_scanner_engine = create_engine(REPO_SCANNER_DB_URL)
+system_scanner_engine = create_engine(SYSTEM_SCANNER_DB_URL)
+
+RepoScannerSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=repo_scanner_engine)
+SystemScannerSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=system_scanner_engine)
+
+def get_scandb_session():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_repo_scanner_session():
+    db = RepoScannerSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_system_scanner_session():
+    db = SystemScannerSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

@@ -446,7 +446,7 @@ def transform_certificate(cert: Dict[str, Any], role: str, position: int = 0) ->
     else:
         # For intermediate and root certificates
         return {
-            "public_key_algorithm": cert.get("keyAlg", ""),
+            "public_key_algorithm": cert.get("keyAlg") or "N/A",
             "public_key_size": cert.get("keySize", 0),
         }
 
@@ -870,7 +870,7 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
             s.get("key_exchange") == "ECDHE" 
             for s in tls_config.get("tls_1.2_cipher_suites", {}).get("suites", [])
         ),
-        "public_key_algorithm": intermediate_cert.get("public_key_algorithm"),
+        "public_key_algorithm": intermediate_cert.get("public_key_algorithm") or "N/A",
         "ct_present": cert_chain.get("leaf_certificate", {}).get("certificate_transparency", False),
         
         # 🔧 CRITICAL FIX: Add pqc_overall_* to TOP LEVEL

@@ -36,6 +36,7 @@ const menuItems = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Applications", url: "/applications", icon: Server },
   { title: "Vulnerabilities_old", url: "/vulnerabilities", icon: Shield },
+  { title: "Vulnerabilities_new", url: "/vulnerabilities2", icon: Shield },
   { title: "Vulnerabilities", url: "/vulnerabilities-new", icon: Shield },
   { title: "Profile", url: "/profile", icon: User },
   { title: "Onboarding", url: "/onboarding", icon: ClipboardPlus },

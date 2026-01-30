@@ -489,7 +489,7 @@ const processAuditResults = (auditResults: any): SectionData[] => { // eslint-di
                 'Store': storeData.store_name,
                 'Subject': cert.subject,
                 'Issuer': cert.issuer,
-                'Algorithm': cert.public_key_algorithm,
+                'Algorithm': cert.public_key_algorithm || 'N/A',
                 'Key Size': `${cert.public_key_size} bits`,
                 'Signature': cert.signature_algorithm,
                 'Valid Until': cert.not_after,
