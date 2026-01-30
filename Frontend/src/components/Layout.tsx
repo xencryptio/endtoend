@@ -62,8 +62,7 @@ export function Layout({ children }: LayoutProps) {
 
               {/* Right Section: Live + Theme Toggle + User */}
               <div className="flex items-center gap-3">
-                <div className="h-2 w-2 rounded-full bg-success animate-pulse"></div>
-                <span className="text-sm text-muted-foreground">Live</span>
+                
 
                 <Button
                   size="icon"
