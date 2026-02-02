@@ -64,7 +64,7 @@ class DatabaseHandler:
             logger.exception("Exception creating batch in DB")
             return False
     
-    async def save_scan_result(self, result: Dict[str, Any], batch_id: str) -> bool:
+    async def save_scan_result(self, result: Dict[str, Any], batch_id: str) -> bool:  # ✅ CORRECT INDENTATION
         """Save a scan result to database."""
         await self._ensure_connected()
         
@@ -73,7 +73,6 @@ class DatabaseHandler:
             return False
         
         try:
-            # Prepare payload - ENSURE all required fields are present
             db_data = {
                 "batch_id": batch_id,
                 "request_id": result.get("request_id"),
@@ -91,8 +90,6 @@ class DatabaseHandler:
             }
             
             logger.info(f"💾 Saving result for {result.get('url')} to batch {batch_id}")
-            logger.debug(f"📤 Payload keys: {db_data.keys()}")
-            logger.debug(f"📤 scan_status: {db_data.get('scan_status')} (type: {type(db_data.get('scan_status')).__name__})")
             
             response = await call_service(
                 "POST",
@@ -101,9 +98,10 @@ class DatabaseHandler:
                 timeout=30
             )
             
-            success = response.status_code in (200, 201)
-            if success:
+            # ✅ FIX: Check status BEFORE logging success
+            if response.status_code in (200, 201):
                 logger.info(f"✅ Result saved for {result.get('url')}")
+                return True
             else:
                 logger.error(f"❌ Failed to save result: {response.status_code}")
                 try:
@@ -111,10 +109,10 @@ class DatabaseHandler:
                     logger.error(f"❌ Error details: {error_detail}")
                 except:
                     logger.error(f"❌ Response text: {response.text}")
-            return success
-            
+                return False
+                
         except Exception as e:
-            logger.exception(f"Exception saving result to DB: {e}")
+            logger.exception(f"❌ Exception saving result to DB: {e}")
             return False
     
     async def update_batch_status(self, batch_id: str, status: str, successful: int = 0, failed: int = 0) -> bool:

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import requests
 import subprocess
+import contextlib
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -23,6 +24,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from exceptions import APIError # Import APIError
+from progress_tracker import ScanProgressTracker
+from scanner_adapter import transform_internal_scan_to_ssllabs_format, extract_additional_metadata
+from tls_scanner import scan_domain as internal_scan_domain
 
 
 
@@ -35,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 # --- Remote Scoring Configuration ---
 SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
+
+# --- Feature Flag for Internal Scanner ---
+USE_INTERNAL_SCANNER = os.getenv("USE_INTERNAL_SCANNER", "true") == "true"
 
 def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:
     """Transform SSL Labs data to standard scoring format"""
@@ -109,7 +116,7 @@ async def score_tls_scan_remote(transformed_result: Dict) -> Dict:
         "scoring_type": "tls",
         "algorithms": algorithms,
         "metadata": {
-            "source": "ssl_labs",
+            "source": "internal_scanner",  # ✅ FIXED
             "domain": transformed_result.get("domain"),
             "protocols": transformed_result.get("tls_configuration", {}).get("supported_protocols", [])
         },
@@ -735,26 +742,6 @@ def clear_ssllabs_cache():
         logger.warning(f"Cache clear warning: {e}")
         return False
 
-def quick_domain_check(domain: str, timeout: int = 5) -> tuple[bool, str]:
-    """
-    Check if domain resolves via DNS, don't make HTTP requests.
-    This avoids anti-bot protection while catching typos/offline servers.
-    """
-    try:
-        # Strip scheme for DNS check if present (ssllabs-scan only accepts hostnames)
-        parsed_url = urlparse(domain)
-        hostname = parsed_url.netloc or parsed_url.path
-        if hostname.startswith("www."):
-            hostname = hostname[4:]
-            
-        socket.gethostbyname(hostname)  # Just DNS lookup
-        return True, ""
-    except socket.gaierror:
-        return False, f"Domain '{domain}' does not exist (DNS lookup failed)"
-    except Exception as e:
-        # If DNS works, assume domain is reachable
-        return True, ""
-
 def safe_get_first_item(items: List[Any], default: Any = None) -> Any:
     """Safely get first item from list or return default."""
     if default is None:
@@ -913,92 +900,72 @@ def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout
     # This line should not be reached
     raise APIError(status_code=500, error_code="unexpected_error", message=f"Unexpected error in backoff handler for {domain}")
 
-def run_ssllabs_cli(domain: str, use_cache: bool = True, timeout: int = 300):
-    """Run ssllabs-scan CLI tool and return parsed JSON. (Synchronous - use run_ssllabs_cli_async for async)"""
+
+
+
+
+
+async def run_internal_scanner(domain: str, timeout: int = 300) -> dict:
+    """
+    Run internal TLS scanner instead of SSL Labs.
+    Drop-in replacement for run_ssllabs_cli_async().
+    """
     try:
-        # ssllabs-scan only accepts hostnames, so strip scheme for the CLI command
+        # Prepare domain URL
         parsed_url = urlparse(domain)
         hostname = parsed_url.netloc or parsed_url.path
         if hostname.startswith("www."):
             hostname = hostname[4:]
-
-        logger.info(f"Scanning: {hostname} (cache: {use_cache})")
         
-        cmd = ["ssllabs-scan", "--quiet"]
-        if use_cache:
-            cmd.append("--usecache")
-        cmd.append(hostname)
+        url = f"https://{hostname}"
         
-        result = subprocess.run(
-            cmd,
-            capture_output=True, 
-            text=True, 
-            check=True,
-            timeout=timeout
+        logger.info(f"Starting internal scan: {hostname}")
+        
+        # Call internal scanner
+        scan_result = await internal_scan_domain(url)
+        
+        # Transform to SSL Labs format
+        ssllabs_format = transform_internal_scan_to_ssllabs_format(scan_result)
+        
+        logger.info(f"Internal scan completed for {hostname}")
+        return [ssllabs_format]  # Wrap in list to match SSL Labs format
+        
+    except Exception as e:
+        logger.error(f"Internal scanner failed for {domain}: {e}")
+        raise APIError(
+            status_code=500,
+            error_code="scan_failed",
+            message=f"Internal scan failed for {domain}: {str(e)}"
         )
-        return json.loads(result.stdout)
-    except subprocess.TimeoutExpired:
-        logger.error(f"Scan timeout for {domain} after {timeout}s - domain may be slow to analyze")
-        raise HTTPException(status_code=504, detail=f"Scan timed out for {domain} after {timeout}s")
-    except subprocess.CalledProcessError as e:
-        error_msg = e.stderr or "Scan failed"
-        # More comprehensive rate limit detection
-        rate_limit_indicators = [
-            "429",
-            "rate limit",
-            "too many requests",
-            "assessment failed: HTTP 429",  # SSL Labs specific
-            "service overloaded",
-            "throttled",
-            "try again later"
-        ]
-        if any(indicator in error_msg.lower() for indicator in rate_limit_indicators):
-            raise RateLimitException(f"Rate limited for {domain}")
-        raise APIError(status_code=500, error_code="scan_failed", message=f"Scan failed for {domain}: {error_msg}")
-    except json.JSONDecodeError as e:
-        raise APIError(status_code=500, error_code="invalid_json", message=f"Invalid JSON from scan: {str(e)}")
-    except FileNotFoundError:
-        raise APIError(status_code=500, error_code="cli_not_found", message="ssllabs-scan not found")
 
-async def run_ssllabs_cli_async(domain: str, use_cache: bool = True, timeout: int = 300):
-    """Run ssllabs-scan CLI tool asynchronously in a thread executor to avoid blocking the event loop."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, run_ssllabs_cli, domain, use_cache, timeout)
-
-def detect_protocol(url_or_domain: str) -> str:
-    """
-    Detect the protocol (https or http) by attempting a HEAD request.
-    Returns "unreachable" if neither is successful after a brief timeout.
-    """
-    
-    # Clean up the domain for requests
-    parsed = urlparse(url_or_domain.strip())
-    domain_only = parsed.netloc or parsed.path
-    if domain_only.startswith("www."):
-        domain_only = domain_only[4:]
-        
-    if not domain_only:
-        return "unreachable"
-
-    logger.info(f"Detecting protocol for {domain_only}")
-    # Try HTTPS first, which is what SSL Labs scans
-    try:
-        httpx.head(f"https://{domain_only}", timeout=3, follow_redirects=True)
-        logger.info(f"Protocol for {domain_only} is https")
+def detect_protocol(domain: str) -> str:
+    """Detect if a domain is HTTP or HTTPS."""
+    if domain.startswith("https://"):
         return "https"
-    except (httpx.ConnectError, httpx.ReadTimeout):
-        # If HTTPS fails, try HTTP (for the check only, will still be skipped for scan)
-        try:
-            httpx.head(f"http://{domain_only}", timeout=3, follow_redirects=True)
-            logger.info(f"Protocol for {domain_only} is http")
-            return "http"
-        except httpx.RequestError:
-            pass # Fall through to unreachable
-    except httpx.RequestError:
-        pass # Fall through to unreachable
+    if domain.startswith("http://"):
+        return "http"
+    
+    # Simple check for port 443 to guess HTTPS
+    try:
+        with socket.create_connection((domain.split('/')[0], 443), timeout=2):
+            return "https"
+    except (socket.timeout, socket.gaierror, ConnectionRefusedError, OSError):
+        # If 443 fails, assume http or that it's just a domain name
+        pass
 
-    logger.warning(f"Could not reach {domain_only}")
-    return "unreachable"
+    # Default to http if no other information
+    return "http"
+
+def quick_domain_check(domain: str, timeout: int = 2) -> tuple[bool, str]:
+    """Check if a domain resolves via DNS."""
+    try:
+        hostname = urlparse(f"//{domain}").hostname or domain
+        socket.gethostbyname(hostname)
+        return True, ""
+    except socket.gaierror:
+        return False, f"DNS resolution failed for {domain}"
+    except Exception as e:
+        return False, f"An unexpected error occurred during DNS check for {domain}: {e}"
 
 async def process_single_domain(
     domain: str, 
@@ -1010,53 +977,40 @@ async def process_single_domain(
 ) -> Dict[str, Any]:
     """Process a single domain scan, with HTTP/HTTPS logic."""
     
+    # ✅ FIX: Generate batch_id if not provided
+    if save_to_db and not batch_id:
+        batch_id = f"batch_{int(datetime.now().timestamp())}_{hash(domain) % 10000}"
+        await db_handler.create_scan_batch(batch_id, 1, 1)
+
     # 1. Protocol Detection
     protocol = detect_protocol(domain)
     
     if protocol != "https":
-        # 2. Skip if HTTP or Unreachable
         error_message = f"Domain is {protocol.upper()} and cannot be scanned (TLS/SSL only)."
         logger.warning(f"Skipping {domain}: {error_message}")
         
-        # ✅ FIX: Create and RETURN properly structured result
         request_id = f"{domain}_{int(datetime.now().timestamp())}"
         
         transformed_result = {
             "domain": domain,
             "scan_status": "http_skipped",
             "error_detail": error_message,
-            "scan_metadata": {
-                "attempt": attempt,
-                "cached": use_cache,
-                "timestamp": datetime.now().isoformat()
-            },
-            # Add empty structures to prevent errors in format_result_for_frontend
-            "tls_configuration": {"supported_protocols": []},
-            "certificate_chain": {"leaf_certificate": {}},
-            "signature_algorithms": {
-                "certificate_signatures": [],
-                "handshake_signatures": []
-            },
-            "pqc_analysis": {
-                "overall_score": 0,
-                "overall_grade": "F",
-                "security_level": "None",
-                "quantum_ready": False,
-                "hybrid_ready": False,
-                "components": {}
-            }
         }
         return format_result_for_frontend(transformed_result, request_id)
 
-    # 3. Proceed with HTTPS scan
-    scan_start_time = datetime.now()  # ✅ Track scan start time
+    # 2. Proceed with HTTPS scan
+    scan_start_time = datetime.now()
     try:
-        # Only check DNS, not HTTP connectivity
+        # DNS check
         is_resolvable, error_msg = quick_domain_check(domain, timeout=2)
+        
         if not is_resolvable:
             raise APIError(status_code=503, error_code="dns_resolution_failed", message=error_msg)
         
-        raw_result = await run_ssllabs_cli_async(domain, use_cache=use_cache, timeout=timeout)
+        # Run internal scanner
+        raw_result = await run_internal_scanner(domain, timeout=timeout)
+        
+        # Transform result
         transformed_result = transform_scan_result(raw_result)
         
         # Score via remote service
@@ -1064,6 +1018,7 @@ async def process_single_domain(
         
         transformed_result["pqc_analysis"] = scoring_results
         
+        # Remove duplicates and finalize
         transformed_result = remove_duplicates_from_structure(transformed_result)
         transformed_result["scan_metadata"] = {
             "attempt": attempt,
@@ -1071,13 +1026,15 @@ async def process_single_domain(
             "timestamp": datetime.now().isoformat()
         }
         transformed_result["scan_status"] = "completed"
+        
         request_id = f"{domain}_{int(datetime.now().timestamp())}"
         result = format_result_for_frontend(transformed_result, request_id)
         
-        # ✅ Calculate execution time
+        # Calculate execution time
         scan_end_time = datetime.now()
         execution_time = (scan_end_time - scan_start_time).total_seconds()
         result["execution_time_seconds"] = round(execution_time, 2)
+        
         logger.info(f"⏱️  Scan for {domain} took {execution_time:.2f} seconds")
         
         # Save to database if requested
@@ -1093,7 +1050,13 @@ async def process_single_domain(
     except APIError:
         raise
     except Exception as e:
-        raise APIError(status_code=500, error_code="processing_failed", message=f"Error processing {domain}: {str(e)}")
+        logger.exception(f"❌ Unexpected error scanning {domain}")
+        raise APIError(
+            status_code=500, 
+            error_code="processing_failed", 
+            message=f"Error processing {domain}: {str(e)}",
+            details={"domain": domain, "protocol": protocol}
+        )
 @app.post("/scan")
 async def scan_domain(request: ScanRequest):
     """
@@ -1105,58 +1068,57 @@ async def scan_domain(request: ScanRequest):
     """
     logger.info("Entered /scan endpoint")
     try:
-        # Generate batch_id if not provided
-        batch_id = request.batch_id if request.batch_id else f"batch_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
+        # ✅ FIX: Generate unique batch_id automatically
+        if not request.batch_id or request.batch_id == "string":
+            batch_id = f"batch_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
+        else:
+            batch_id = request.batch_id
+        
+        # ✅ FIX: Create batch in database FIRST
+        if request.save_to_db:
+            domains_list = [d.strip() for d in request.domain.split(',')]
+            
+            # ✅ DO NOT convert to JSON string
+            request_payload = {
+                "domains": domains_list,
+                "domain_string": request.domain,
+                "max_concurrent": request.max_concurrent
+            }
+            
+            success = await db_handler.create_scan_batch(
+                batch_id=batch_id,
+                total_urls=len(domains_list),
+                max_concurrent=request.max_concurrent,
+                request_payload=request_payload  # ✅ Pass as dict
+            )
+            if not success:
+                logger.error(f"Failed to create batch {batch_id} in database")
+                raise APIError(500, "batch_creation_failed", "Failed to create scan batch")
         
         # Use the raw domains from the validated model string
         domains = [d.strip() for d in request.domain.split(',')]
         
-        # 1. Initial Protocol Filtering
-        https_domains = []
-        skipped_domains = []
+        domains_to_scan = domains
+        skipped_domains = [] # Initialize as empty, as process_single_domain will handle skips
         
-        logger.info("Protocol Check and Filtering...")
-        for domain in domains:
-            protocol = detect_protocol(domain)
-            if protocol == "https":
-                https_domains.append(domain)
-                logger.info(f"{domain} - HTTPS, proceeding to scan.")
-            else:
-                error_msg = f"Domain is {protocol.upper()} and cannot be scanned  ."
-                # Define the skipped_domain_result structure here
-                skipped_domain_result = {
-                    "request_id": f"skipped_{domain}",
-                    "url": domain,
-                    "status": "failed",
-                    "scan_status": "http_skipped",
-                    "error_message": error_msg,
-                    "requested_at": datetime.now().isoformat(),
-                    "total_urls": 1,
-                    "raw_response": {"scan_status": "http_skipped", "error_detail": error_msg}
-                }
-                skipped_domains.append(skipped_domain_result)
-                logger.warning(f"{domain} - {protocol.upper()}, skipping scan.")
-
-        domains_to_scan = https_domains
-        
-        if len(domains_to_scan) == 0:
+        if not domains: # Check if the original input 'domains' is empty
             return {
                 "summary": {
-                    "total_domains": len(domains),
+                    "total_domains": 0,
                     "successful": 0,
-                    "failed": len(domains),
+                    "failed": 0,
                     "rounds_completed": 0,
                     "timestamp": datetime.now().isoformat()
                 },
                 "successful_scans": [],
-                "failed_scans": skipped_domains
+                "failed_scans": []
             }
 
-        if len(domains_to_scan) == 1 and not skipped_domains:
+        if len(domains_to_scan) == 1:
             # For a single domain that is HTTPS, use a longer default timeout.
             result = await process_single_domain(
                 domains_to_scan[0], 
-                timeout=600, 
+                timeout=6000, 
                 batch_id=batch_id, 
                 save_to_db=request.save_to_db
             )
@@ -1234,9 +1196,7 @@ async def scan_domain(request: ScanRequest):
                 
                 time.sleep(retry_delay)
         
-        # 2. Add all skipped domains (HTTP/Unreachable) to the final failed list
         final_failed_scans = list(retry_state.failed_domains.values())
-        final_failed_scans.extend(skipped_domains)
         
         # Prepare final response
         final_response = {
@@ -1257,422 +1217,105 @@ async def scan_domain(request: ScanRequest):
         logger.exception("Scan failed")
         raise APIError(status_code=500, error_code="scan_failed", message=f"Scan failed: {str(e)}")
 
+
+
+
+
 @app.post("/scan-with-progress")
 async def scan_with_progress(request: ScanRequest):
     """
     Scan domains with live progress updates and retry logic.
     Uses Server-Sent Events for real-time updates.
-    - Filters out HTTP domains.
-    - Filters out HTTP domains ONCE upfront.
-    - No duplicates in results.
-    - Returns skipped domains as failed events.
     """
     logger.info("Entered /scan-with-progress endpoint")
-    
+
     async def event_stream():
         request_id = f"scan_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
-        batch_id = f"batch_{int(datetime.now().timestamp())}"  # ADD THIS
-        domains = [d.strip() for d in request.domain.split(',')]
+        batch_id = request.batch_id if request.batch_id else f"batch_{int(datetime.now().timestamp())}"
+        domains = [d.strip() for d in request.domain.split(',') if d.strip()]
         retry_state = RetryState()
+
         max_retries = 3
         retry_delay = 30
-        clear_cache_between_rounds = False
-        retry_state.total_rounds = max_retries
-        initial_timeout = 600  # 10 minutes
+        initial_timeout = 600
         timeout_increment = 300
-        
-        start_time = datetime.now()
 
-        # ============================================================
-        # STEP 1: PROTOCOL FILTERING (HAPPENS ONCE, UPFRONT)
-        # ============================================================
-        domains_to_scan = []  # Only HTTPS domains
-        skipped_domains_list = []  # Track skipped for final summary
-        
-        # Use provided batch_id or create a new one
-        if request.batch_id:
-            batch_id = request.batch_id
-            logger.info(f"Using existing batch_id: {batch_id}")
-        else:
-            # Create new batch in database if save_to_db is enabled
-            if request.save_to_db:
-                await db_handler.create_scan_batch(batch_id, len(domains), request.max_concurrent)
-        
-        # Send start event
-        start_event = {
-            'type': 'start',
-            'request_id': request_id,
-            'batch_id': batch_id,  # ADD THIS
-            'total_domains': len(domains),
-            'save_to_db': request.save_to_db,  # ADD THIS
-            'max_rounds': max_retries,
-            'timestamp': start_time.isoformat()
-        }
-        yield f"data: {json.dumps(start_event)}\n\n"
-        
-        # ============================================================
-        # FILTER: Check each domain's protocol and DNS
-        # ============================================================
-        for domain in domains:
-            is_resolvable, dns_error_msg = quick_domain_check(domain, timeout=5)
-            protocol = "unreachable"
-            
-            if is_resolvable:
-                protocol = detect_protocol(domain)
-            else:
-                protocol = "dns_failed"
-            
-            # ✅ CRITICAL FIX: Only add HTTPS domains to scan queue
-            if protocol == "https":
-                domains_to_scan.append(domain)
-                continue  # Skip to next domain
-            
-            # ============================================================
-            # Handle non-HTTPS domains (skip them)
-            # ============================================================
-            error_msg = f"Domain is {protocol.upper()} and cannot be scanned  ."
-            if protocol == "dns_failed":
-                error_msg = dns_error_msg
-            
-            # Add to retry_state for final summary
-            retry_state.add_failure(domain, error_msg, 0)
-            skipped_domains_list.append(domain)
-            
-            # Save to database using save_scan_result (not save_failed_scan)
-            if request.save_to_db:
-                # 🆕 CREATE PROPER STRUCTURE FOR HTTP SKIPPED DOMAINS
-                skipped_result = {
-                    "request_id": f"skipped_{domain}_{int(datetime.now().timestamp())}",
-                    "url": domain,
-                    "status": "completed",  # ✅ Use "completed" not "failed"
-                    "scan_status": "http_skipped",  # ✅ This is the key field
-                    "scan_type": "crypto_audit",
-                    "error_message": error_msg,
-                    "requested_at": datetime.now().isoformat(),
-                    "completed_at": datetime.now().isoformat(),
-                    "total_urls": 1,
-                    "execution_time_seconds": 0,
-                    # 🆕 ADD RAW_RESPONSE WITH PROPER STRUCTURE
-                    "raw_response": {
-                        "domain": domain,
-                        "scan_status": "http_skipped",
-                        "error_detail": error_msg,
-                        "scan_metadata": {
-                            "attempt": 0,
-                            "cached": False,
-                            "timestamp": datetime.now().isoformat()
-                        },
-                        "tls_configuration": {
-                            "supported_protocols": [],
-                            "tls_1.2_cipher_suites": {"server_preference": "disabled", "suites": []},
-                            "tls_1.3_cipher_suites": {"server_preference": "disabled", "suites": []},
-                            "supported_elliptic_curves": {"server_preference": "disabled", "curves": []}
-                        },
-                        "certificate_chain": {
-                            "leaf_certificate": {},
-                            "intermediate_certificates": [],
-                            "root_certificates": []
-                        },
-                        "signature_algorithms": {
-                            "certificate_signatures": [],
-                            "handshake_signatures": []
-                        },
-                        "pqc_analysis": {
-                            "overall_score": 0,
-                            "overall_grade": "F",
-                            "security_level": "None",
-                            "quantum_ready": False,
-                            "hybrid_ready": False,
-                            "components": {}
-                        }
-                    },
-                    # 🆕 ADD TOP-LEVEL PQC FIELDS
-                    "pqc_overall_score": 0,
-                    "pqc_overall_grade": "F"
-                }
-                await db_handler.save_scan_result(skipped_result, batch_id)
-            
-            # Send skipped event
-            skipped_event = {
-                'type': 'domain_complete',
-                'domain': domain,
-                'status': 'completed',  # ✅ CHANGED: Now "completed" instead of "failed"
-                'scan_status': 'http_skipped',
-                'error': error_msg,
-                'completed': len(retry_state.successful_domains) + len(retry_state.failed_domains),
-                'total': len(domains),
-                'percentage': round(((len(retry_state.successful_domains) + len(retry_state.failed_domains)) / len(domains)) * 100, 2),
-                'round': 0,
-                'duration': 0,
-                'saved_to_db': request.save_to_db,
-                'timestamp': datetime.now().isoformat()
-            }
-            yield f"data: {json.dumps(skipped_event)}\n\n"
-        
-        # ============================================================
-        # STEP 2: SCAN ONLY HTTPS DOMAINS
-        # ============================================================
-        if not domains_to_scan:
-            logger.warning("No HTTPS domains to scan. All domains were filtered out.")
-            # Skip to final summary
+        # Work on a mutable copy
+        domains_to_scan = domains.copy()
+
         for round_num in range(1, max_retries + 1):
-            # Check if scan was cancelled before starting the round
-            if is_scan_cancelled(request_id):
-                cancel_event = {
-                    'type': 'cancelled',
-                    'message': 'Scan cancelled before round started',
-                    'timestamp': datetime.now().isoformat()
-                }
-                yield f"data: {json.dumps(cancel_event)}\n\n"
-                # Mark all unscanned domains as failed
-                for domain in domains_to_scan:
-                    retry_state.add_failure(domain, "Scan cancelled by user", round_num)
-                break
-
             if not domains_to_scan:
                 break
-                
-            retry_state.current_round = round_num
-            
-            # Send round start event
-            round_start_event = {
-                'type': 'round_start',
-                'round': round_num,
-                'domains_in_round': len(domains_to_scan)
-            }
-            yield f"data: {json.dumps(round_start_event)}\n\n"
-            round_start = datetime.now()
-            
+
             use_cache = (round_num == 1)
             current_timeout = initial_timeout + (timeout_increment * (round_num - 1))
-            
-            domain_start_times = {}  # Track start times for each domain
-            with ThreadPoolExecutor(max_workers=min(request.max_concurrent, len(domains_to_scan))) as executor:
+
+            with ThreadPoolExecutor(max_workers=min(request.max_concurrent, max(1, len(domains_to_scan)))) as executor:
                 future_to_domain = {
-                    executor.submit(handle_scan_with_backoff, domain, use_cache, round_num, current_timeout): domain 
+                    executor.submit(
+                        handle_scan_with_backoff,
+                        domain,
+                        use_cache,
+                        round_num,
+                        current_timeout
+                    ): domain
                     for domain in domains_to_scan
                 }
-                
-                # Send processing events
-                for domain in domains_to_scan:
-                    domain_start_times[domain] = datetime.now()
-                    processing_event = {
-                        'type': 'domain_processing',
-                        'domain': domain,
-                        'status': 'processing',
-                        'round': round_num,
-                        'started_at': domain_start_times[domain].isoformat()
-                    }
-                    yield f"data: {json.dumps(processing_event)}\n\n"
-                
-                for future in as_completed(future_to_domain):
-                    # Check cancellation
-                    if is_scan_cancelled(request_id):
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        break
 
+                for future in as_completed(future_to_domain):
                     domain = future_to_domain[future]
-                    domain_start = domain_start_times[domain]
-                    
                     try:
                         result = future.result()
                         
-                        domain_end = datetime.now()
-                        duration = (domain_end - domain_start).total_seconds()
-                        
-                        # Overwrite execution_time_seconds with the numeric duration
-                        result["execution_time_seconds"] = round(duration, 2)
-                        
                         retry_state.add_success(result)
                         retry_state.remove_success(domain)
-                        
-                        # Save to database
+
                         if request.save_to_db:
                             await db_handler.save_scan_result(result, batch_id)
-                        
+
                         progress_data = {
                             'type': 'domain_complete',
                             'domain': domain,
                             'status': 'completed',
                             'round': round_num,
-                            'duration': round(duration, 2),
-                            'completed': len(retry_state.successful_domains) + len(retry_state.failed_domains),
-                            'total': len(domains),
-                            'percentage': round(((len(retry_state.successful_domains) + len(retry_state.failed_domains)) / len(domains)) * 100, 2),
-                            'result': result,
-                            'saved_to_db': request.save_to_db,
-                            'round_start_time': round_start.isoformat(),
-                            'domain_start_time': domain_start.isoformat(),
-                            'time_in_current_round': round((datetime.now() - round_start).total_seconds(), 2),
-                            'summary': {
-                                'successful': len(retry_state.successful_domains),
-                                'failed': len(retry_state.failed_domains)
-                            }
+                            'result': result 
                         }
                         yield f"data: {json.dumps(progress_data)}\n\n"
-                        
-                        await asyncio.sleep(5)
-                        
-                    except (HTTPException, Exception) as e:
-                        error_msg = e.detail if isinstance(e, HTTPException) else str(e)
-                        
-                        # ✅ CRITICAL: Only actual scan failures reach here
-                        # HTTP domains were already filtered out above
-                        retry_state.add_failure(domain, error_msg, round_num)
-                        
-                        domain_end = datetime.now()
-                        duration = (domain_end - domain_start).total_seconds()
-                        
-                        # Save to database
-                        if request.save_to_db:
-                            await db_handler.save_failed_scan(
-                                domain, 
-                                error_msg, 
-                                batch_id, 
-                                f"{request_id}_{domain}")
-                        
-                        error_data = {
-                            'type': 'domain_complete',
-                            'domain': domain,
-                            'status': 'failed',
-                            'round': round_num,
-                            'error': error_msg,
-                            'completed': len(retry_state.successful_domains) + len(retry_state.failed_domains),
-                            'total': len(domains),
-                            'percentage': round(((len(retry_state.successful_domains) + len(retry_state.failed_domains)) / len(domains)) * 100, 2),
-                            'duration': round(duration, 2),
-                            'saved_to_db': request.save_to_db,
-                            'round_start_time': round_start.isoformat(),
-                            'domain_start_time': domain_start.isoformat(),
-                            'time_in_current_round': round((datetime.now() - round_start).total_seconds(), 2),
-                            'summary': {
-                                'successful': len(retry_state.successful_domains),
-                                'failed': len(retry_state.failed_domains)
-                            }
-                        }
-                        yield f"data: {json.dumps(error_data)}\n\n"
-                    
-                    await asyncio.sleep(0)
-                
-                # Round complete
-                round_end = datetime.now()
-                round_duration = (round_end - round_start).total_seconds()
-                
-                round_complete_event = {
-                    'type': 'round_complete',
-                    'round': round_num,
-                    'duration': round(round_duration, 2),
-                    'domains_processed': len(domains_to_scan)
-                }
-                yield f"data: {json.dumps(round_complete_event)}\n\n"
-                
-                # Update domains for next round (only failed HTTPS scans)
-                domains_to_scan = retry_state.get_failed_domains()
-                
-                # Remove skipped domains from retry queue
-                domains_to_scan = [d for d in domains_to_scan if d not in skipped_domains_list]
-                
-                if not domains_to_scan:
-                    break
-                
-                if round_num < max_retries:
-                    retry_wait_event = {
-                        'type': 'retry_wait',
-                        'round': round_num,
-                        'next_round': round_num + 1,
-                        'domains_to_retry': len(domains_to_scan),
-                        'delay': retry_delay
-                    }
-                    yield f"data: {json.dumps(retry_wait_event)}\n\n"
-                    
-                    if clear_cache_between_rounds:
-                        clear_ssllabs_cache()
-                    
-                    await asyncio.sleep(retry_delay)
 
-        # ============================================================
-        # STEP 3: FINAL SUMMARY
-        # ============================================================
-        end_time = datetime.now()
-        clear_cancellation(request_id)
+                    except Exception as e:
+                        retry_state.add_failure(domain, str(e), round_num)
+                        yield f"data: {json.dumps({'type': 'error', 'domain': domain, 'error': str(e)})}\n\n"
 
-        total_duration = (end_time - start_time).total_seconds()
-        round_history_for_summary = []
-        
-        all_domains_status = {}
-        
-        # Add successful domains
-        for result in retry_state.successful_domains:
-            domain = result.get('url', result.get('domain', 'unknown'))
-            all_domains_status[domain] = {
-                'status': 'completed',
-                'duration': result.get('execution_time_seconds'),
-                'round': result.get('scan_metadata', {}).get('attempt', 1) if result.get('scan_metadata') else 1,
-                'result': result # Include the full result for the domain
-            }
-        
-        # Add failed and skipped domains
-        for domain, info in retry_state.failed_domains.items():
-            is_skipped = info.get("error", "").startswith("Domain is HTTP") or \
-                         info.get("error", "").startswith("Domain is UNREACHABLE") or \
-                         info.get("error", "").startswith("Domain is DNS_FAILED")
+            # Prepare for next round
+            domains_to_scan = retry_state.get_failed_domains()
             
-            all_domains_status[domain] = {
-                'status': 'completed' if is_skipped else 'failed',  # ✅ CHANGED
-                'scan_status': 'http_skipped' if is_skipped else 'failed',  # ✅ ADDED
-                'error': info.get('error', 'Unknown error'),
-                'round': info.get('last_attempt', 0)
-            }
-
-        # Collect round history
-        for i in range(1, retry_state.current_round + 1):
-            round_domains = [d for d, s in all_domains_status.items() if s.get('round') == i]
-            if round_domains:
-                round_history_for_summary.append({
-                    'round': i,
-                    'domains_processed': len(round_domains),
-                    'status': 'completed' # Simplified for summary
-                })
-        
-        final_summary = {
-            'type': 'complete',
-            'request_id': request_id,
-            'batch_id': batch_id,
-            'saved_to_db': request.save_to_db,
-            'timestamp': end_time.isoformat(),
-            'total_duration': round(total_duration, 2),
-            'rounds_completed': retry_state.current_round,
-            'summary': {
-                'total': len(domains),
+            round_summary = {
+                'type': 'round_complete',
+                'round': round_num,
                 'successful': len(retry_state.successful_domains),
-                'failed': len(retry_state.failed_domains)
-            },
-            'successful_domains': [r.get('url', r.get('domain', 'unknown')) for r in retry_state.successful_domains],
-            'failed_domains': list(retry_state.failed_domains.keys()),
-            'all_domains_status': all_domains_status,
-            'scanRoundHistory': round_history_for_summary
-        }
-        
-        # Update final batch status
-        if request.save_to_db:
-            await db_handler.update_batch_status(
-                batch_id, 
-                "completed",
-                len(retry_state.successful_domains),
-                len(retry_state.failed_domains)
-            )
-        
-        yield f"data: {json.dumps(final_summary)}\n\n"
-
-        # Emit db_committed event
-        if request.save_to_db:
-            db_commit_event = {
-                'type': 'db_committed',
-                'batch_id': batch_id,
-                'timestamp': datetime.now().isoformat()
+                'failed': len(retry_state.failed_domains),
+                'remaining': len(domains_to_scan)
             }
-            yield f"data: {json.dumps(db_commit_event)}\n\n"
-    
+            yield f"data: {json.dumps(round_summary)}\n\n"
+
+
+            if domains_to_scan and round_num < max_retries:
+                await asyncio.sleep(retry_delay)
+
+        # Final summary
+        final_summary_data = {
+            'type': 'scan_complete',
+            'summary': {
+                'total_domains': len(domains),
+                'successful': len(retry_state.successful_domains),
+                'failed': len(retry_state.failed_domains),
+                'rounds_completed': max_retries if domains_to_scan else round_num,
+            },
+            'successful_scans': retry_state.successful_domains,
+            'failed_scans': list(retry_state.failed_domains.values())
+        }
+        yield f"data: {json.dumps(final_summary_data)}\n\n"
+
     return StreamingResponse(
         event_stream(), 
         media_type="text/event-stream",

@@ -1,0 +1,7 @@
+services:
+  scanner-api:
+    build: .
+    container_name: tls-crypto-scanner
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
