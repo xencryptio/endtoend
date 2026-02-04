@@ -192,10 +192,25 @@ class ScanProgressTracker:
         return round(avg_time * remaining, 1)
         
     def get_progress_snapshot(self) -> Dict:
-        """
-        Get current progress state for SSE.
-        Returns complete progress data.
-        """
+        """Get current progress state with ACCURATE phase-based calculation."""
+        
+        # Calculate completion percentage based on phases
+        total_phases = len(self.PHASES)
+        total_possible_progress = self.total_domains * total_phases
+        
+        completed_progress = 0
+        for domain_progress in self.domains.values():
+            if domain_progress.status == "completed":
+                completed_progress += total_phases
+            elif domain_progress.status == "failed":
+                completed_progress += len(domain_progress.phases)
+            else:
+                # In progress - count completed phases
+                completed_progress += len(domain_progress.phases)
+        
+        percentage = round((completed_progress / total_possible_progress) * 100, 2) if total_possible_progress > 0 else 0
+        
+        # ... rest of existing code ...
         eta = self.calculate_eta()
         elapsed = round(time.time() - self.batch_start_time, 2)
         
@@ -211,7 +226,7 @@ class ScanProgressTracker:
             "completed": self.completed_count,
             "failed": self.failed_count,
             "remaining": self.total_domains - self.completed_count - self.failed_count,
-            "percentage": round((self.completed_count + self.failed_count) / self.total_domains * 100, 2),
+            "percentage": percentage,  # ✅ NOW ACCURATE
             "eta_seconds": eta,
             "avg_time_per_domain": avg_time,
             "elapsed_seconds": elapsed,

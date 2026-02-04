@@ -5,7 +5,7 @@ from typing import List
 from .openssl_runner import scan_with_openssl, scan_application_layer
 from .normalize import normalize_endpoint_data, merge_with_application_data
 
-async def scan_domain(url: str, timeout: int = 5) -> dict:
+async def scan_domain(url: str, timeout: int = 5, progress_tracker=None) -> dict:
     """
     Main orchestration function.
     Coordinates DNS resolution, parallel endpoint scanning, and normalization.
@@ -25,7 +25,7 @@ async def scan_domain(url: str, timeout: int = 5) -> dict:
         raise ValueError(f"Could not resolve domain: {domain}")
     
     # Scan all endpoints in parallel
-    tasks = [scan_endpoint(ip, port, domain, timeout) for ip in ips]
+    tasks = [scan_endpoint(ip, port, domain, timeout, progress_tracker) for ip in ips]
     endpoint_results = await asyncio.gather(*tasks, return_exceptions=True)
     
     # Filter out failed scans
@@ -56,19 +56,40 @@ async def resolve_ips(domain: str) -> List[str]:
     except Exception:
         return []
 
-async def scan_endpoint(ip: str, port: int, domain: str, timeout: int = 5) -> dict:
+async def scan_endpoint(ip: str, port: int, domain: str, timeout: int = 5, progress_tracker=None) -> dict:
     """Scan a single endpoint - 3 phases"""
     
-    # PHASE 1: Original TLS crypto scan (DON'T CHANGE THIS)
+    # Track DNS phase
+    if progress_tracker:
+        progress_tracker.start_phase(domain, "dns_lookup")
+        progress_tracker.complete_phase(domain, "dns_lookup")
+    
+    # PHASE 1: Original TLS crypto scan
+    if progress_tracker:
+        progress_tracker.start_phase(domain, "tls_handshake")
     raw_data = await scan_with_openssl(ip, port, domain, timeout)
+    if progress_tracker:
+        progress_tracker.complete_phase(domain, "tls_handshake")
     
-    # PHASE 2: Application layer (NEW - runs in parallel ideally)
-    app_data = await scan_application_layer(ip, port, domain, timeout) # Pass timeout
+    # PHASE 2: Application layer
+    if progress_tracker:
+        progress_tracker.start_phase(domain, "cipher_enumeration")
+    app_data = await scan_application_layer(ip, port, domain, timeout)
+    if progress_tracker:
+        progress_tracker.complete_phase(domain, "cipher_enumeration")
     
-    # PHASE 3: Normalize crypto data (KEEP ORIGINAL)
+    # PHASE 3: Normalize crypto data
+    if progress_tracker:
+        progress_tracker.start_phase(domain, "cert_parsing")
     normalized = normalize_endpoint_data(raw_data, ip, port)
+    if progress_tracker:
+        progress_tracker.complete_phase(domain, "cert_parsing")
     
-    # PHASE 4: Merge everything (NEW)
+    # PHASE 4: Merge everything
+    if progress_tracker:
+        progress_tracker.start_phase(domain, "formatting")
     final = merge_with_application_data(normalized, app_data)
+    if progress_tracker:
+        progress_tracker.complete_phase(domain, "formatting")
     
     return final

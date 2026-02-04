@@ -29,39 +29,34 @@ class DatabaseHandler:
                 logger.error(f"❌ Cannot connect to database service: {e}")
                 self.enabled = False
     
-    async def create_scan_batch(self, batch_id: str, total_urls: int, max_concurrent: int, request_payload: dict = None) -> bool:
+    async def create_scan_batch(self, batch_id, total_urls, max_concurrent, request_payload=None):
         """Create a new scan batch in database."""
         await self._ensure_connected()
-        
         if not self.enabled:
             logger.warning("Database disabled, skipping batch creation")
             return False
-        
+
         try:
-            payload = {
-                "batch_id": batch_id,
-                "total_urls": total_urls,
-                "max_concurrent": max_concurrent,
-                "status": "pending",
-                "request_payload": request_payload or {}
-            }
-            
+            logger.info(f"Creating batch {batch_id} with payload: {request_payload}")
             response = await call_service(
                 "POST",
                 f"{self.db_service_url}/scans/batch",
-                json=payload,
+                json={
+                    "batch_id": batch_id,
+                    "total_urls": total_urls,
+                    "max_concurrent": max_concurrent,
+                    "request_payload": request_payload
+                },
                 timeout=10
             )
             
-            success = response.status_code in (200, 201)
-            if success:
-                logger.info(f"✅ Batch {batch_id} created in database")
-            else:
-                logger.error(f"❌ Failed to create batch: {response.status_code}")
-            return success
-            
+            if response.status_code not in (200, 201):
+                logger.error(f"DB service returned {response.status_code}: {response.text}")
+                return False
+                
+            return True
         except Exception as e:
-            logger.exception("Exception creating batch in DB")
+            logger.error(f"Exception creating batch: {e}")
             return False
     
     async def save_scan_result(self, result: Dict[str, Any], batch_id: str) -> bool:  # ✅ CORRECT INDENTATION

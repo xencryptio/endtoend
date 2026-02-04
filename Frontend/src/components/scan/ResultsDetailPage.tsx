@@ -32,6 +32,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 // ============================================================================
 
 interface ScanResult {
+  id?: number;
+  batch_id?: string;
   request_id: string;
   url: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
@@ -85,6 +87,12 @@ interface ComponentScore {
   quantum_safe_count: number;
 }
 
+/**
+ * Canonical status type for scan results.
+ * This is the SINGLE SOURCE OF TRUTH for scan_status values.
+ */
+export type ScanStatus = 'completed' | 'failed' | 'pending' | 'http_skipped';
+
 interface ResultsDetailPageProps {
   scan: ScanResult;
   onBack: () => void;
@@ -94,6 +102,45 @@ interface ResultsDetailPageProps {
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+/**
+ * Normalizes scan status values from backend to canonical ScanStatus type.
+ * Maps various backend status values to our frontend ScanStatus enum.
+ */
+const normalizeScanStatus = (result: any): ScanStatus => {
+  // ✅ Map backend status to frontend "completed"
+  if (result.scan_status === 'completed' || result.status === 'completed') {
+    return 'completed';
+  }
+  if (result.scan_status === 'failed') return 'failed';
+  if (result.scan_status === 'pending') return 'pending';
+  if (result.scan_status === 'http_skipped') return 'http_skipped';
+
+  // Fallback checks
+  if (result.status === 'pending' || result.status === 'processing') return 'pending';
+
+  return 'failed';
+};
+
+/**
+ * Calculates security score from scan result.
+ * Returns 0 if scan is not completed, otherwise returns PQC analysis score.
+ */
+const calculateSecurityScore = (result: any): number => {
+  if (result.scan_status !== 'completed') return 0;
+
+  // Prioritize new PQC analysis
+  if (result.raw_response?.pqc_analysis) {
+    return result.raw_response.pqc_analysis.overall_score;
+  }
+
+  // Fallback to quantum_score if available
+  if (typeof result.quantum_score === 'number') {
+    return result.quantum_score;
+  }
+
+  return 0;
+};
 
 const getGradeColor = (grade: string): string => {
   if (!grade) return 'text-zinc-500';
@@ -310,8 +357,20 @@ const DomainDetailPage: React.FC<{
   result: ScanResult;
   onBack: () => void;
 }> = ({ result, onBack }) => {
+  // 🔍 DEBUG: Log the result being received
+  console.log('🎯 DomainDetailPage received result:', {
+    url: result.url,
+    scan_status: result.scan_status,
+    status: result.status,
+    raw_response_exists: !!result.raw_response,
+    pqc_analysis_exists: !!result.raw_response?.pqc_analysis
+  });
+
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const isSuccess = result.scan_status?.toLowerCase() === 'completed';
+  
+  console.log('✅ isSuccess:', isSuccess, 'scan_status:', result.scan_status);
+
   const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? result.quantum_score ?? 'N/A';
   const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? result.quantum_grade ?? 'N/A';
   const quantumReady = result.raw_response?.pqc_analysis?.quantum_ready ?? false;
@@ -1223,7 +1282,7 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack, tar
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredResults.map((result, index) => (
             <motion.div
-              key={result.url}
+              key={result.id || `${result.url}-${index}-${result.requested_at || Date.now()}`}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05, duration: 0.4 }}

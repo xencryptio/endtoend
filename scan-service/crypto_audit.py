@@ -7,6 +7,7 @@ import base64
 import requests
 import subprocess
 import contextlib
+import uuid
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -61,7 +62,11 @@ def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:
             })
         
         if suite.get("encryption"):
-            key_size = 256 if "256" in suite["encryption"] else 128
+            enc = suite["encryption"]
+            if "ChaCha20" in enc:
+                key_size = 256
+            else:
+                key_size = 256 if "256" in enc else 128
             algorithms.append({
                 "name": suite["encryption"],
                 "algorithm_type": "symmetric",
@@ -84,7 +89,11 @@ def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:
             })
         
         if suite.get("encryption"):
-            key_size = 256 if "256" in suite["encryption"] else 128
+            enc = suite["encryption"]
+            if "ChaCha20" in enc:
+                key_size = 256
+            else:
+                key_size = 256 if "256" in enc else 128
             algorithms.append({
                 "name": suite["encryption"],
                 "algorithm_type": "symmetric",
@@ -152,7 +161,7 @@ except ImportError:
         async def get_batch_info(self, *args): return {}
         async def get_all_batches(self, *args): return []
         async def search_scans(self, *args): return []
-        async def _ensure_connected(self): 
+        async def _ensure_connected(self):
             logger.warning("MockDatabaseHandler: _ensure_connected called, mock connection is disabled.")
             self.enabled = False
             return
@@ -167,19 +176,8 @@ db_handler = AsyncDatabaseHandler()
 
 app = FastAPI(title="SSL Labs Scan Service", version="5.0")
 
-@app.on_event("startup")
-async def startup_event():
-    """Verify database connection on startup"""
-    logger.info("🚀 Starting scan-service...")
-    logger.info(f"📊 Database URL: {db_handler.db_service_url}")
-    
-    # Test connection
-    await db_handler._ensure_connected()
-    
-    if db_handler.enabled:
-        logger.info("✅ Database connection established")
-    else:
-        logger.warning("⚠️ Database connection failed - results will not be saved!")
+
+
 
 from logging_middleware import correlation_middleware
 app.middleware("http")(correlation_middleware)
@@ -195,6 +193,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]  # ✅ Add this
 )
 
 @app.exception_handler(RequestValidationError)
@@ -233,9 +232,50 @@ async def generic_exception_handler(request: Request, exc: Exception):
 class ScanStatus(str, Enum):
     PENDING = "pending"
     SCANNING = "scanning"
-    SUCCESS = "success"
+    COMPLETED = "completed"
     FAILED = "failed"
     RETRYING = "retrying"
+
+def normalize_domain_input(domain_input: str) -> str:
+    """
+    Normalize domain input to canonical format: protocol://hostname
+    
+    Accepts:
+    - https://example.com
+    - http://example.com  
+    - www.example.com
+    - example.com
+    
+    Returns: Canonical format (https:// or http://)
+    """
+    domain_input = domain_input.strip().lower()
+    
+    # Already has protocol
+    if domain_input.startswith("https://") or domain_input.startswith("http://"):
+        return domain_input.rstrip("/")
+    
+    # Has www prefix but no protocol
+    if domain_input.startswith("www."):
+        return f"https://{domain_input}".rstrip("/")
+    
+    # Plain domain - default to https
+    return f"https://{domain_input}".rstrip("/")
+
+def extract_hostname(domain: str) -> str:
+    """
+    Extract clean hostname from normalized domain.
+    
+    Input: https://www.example.com or http://example.com
+    Output: example.com (no protocol, no www)
+    """
+    parsed = urlparse(domain)
+    hostname = parsed.netloc or parsed.path
+    
+    # Remove www prefix
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    
+    return hostname
 
 class ScanRequest(BaseModel):
     domain: str
@@ -245,23 +285,28 @@ class ScanRequest(BaseModel):
     
     @validator('domain')
     def validate_and_parse_domains(cls, v):
-        """Parse comma-separated domains and clean them (NO protocol removal here)."""
+        """Parse and normalize comma-separated domains."""
         if ',' in v:
             domains = [d.strip() for d in v.split(',')]
         else:
             domains = [v.strip()]
         
-        cleaned = []
+        normalized = []
         for domain in domains:
-            # Preserve protocol if present, only clean up trailing slash
-            domain = domain.lower().rstrip("/")
-            if domain and domain not in cleaned:
-                cleaned.append(domain)
+            if not domain:
+                continue
+            
+            # Normalize to canonical format
+            canonical = normalize_domain_input(domain)
+            
+            # Avoid duplicates
+            if canonical not in normalized:
+                normalized.append(canonical)
         
-        if not cleaned:
+        if not normalized:
             raise ValueError("No valid domains provided")
         
-        return ','.join(cleaned)
+        return ','.join(normalized)
 
 # In-memory retry state (no file storage)
 class RetryState:
@@ -313,17 +358,32 @@ def clear_cancellation(request_id: str):
 
 
 def extract_encryption_algorithm(cipher_name: str) -> str:
-    """Extract encryption algorithm from cipher suite name."""
-    if "AES_128_GCM" in cipher_name:
-        return "AES-128-GCM"
-    elif "AES_256_GCM" in cipher_name:
-        return "AES-256-GCM"
-    elif "AES_128_CBC" in cipher_name:
-        return "AES-128-CBC"
-    elif "AES_256_CBC" in cipher_name:
-        return "AES-256-CBC"
-    elif "CHACHA20_POLY1305" in cipher_name:
+    """Extract encryption algorithm from cipher suite name.
+    
+    Handles both formats produced by the scanner:
+      TLS 1.2 (OpenSSL dash format): ECDHE-RSA-AES256-GCM-SHA384
+      TLS 1.3 (underscore format):   TLS_AES_256_GCM_SHA384
+    """
+    upper = cipher_name.upper()
+
+    # AES-256 variants (match AES256 or AES_256)
+    if "AES256" in upper or "AES_256" in upper:
+        if "GCM" in upper:
+            return "AES-256-GCM"
+        if "CBC" in upper:
+            return "AES-256-CBC"
+
+    # AES-128 variants (match AES128 or AES_128)
+    if "AES128" in upper or "AES_128" in upper:
+        if "GCM" in upper:
+            return "AES-128-GCM"
+        if "CBC" in upper:
+            return "AES-128-CBC"
+
+    # ChaCha20 (match both CHACHA20_POLY1305 and CHACHA20-POLY1305)
+    if "CHACHA20" in upper:
         return "ChaCha20-Poly1305"
+
     return "Unknown"
 
 def extract_key_exchange(cipher_name: str, kx_type: Optional[str] = None) -> str:
@@ -337,9 +397,19 @@ def extract_key_exchange(cipher_name: str, kx_type: Optional[str] = None) -> str
     return "Unknown"
 
 def extract_authentication(cipher_name: str) -> str:
-    """Extract authentication algorithm from cipher suite name."""
+    """Extract authentication algorithm from cipher suite name.
+    
+    Order matters: ECDSA checked before RSA because a name like
+    ECDHE-RSA-AES256-GCM-SHA384 contains RSA (correct auth) while
+    ECDHE-ECDSA-AES256-GCM-SHA384 contains both ECDSA and RSA substrings
+    in some edge cases — checking ECDSA first avoids false RSA matches.
+    """
+    if "ECDSA" in cipher_name:
+        return "ECDSA"
     if "RSA" in cipher_name:
         return "RSA"
+    if "DSS" in cipher_name or "DSA" in cipher_name:
+        return "DSS"
     return "Unknown"
 
 def dict_to_tuple(d: Dict[str, Any]) -> tuple:
@@ -533,8 +603,6 @@ def transform_scan_result(data: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "server_preference": preference,
                     "suites": [transform_tls13_cipher_suite(cs, position=i) for i, cs in enumerate(cipher_list)]
                 }
-    
-
     
 
     
@@ -758,9 +826,9 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
     3. Ensure HTTP-skipped domains have complete structure
     """
     
-    # ============================================================
+    # ============================================================ 
     # CASE 1: HTTP/Unreachable Domains (Cannot be scanned)
-    # ============================================================
+    # ============================================================ 
     if transformed_result.get("scan_status") == "http_skipped":
         return {
             "request_id": request_id,
@@ -815,9 +883,9 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
             "pqc_hybrid_ready": False,
         }
     
-    # ============================================================
+    # ============================================================ 
     # CASE 2: Successful HTTPS Scans (rest of the function remains the same)
-    # ============================================================
+    # ============================================================ 
     tls_config = transformed_result.get("tls_configuration", {})
     cert_chain = transformed_result.get("certificate_chain", {})
     
@@ -870,7 +938,7 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
         "execution_time_seconds": 0  # Will be set by caller if needed, or default to 0
     }
 
-def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout: int, max_backoff_retries: int = 3) -> Dict[str, Any]:
+def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout: int, progress_tracker=None, max_backoff_retries: int = 3) -> Dict[str, Any]:
     """
     Wrapper that handles rate limiting with exponential backoff.
     This runs in a separate thread, so it needs its own event loop.
@@ -880,7 +948,7 @@ def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout
         asyncio.set_event_loop(loop)
         for retry in range(max_backoff_retries):
             try:
-                return loop.run_until_complete(process_single_domain(domain, use_cache, attempt, timeout))
+                return loop.run_until_complete(process_single_domain(domain, use_cache, attempt, timeout, progress_tracker=progress_tracker))
             except RateLimitException:
                 if retry < max_backoff_retries - 1:
                     wait_time = (2 ** retry) * 5  # 5s, 10s, 20s
@@ -901,28 +969,23 @@ def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout
     raise APIError(status_code=500, error_code="unexpected_error", message=f"Unexpected error in backoff handler for {domain}")
 
 
-
-
-
-
-async def run_internal_scanner(domain: str, timeout: int = 300) -> dict:
+async def run_internal_scanner(domain: str, timeout: int = 300, progress_tracker=None) -> dict:
     """
     Run internal TLS scanner instead of SSL Labs.
     Drop-in replacement for run_ssllabs_cli_async().
     """
     try:
-        # Prepare domain URL
-        parsed_url = urlparse(domain)
-        hostname = parsed_url.netloc or parsed_url.path
-        if hostname.startswith("www."):
-            hostname = hostname[4:]
+        # Extract clean hostname (domain is already normalized with protocol)
+        hostname = extract_hostname(domain)
         
-        url = f"https://{hostname}"
+        # Preserve original protocol from normalized input
+        protocol = detect_protocol(domain)
+        url = f"{protocol}://{hostname}"
         
         logger.info(f"Starting internal scan: {hostname}")
         
         # Call internal scanner
-        scan_result = await internal_scan_domain(url)
+        scan_result = await internal_scan_domain(url, timeout=timeout, progress_tracker=progress_tracker)
         
         # Transform to SSL Labs format
         ssllabs_format = transform_internal_scan_to_ssllabs_format(scan_result)
@@ -939,27 +1002,19 @@ async def run_internal_scanner(domain: str, timeout: int = 300) -> dict:
         )
 
 def detect_protocol(domain: str) -> str:
-    """Detect if a domain is HTTP or HTTPS."""
+    """Extract protocol from normalized domain input."""
     if domain.startswith("https://"):
         return "https"
-    if domain.startswith("http://"):
+    elif domain.startswith("http://"):
         return "http"
-    
-    # Simple check for port 443 to guess HTTPS
-    try:
-        with socket.create_connection((domain.split('/')[0], 443), timeout=2):
-            return "https"
-    except (socket.timeout, socket.gaierror, ConnectionRefusedError, OSError):
-        # If 443 fails, assume http or that it's just a domain name
-        pass
-
-    # Default to http if no other information
-    return "http"
+    else:
+        # This should never happen after normalization
+        raise ValueError(f"Domain not normalized: {domain}")
 
 def quick_domain_check(domain: str, timeout: int = 2) -> tuple[bool, str]:
     """Check if a domain resolves via DNS."""
     try:
-        hostname = urlparse(f"//{domain}").hostname or domain
+        hostname = extract_hostname(domain)
         socket.gethostbyname(hostname)
         return True, ""
     except socket.gaierror:
@@ -973,17 +1028,23 @@ async def process_single_domain(
     attempt: int = 1, 
     timeout: int = 300,
     batch_id: str = None,
-    save_to_db: bool = False
+    save_to_db: bool = False,
+    progress_tracker=None  # ADD THIS PARAMETER
 ) -> Dict[str, Any]:
     """Process a single domain scan, with HTTP/HTTPS logic."""
     
-    # ✅ FIX: Generate batch_id if not provided
-    if save_to_db and not batch_id:
-        batch_id = f"batch_{int(datetime.now().timestamp())}_{hash(domain) % 10000}"
-        await db_handler.create_scan_batch(batch_id, 1, 1)
+    # Register domain with tracker
+    if progress_tracker:
+        progress_tracker.register_domain(domain)
+        progress_tracker.start_phase(domain, "protocol_check")
+
+
 
     # 1. Protocol Detection
     protocol = detect_protocol(domain)
+    
+    if progress_tracker:
+        progress_tracker.complete_phase(domain, "protocol_check")
     
     if protocol != "https":
         error_message = f"Domain is {protocol.upper()} and cannot be scanned (TLS/SSL only)."
@@ -1008,13 +1069,18 @@ async def process_single_domain(
             raise APIError(status_code=503, error_code="dns_resolution_failed", message=error_msg)
         
         # Run internal scanner
-        raw_result = await run_internal_scanner(domain, timeout=timeout)
+        raw_result = await run_internal_scanner(domain, timeout=timeout, progress_tracker=progress_tracker)
         
         # Transform result
         transformed_result = transform_scan_result(raw_result)
         
-        # Score via remote service
+        if progress_tracker:
+            progress_tracker.start_phase(domain, "scoring")
+
         scoring_results = await score_tls_scan_remote(transformed_result)
+
+        if progress_tracker:
+            progress_tracker.complete_phase(domain, "scoring")
         
         transformed_result["pqc_analysis"] = scoring_results
         
@@ -1045,6 +1111,9 @@ async def process_single_domain(
             except Exception as e:
                 logger.error(f"Failed to save result for {domain}: {e}")
         
+        if progress_tracker:
+            progress_tracker.mark_domain_completed(domain)
+
         return result
     
     except APIError:
@@ -1068,32 +1137,47 @@ async def scan_domain(request: ScanRequest):
     """
     logger.info("Entered /scan endpoint")
     try:
-        # ✅ FIX: Generate unique batch_id automatically
-        if not request.batch_id or request.batch_id == "string":
-            batch_id = f"batch_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
+        # ✅ FIX: Only create batch if NOT provided
+        if not request.batch_id:
+            batch_id = f"batch_{int(datetime.now().timestamp())}_{str(uuid.uuid4())[:8]}"
+            
+            # Create batch ONLY if save_to_db is True AND batch doesn't exist
+            if request.save_to_db:
+                domains_list = [d.strip() for d in request.domain.split(',')]
+                
+                request_payload = {
+                    "domains": domains_list,
+                    "domain_string": request.domain,
+                    "max_concurrent": request.max_concurrent
+                }
+                
+                try:
+                    success = await db_handler.create_scan_batch(
+                        batch_id=batch_id,
+                        total_urls=len(domains_list),
+                        max_concurrent=request.max_concurrent,
+                        request_payload=request_payload
+                    )
+                    if not success:
+                        raise APIError(500, "batch_creation_failed", "Failed to create scan batch")
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if "duplicate" in error_msg or "already exists" in error_msg:
+                        batch_id = f"batch_{int(datetime.now().timestamp())}_{str(uuid.uuid4())[:8]}"
+                        success = await db_handler.create_scan_batch(
+                            batch_id=batch_id,
+                            total_urls=len(domains_list),
+                            max_concurrent=request.max_concurrent,
+                            request_payload=request_payload
+                        )
+                        if not success:
+                            raise APIError(500, "batch_creation_failed", "Failed after retry")
+                    else:
+                        raise APIError(500, "batch_creation_failed", f"Database error: {str(e)}")
         else:
+            # ✅ CRITICAL: Use existing batch_id (from background worker)
             batch_id = request.batch_id
-        
-        # ✅ FIX: Create batch in database FIRST
-        if request.save_to_db:
-            domains_list = [d.strip() for d in request.domain.split(',')]
-            
-            # ✅ DO NOT convert to JSON string
-            request_payload = {
-                "domains": domains_list,
-                "domain_string": request.domain,
-                "max_concurrent": request.max_concurrent
-            }
-            
-            success = await db_handler.create_scan_batch(
-                batch_id=batch_id,
-                total_urls=len(domains_list),
-                max_concurrent=request.max_concurrent,
-                request_payload=request_payload  # ✅ Pass as dict
-            )
-            if not success:
-                logger.error(f"Failed to create batch {batch_id} in database")
-                raise APIError(500, "batch_creation_failed", "Failed to create scan batch")
+            logger.info(f"♻️  Reusing existing batch: {batch_id}")
         
         # Use the raw domains from the validated model string
         domains = [d.strip() for d in request.domain.split(',')]
@@ -1218,23 +1302,26 @@ async def scan_domain(request: ScanRequest):
         raise APIError(status_code=500, error_code="scan_failed", message=f"Scan failed: {str(e)}")
 
 
-
-
-
 @app.post("/scan-with-progress")
 async def scan_with_progress(request: ScanRequest):
-    """
-    Scan domains with live progress updates and retry logic.
-    Uses Server-Sent Events for real-time updates.
-    """
-    logger.info("Entered /scan-with-progress endpoint")
-
+    """Scan domains with live progress updates and retry logic."""
+    
     async def event_stream():
         request_id = f"scan_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
         batch_id = request.batch_id if request.batch_id else f"batch_{int(datetime.now().timestamp())}"
         domains = [d.strip() for d in request.domain.split(',') if d.strip()]
-        retry_state = RetryState()
-
+        
+        # ✅ INITIALIZE TRACKER
+        tracker = ScanProgressTracker(len(domains), batch_id)
+        
+        # Register all domains
+        for domain in domains:
+            tracker.register_domain(domain)
+        
+        # Send initial snapshot
+        yield f"data: {json.dumps(tracker.get_progress_snapshot())}\n\n"
+        
+        # ... existing retry loop code ...
         max_retries = 3
         retry_delay = 30
         initial_timeout = 600
@@ -1242,14 +1329,14 @@ async def scan_with_progress(request: ScanRequest):
 
         # Work on a mutable copy
         domains_to_scan = domains.copy()
-
+        
         for round_num in range(1, max_retries + 1):
             if not domains_to_scan:
                 break
-
+            # ... existing setup ...
             use_cache = (round_num == 1)
             current_timeout = initial_timeout + (timeout_increment * (round_num - 1))
-
+            
             with ThreadPoolExecutor(max_workers=min(request.max_concurrent, max(1, len(domains_to_scan)))) as executor:
                 future_to_domain = {
                     executor.submit(
@@ -1257,64 +1344,36 @@ async def scan_with_progress(request: ScanRequest):
                         domain,
                         use_cache,
                         round_num,
-                        current_timeout
+                        current_timeout,
+                        tracker  # ✅ PASS TRACKER
                     ): domain
                     for domain in domains_to_scan
                 }
-
+                
                 for future in as_completed(future_to_domain):
                     domain = future_to_domain[future]
                     try:
                         result = future.result()
                         
-                        retry_state.add_success(result)
-                        retry_state.remove_success(domain)
-
-                        if request.save_to_db:
-                            await db_handler.save_scan_result(result, batch_id)
-
-                        progress_data = {
-                            'type': 'domain_complete',
-                            'domain': domain,
-                            'status': 'completed',
-                            'round': round_num,
-                            'result': result 
-                        }
-                        yield f"data: {json.dumps(progress_data)}\n\n"
-
+                        # ✅ SEND PROGRESS UPDATE
+                        yield f"data: {json.dumps(tracker.get_progress_snapshot())}\n\n"
+                        
+                        # ... existing success handling ...
+                        
                     except Exception as e:
-                        retry_state.add_failure(domain, str(e), round_num)
-                        yield f"data: {json.dumps({'type': 'error', 'domain': domain, 'error': str(e)})}\n\n"
-
-            # Prepare for next round
-            domains_to_scan = retry_state.get_failed_domains()
+                        tracker.mark_domain_failed(domain, str(e), round_num)
+                        yield f"data: {json.dumps(tracker.get_progress_snapshot())}\n\n"
             
-            round_summary = {
-                'type': 'round_complete',
-                'round': round_num,
-                'successful': len(retry_state.successful_domains),
-                'failed': len(retry_state.failed_domains),
-                'remaining': len(domains_to_scan)
-            }
-            yield f"data: {json.dumps(round_summary)}\n\n"
+            # Round complete
+            yield f"data: {json.dumps(tracker.get_progress_snapshot())}\n\n"
 
+            domains_to_scan = tracker.get_failed_domains()
 
             if domains_to_scan and round_num < max_retries:
                 await asyncio.sleep(retry_delay)
-
+        
         # Final summary
-        final_summary_data = {
-            'type': 'scan_complete',
-            'summary': {
-                'total_domains': len(domains),
-                'successful': len(retry_state.successful_domains),
-                'failed': len(retry_state.failed_domains),
-                'rounds_completed': max_retries if domains_to_scan else round_num,
-            },
-            'successful_scans': retry_state.successful_domains,
-            'failed_scans': list(retry_state.failed_domains.values())
-        }
-        yield f"data: {json.dumps(final_summary_data)}\n\n"
+        yield f"data: {json.dumps(tracker.get_final_summary())}\n\n"
 
     return StreamingResponse(
         event_stream(), 
@@ -1396,9 +1455,9 @@ async def health_check():
         logger.exception(f"Health check failed: {str(e)}")
         raise APIError(status_code=500, error_code="health_check_failed", message=f"Health check failed: {str(e)}")
 
-# ============================================================
+# ============================================================ 
 # DATABASE QUERY ENDPOINTS
-# ============================================================
+# ============================================================ 
 
 @app.get("/results")
 async def get_scan_results(
@@ -1512,9 +1571,9 @@ async def debug_test_save():
         "db_enabled": db_handler.enabled
     }
 
-# ============================================================
+# ============================================================ 
 # DELETE ENDPOINTS (Proxy to DB Service)
-# ============================================================
+# ============================================================ 
 
 @app.delete("/scans/batch/{batch_id}")
 async def delete_scan_batch_endpoint(batch_id: str = Path(..., description="Batch ID to delete")):
@@ -1604,9 +1663,9 @@ async def clear_all_scans_endpoint():
         )
 
 
-# ============================================================
+# ============================================================ 
 # NEW QUEUE-BASED ARCHITECTURE ENDPOINTS
-# ============================================================
+# ============================================================ 
 
 @app.post("/create-scan-request")
 async def create_scan_request(request: ScanRequest):
@@ -1701,7 +1760,7 @@ async def execute_queued_scan(batch_id: str, domains_str: str, max_concurrent: i
                 result_data = {
                     "url": scan_result.get("url"),
                     "batch_id": batch_id,
-                    "scan_status": "success",
+                    "scan_status": "completed",
                     "status": "completed",
                     "execution_time_seconds": scan_result.get("execution_time_seconds", 0),
                     "raw_response": scan_result,
@@ -1923,9 +1982,21 @@ async def process_batch_scan(batch_id: str, batch_data: dict):
 
 @app.on_event("startup")
 async def startup_event():
-    """Start background task to process pending scans every 10 seconds"""
+    """Single startup handler: DB health check + background scan processor."""
+    # --- Part 1: DB connection check (was in the deleted first handler) ---
+    logger.info("🚀 Starting scan-service...")
+    logger.info(f"📊 Database URL: {db_handler.db_service_url}")
+
+    await db_handler._ensure_connected()
+
+    if db_handler.enabled:
+        logger.info("✅ Database connection established")
+    else:
+        logger.warning("⚠️ Database connection failed - results will not be saved!")
+
+    # --- Part 2: Background scan processor (was in this handler) ---
     logger.info("🚀 Starting scan processor background task...")
-    
+
     async def scan_processor():
         while True:
             try:

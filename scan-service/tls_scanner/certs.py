@@ -1,7 +1,7 @@
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.x509.oid import SignatureAlgorithmOID
+from cryptography.x509.oid import SignatureAlgorithmOID, NameOID
 from typing import List, Dict, Optional
 
 def parse_certificate_chain(cert_chain: List[bytes]) -> List[dict]:
@@ -25,6 +25,8 @@ def extract_cert_crypto(cert: x509.Certificate, index: int, total: int) -> dict:
     """
     Extract cryptographic information from a certificate.
     NO trust validation, NO expiry checks - only crypto facts.
+    
+    ✅ NOW INCLUDES: Subject, Issuer, Valid From, Valid Until
     """
     # Determine certificate type
     cert_type = determine_cert_type(index, total)
@@ -37,6 +39,16 @@ def extract_cert_crypto(cert: x509.Certificate, index: int, total: int) -> dict:
     pub_key_alg = get_public_key_algorithm(cert)
     pub_key_size = get_public_key_size(cert)
     pub_key_curve = get_public_key_curve(cert)
+    
+    # ✅ NEW: Extract Subject (Common Name)
+    subject_cn = extract_common_name(cert.subject)
+    
+    # ✅ NEW: Extract Issuer (Common Name)
+    issuer_cn = extract_common_name(cert.issuer)
+    
+    # ✅ NEW: Extract validity dates
+    valid_from = cert.not_valid_before.isoformat()
+    valid_until = cert.not_valid_after.isoformat()
     
     # Extract CT SCTs
     try:
@@ -61,8 +73,43 @@ def extract_cert_crypto(cert: x509.Certificate, index: int, total: int) -> dict:
         "public_key_algorithm": pub_key_alg,
         "public_key_size": pub_key_size,
         "public_key_curve": pub_key_curve,
-        "ct_scts": scts
+        "ct_scts": scts,
+        
+        # ✅ NEW FIELDS ADDED HERE
+        "subject": subject_cn,
+        "issuer": issuer_cn,
+        "valid_from": valid_from,
+        "valid_until": valid_until
     }
+
+def extract_common_name(name: x509.Name) -> str:
+    """
+    ✅ NEW FUNCTION: Extract Common Name (CN) from x509.Name object.
+    Handles cases where CN might not exist.
+    
+    Args:
+        name: x509.Name object (either subject or issuer)
+    
+    Returns:
+        Common Name string or "Unknown" if not found
+    """
+    try:
+        # Get all CN attributes
+        cn_attrs = name.get_attributes_for_oid(NameOID.COMMON_NAME)
+        
+        if cn_attrs:
+            # Return the first CN value
+            return cn_attrs[0].value
+        else:
+            # Fallback: try to construct from other fields
+            org_attrs = name.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)
+            if org_attrs:
+                return f"{org_attrs[0].value} (No CN)"
+            
+            return "Unknown"
+    
+    except Exception as e:
+        return f"Error extracting CN: {str(e)}"
 
 def determine_cert_type(index: int, total: int) -> str:
     """

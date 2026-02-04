@@ -7,6 +7,8 @@ def normalize_endpoint_data(raw_data: dict, ip: str, port: int) -> dict:
     """
     Normalize raw TLS data into scoring-ready structure.
     This is the final transformation layer.
+    
+    ✅ NOW INCLUDES: Subject, Issuer, Valid From, Valid Until in certificate output
     """
     # Parse certificates
     cert_chain = raw_data.get("certificates", [])
@@ -50,7 +52,7 @@ def normalize_endpoint_data(raw_data: dict, ip: str, port: int) -> dict:
             bits = {"X25519": 253, "secp256r1": 256, "secp384r1": 384, "X448": 448}.get(curve_name, 0)
             supported_curves.append({"name": curve_name, "bits": bits})
     
-    # Build certificate structure
+    # Build certificate structure with NEW fields
     certificates = {
         "leaf_certificates": format_certificates(grouped_certs["leaf"]),
         "intermediate_certificates": format_certificates(grouped_certs["intermediate"]),
@@ -136,6 +138,8 @@ def format_cipher_suites(ciphers: List[dict]) -> List[dict]:
 def format_certificates(certs: List[dict]) -> List[dict]:
     """
     Format certificates for output.
+    
+    ✅ NOW INCLUDES: subject, issuer, valid_from, valid_until
     """
     formatted = []
     
@@ -146,7 +150,13 @@ def format_certificates(certs: List[dict]) -> List[dict]:
             "public_key_algorithm": cert.get("public_key_algorithm"),
             "public_key_size": cert.get("public_key_size"),
             "public_key_curve": cert.get("public_key_curve"),
-            "ct_scts": cert.get("ct_scts", [])  # ADD THIS
+            "ct_scts": cert.get("ct_scts", []),
+            
+            # ✅ NEW FIELDS ADDED TO OUTPUT
+            "subject": cert.get("subject"),
+            "issuer": cert.get("issuer"),
+            "valid_from": cert.get("valid_from"),
+            "valid_until": cert.get("valid_until")
         })
     
     return formatted

@@ -149,10 +149,15 @@ def build_certificates(endpoint: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Leaf certificate
     leaf_certs = cert_data.get("leaf_certificates", [])
     for leaf in leaf_certs:
+        subject_val = leaf.get("subject", "Unknown")
+        issuer_val = leaf.get("issuer", "Unknown")
         certs.append({
-            "subject": "CN=Unknown",  # Scanner doesn't extract this
-            "commonNames": ["Unknown"],
-            "altNames": [],
+            "subject": f"CN={subject_val}",
+            "issuerSubject": f"CN={issuer_val}",
+            "commonNames": [subject_val],
+            "altNames": leaf.get("subject_alternative_names", []),
+            "notBefore": leaf.get("valid_from"),
+            "notAfter": leaf.get("valid_until"),
             "sigAlg": leaf.get("signature_algorithm", ""),
             "keyAlg": leaf.get("public_key_algorithm", ""),
             "keySize": leaf.get("public_key_size", 0),
@@ -162,9 +167,13 @@ def build_certificates(endpoint: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Intermediate certificates
     intermediate_certs = cert_data.get("intermediate_certificates", [])
     for cert in intermediate_certs:
+        subject_val = cert.get("subject", "Intermediate")
+        issuer_val = cert.get("issuer", "Root")
         certs.append({
-            "subject": "CN=Intermediate",
-            "issuerSubject": "CN=Root",  # Simplified
+            "subject": f"CN={subject_val}",
+            "issuerSubject": f"CN={issuer_val}",
+            "notBefore": cert.get("valid_from"),
+            "notAfter": cert.get("valid_until"),
             "sigAlg": cert.get("signature_algorithm", ""),
             "keyAlg": cert.get("public_key_algorithm", ""),
             "keySize": cert.get("public_key_size", 0)
@@ -173,9 +182,13 @@ def build_certificates(endpoint: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Root certificates
     root_certs = cert_data.get("root_certificates", [])
     for cert in root_certs:
+        subject_val = cert.get("subject", "Root")
+        issuer_val = cert.get("issuer", subject_val)  # root is self-signed
         certs.append({
-            "subject": "CN=Root",
-            "issuerSubject": "CN=Root",  # Self-signed
+            "subject": f"CN={subject_val}",
+            "issuerSubject": f"CN={issuer_val}",
+            "notBefore": cert.get("valid_from"),
+            "notAfter": cert.get("valid_until"),
             "sigAlg": cert.get("signature_algorithm", ""),
             "keyAlg": cert.get("public_key_algorithm", ""),
             "keySize": cert.get("public_key_size", 0)

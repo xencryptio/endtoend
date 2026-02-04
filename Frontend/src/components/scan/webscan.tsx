@@ -41,7 +41,7 @@ const fetchOnboardingDomains = async () => {
 };
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle,ArrowLeft, ArrowRight, Globe, RefreshCw, Play, Edit, Save, RotateCcw, Plus, Check, X, Shield, Lock, Hash, Key, Zap, Trash2, Activity, FileText, Eye } from "lucide-react";
+import { AlertTriangle,ArrowLeft, ArrowRight, Globe, RefreshCw, Play, Edit, Save, RotateCcw, Plus, Check, X, Shield, Lock, Hash, Key, Zap, Trash2, Activity, FileText, Eye, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 import {
@@ -59,6 +59,35 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { UnifiedBackButton, UnifiedResultCard, UnifiedCard, UnifiedFileInput, UnifiedActionLoading, UnifiedInlineRefresh } from "@/components/ui/unified";
 import ResultsDetailPage from "./ResultsDetailPage";
 import { apiFetch } from '@/lib/api';
+
+// ============================================================================
+// TYPE DEFINITIONS (Single Source of Truth)
+// ============================================================================
+
+/**
+ * Canonical status type for scan results.
+ * This is the SINGLE SOURCE OF TRUTH for scan_status values.
+ */
+export type ScanStatus = 'completed' | 'failed' | 'pending' | 'http_skipped';
+
+/**
+ * Normalize any status string to the canonical ScanStatus type.
+ * Handles backend returning different formats and maps them to our strict union.
+ */
+const normalizeScanStatus = (result: any): ScanStatus => {
+  // ✅ Map backend status values to frontend "completed"
+  if (result.scan_status === 'completed' || result.status === 'completed') {
+    return 'completed';
+  }
+  if (result.scan_status === 'failed') return 'failed';
+  if (result.scan_status === 'pending') return 'pending';
+  if (result.scan_status === 'http_skipped') return 'http_skipped';
+
+  // Fallback checks
+  if (result.status === 'pending' || result.status === 'processing') return 'pending';
+
+  return 'failed';
+};
 
 // ============================================================================
 // INTERFACES & TYPES
@@ -82,7 +111,7 @@ interface ScanResult {
   requested_at: string;
   total_urls: number;
   execution_time_seconds?: number;
-  scan_status?: 'success' | 'http_skipped' | 'failed' | 'pending';
+  scan_status?: ScanStatus;
   tls_version?: string;
   public_key_size_bits?: number;
   cipher_suite_name?: string;
@@ -525,12 +554,12 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
         batch_id: batch.batch_id,
         url: primaryDomain || `Batch with ${totalUrls} domains`,
         primary_domain: primaryDomain,
-        domain_list: domainCandidates.length > 0 ? domainCandidates : undefined,
+        domain_list: domainCandidates.length > 0 ? domainCandidates : [],
         status: batch.status as 'pending' | 'processing' | 'completed' | 'failed',
         requested_at: batch.created_at,
         total_urls: totalUrls,
         execution_time_seconds: batch.execution_time_seconds || 0,
-        scan_status: batch.status === 'completed' ? 'success' : 'failed',
+        scan_status: normalizeScanStatus({ status: batch.status }),
         successful_count: batch.successful_count || 0,
         failed_count: batch.failed_count || 0,
         error_message: batch.status === 'failed' ? 'Batch processing failed' : undefined,
@@ -551,7 +580,7 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
   }
 };
 
-const loadBatchDetails = async (apiBaseUrl: string, batchId: string) => {
+const loadBatchDetails = async (apiBaseUrl: string, batchId: string): Promise<ScanResult[]> => {
   try {
     // Normalize base URL to avoid trailing slash
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
@@ -569,18 +598,24 @@ const loadBatchDetails = async (apiBaseUrl: string, batchId: string) => {
     }
     
     // Map and normalize results
-    return results.map((result: any) => ({
+    return results.map((result: any): ScanResult => {
+      const normalizedStatus = normalizeScanStatus(result);
+      console.log(`🔍 Normalizing result for ${result.url}:`, {
+        original_scan_status: result.scan_status,
+        original_status: result.status,
+        normalized: normalizedStatus
+      });
+      
+      return {
         ...result,
-        scan_status: result.scan_status
-          ? result.scan_status
-          : result.status === 'completed'
-            ? 'completed'
-            : (result.scan_status === 'http_skipped' ? 'http_skipped' : 'failed'),
-        total_urls: 1,
-        
-        // ✅ FIX: Ensure execution_time_seconds is preserved or defaults to 0
-        execution_time_seconds: result.execution_time_seconds || 0
-      }));
+        scan_status: normalizedStatus,
+        domain_list: Array.isArray(result.domain_list)
+          ? result.domain_list.filter((d): d is string => typeof d === 'string')
+          : [],
+        total_urls: result.total_urls ?? 1,
+        execution_time_seconds: result.execution_time_seconds ?? 0
+      };
+    });
   } catch (error) {
     console.error('Error loading batch details:', error);
     throw error;
@@ -712,13 +747,13 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
   const [processingDomains, setProcessingDomains] = useState<{[key: string]: DomainProgressInfo}>({});
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [currentBatchId, setCurrentBatchId] = useState<string | null>(null); // ADD THIS
   const [expandedProgress, setExpandedProgress] = useState<Set<string>>(new Set());
   const [roundHistory, setRoundHistory] = useState<RoundInfo[]>([]);
   const [currentRound, setCurrentRound] = useState(1);const [viewingResultsFor, setViewingResultsFor] = useState<string | null>(null);
   const [expandedDomainUrl, setExpandedDomainUrl] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false); // Track if we've already auto-loaded
+
 
   // Load historical scans on component mount from the API
   useEffect(() => {
@@ -863,7 +898,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
       // Fallback: if no domains found, check if scan.url is a valid domain
       if (domainsToRetry.length === 0) {
         if (scan.url && !scan.url.toLowerCase().startsWith('batch with')) {
-          domainsToRetry = [scan.url];
+          domainsToRetry = [scan.url] as string[];
           console.log(`📋 Using scan.url as fallback: ${scan.url}`);
         } else {
           showMessage(`Cannot retry: No valid domains found in batch`, 'error');
@@ -898,7 +933,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
       }
       
       // Create new scan request with actual domains
-      const createResponse = await apiFetch(`${apiBaseUrl}/create-scan-request`, {
+      const response = await apiFetch(`${apiBaseUrl}/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -908,9 +943,8 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
         })
       });
 
-      const { batch_id: newBatchId } = createResponse;
-      console.log(`✅ New scan created with batch_id: ${newBatchId} for domains: ${domainsToRetry.join(', ')}`);
-      showMessage(`Retry scan queued successfully! Batch ID: ${newBatchId}`, 'success');
+      console.log('✅ Retry scan completed:', response);
+      showMessage(`Retry scan completed successfully!`, 'success');
       
       // Switch to history tab and refresh
       setActiveTab('history');
@@ -1018,168 +1052,75 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
   // NEW QUEUE-BASED SCANNING (Database is source of truth)
   // ============================================================================
   
-  const pollBatchStatus = async (batchId: string, maxAttempts: number = 300) => {
-    /**
-     * Poll the database for batch status updates every second.
-     * maxAttempts = 300 = 5 minutes max polling
-     */
-    let attempts = 0;
-    
-    return new Promise<any>((resolve, reject) => {
-      const pollInterval = setInterval(async () => {
-        attempts++;
-        
-        try {
-          const response = await apiFetch(`${apiBaseUrl}/batch/${batchId}`);
-          const batchData = response;
-          
-          console.log(`📊 Batch ${batchId} status:`, batchData.status);
-          
-          // Update UI with current status
-          setScanHistory(prev => prev.map(scan =>
-            scan.batch_id === batchId
-              ? {
-                  ...scan,
-                  status: batchData.status as any,
-                  successful_count: batchData.successful_count || 0,
-                  failed_count: batchData.failed_count || 0,
-                  execution_time_seconds: batchData.execution_time_seconds || 0
-                }
-              : scan
-          ));
-          
-          // Check if scan is done
-          if (batchData.status === 'completed' || batchData.status === 'failed') {
-            clearInterval(pollInterval);
-            resolve(batchData);
-          }
-          
-          // Max timeout
-          if (attempts >= maxAttempts) {
-            clearInterval(pollInterval);
-            reject(new Error('Scan polling timed out after 5 minutes'));
-          }
-        } catch (error) {
-          console.error(`Error polling batch ${batchId}:`, error);
-          // Continue polling on error
-        }
-      }, 1000); // Poll every 1 second
-    });
-  };
-
-  const handleQueuedScan = async (e: React.FormEvent, directUrl?: string) => {
-    /**
-     * NEW: Queue-based scanning
-     * 1. Create scan request in DB (returns batch_id)
-     * 2. Poll database for status updates
-     * 3. Fetch results when complete
-     */
+  const handleScanSubmit = async (e: React.FormEvent, directUrl?: string) => {
     e.preventDefault();
     
     const sourceUrls = directUrl || urls;
     const urlList = sourceUrls
-      .split(/[\s,\n]+/)
-      .map(u => u.trim().replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, ''))
+      .split(/[\n,\s]+/)
+      .map(u => u.trim())
       .filter(u => u !== '');
-
+  
     if (urlList.length === 0) {
       showMessage('Please enter at least one URL', 'error');
       return;
     }
-
-    const tempBatchId = `batch_temp_${Date.now()}`;
+  
     setIsScanning(true);
     setUrls('');
-    showMessage(`Queuing scan for ${urlList.length} URL(s)...`, 'info');
-
-    // Add pending scan to history
-    const pendingScan: ScanResult = {
-      request_id: tempBatchId,
-      batch_id: tempBatchId,
-      url: urlList.join(', '),
-      status: 'pending',
-      requested_at: new Date().toISOString(),
-      total_urls: urlList.length,
-    };
-    setScanHistory(prev => [pendingScan, ...prev]);
-
+    showMessage(`Starting scan for ${urlList.length} URL(s)...`, 'info');
+  
     try {
-      // Step 1: Create scan request in database
-      console.log('📝 Creating scan request for domains:', urlList);
-      const createResponse = await apiFetch(`${apiBaseUrl}/create-scan-request`, {
+      // ✅ FIX: Use /scan endpoint directly (same as Swagger UI)
+      const response = await apiFetch(`${apiBaseUrl}/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           domain: urlList.join(','),
           max_concurrent: 5,
-          save_to_db: true
+          save_to_db: true  // ✅ This ensures DB storage
         })
       });
-
-      const { batch_id: realBatchId } = createResponse;
-      console.log('✅ Scan request created, batch_id:', realBatchId);
-
-      // Update history with real batch_id
-      setScanHistory(prev => prev.map(scan =>
-        scan.batch_id === tempBatchId
-          ? { ...scan, batch_id: realBatchId, request_id: realBatchId, status: 'pending' }
-          : scan
-      ));
-
-      // Step 2: Poll for status updates
-      console.log('🔄 Starting to poll batch status...');
-      showMessage('Waiting for scan to start...', 'info');
+  
+      console.log('✅ Scan completed:', response);
       
-      const completedBatch = await pollBatchStatus(realBatchId);
-      console.log('✅ Scan completed:', completedBatch);
-
-      // Step 3: Load detailed results from database
-      console.log('📊 Loading detailed results for batch:', realBatchId);
-      const details = await loadBatchDetails(apiBaseUrl, realBatchId);
-      console.log('✅ Loaded', details.length, 'detailed results');
-
-      const totalExecutionTime = details.reduce((sum, result) => {
-        return sum + (result.execution_time_seconds || 0);
-      }, 0);
-
-      // Step 4: Update scan with final status AND results
-      setScanHistory(prev => prev.map(scan =>
-        scan.batch_id === realBatchId
-          ? {
-              ...scan,
-              status: completedBatch.status,
-              successful_count: completedBatch.successful_count || 0,
-              failed_count: completedBatch.failed_count || 0,
-              execution_time_seconds: totalExecutionTime,
-              detailedResults: details  // ✅ ADD: Populate results
-            }
-          : scan
-      ));
-
+      // Extract batch_id from response
+      // The /scan endpoint returns the result directly, but we need to find the batch_id
+      // For single domain: response is the scan result with batch_id
+      // For multiple domains: response has successful_scans array
+      
+      let batchId: string | undefined;
+      if (response.successful_scans && response.successful_scans.length > 0) {
+        // Multi-domain scan
+        batchId = response.successful_scans[0]?.batch_id;
+      } else if (response.batch_id) {
+        // Single domain scan
+        batchId = response.batch_id;
+      }
+  
       showMessage(
-        `✅ Scan completed! ${completedBatch.successful_count || 0} successful, ${completedBatch.failed_count || 0} failed.`,
+        `✅ Scan completed successfully!`, 
         'success'
       );
-
+  
+      // Refresh history to show new scan
+      setTimeout(async () => {
+        const historicalScans = await loadHistoricalScans(apiBaseUrl);
+        if (historicalScans && historicalScans.length > 0) {
+          setScanHistory(historicalScans);
+        }
+        
+        // Switch to history tab
+        setActiveTab('history');
+      }, 1000);
+  
     } catch (error) {
       console.error('❌ Scan failed:', error);
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       showMessage(`Scan failed: ${errorMsg}`, 'error');
-      
-      // Mark scan as failed in history
-      setScanHistory(prev => prev.map(scan =>
-        scan.batch_id === tempBatchId || scan.batch_id?.includes('temp')
-          ? { ...scan, status: 'failed', error_message: errorMsg }
-          : scan
-      ));
     } finally {
       setIsScanning(false);
     }
-  };
-
-  const handleScanSubmit = async (e: React.FormEvent, directUrl?: string) => {
-    // Use new queue-based approach
-    await handleQueuedScan(e, directUrl);
   };
 
   const toggleSummary = (requestId: string) => {
@@ -1250,7 +1191,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
   };
 
   const calculateSecurityScore = (result: any) => {
-    if (result.scan_status !== 'success') return 0;
+    if (result.scan_status !== 'completed') return 0;
   
     // Prioritize new PQC analysis
     if (result.raw_response?.pqc_analysis) {
@@ -1612,8 +1553,13 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
 
                   // Determine quantum readiness status for completed scans
                   const getQuantumStatus = () => {
+                    // Handle HTTP skipped explicitly
+                    if (scan.scan_status === 'http_skipped') return 'HTTP/UNREACHABLE';
+                    // Handle failed scans
+                    if (scan.status === 'failed') return 'FAILED';
+
                     if (scan.status !== 'completed') return scan.status.toUpperCase();
-                    
+
                     // For individual domains, check their specific quantum analysis
                     if (isIndividualDomain && scan.raw_response?.pqc_analysis) {
                       return scan.raw_response.pqc_analysis.quantum_ready ? 'QUANTUM READY' : 'NOT QUANTUM READY';
@@ -1646,19 +1592,27 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                   
                   const shouldShowDomainHint = !domainLabel && scan.total_urls === 1;
                   
-                  // Generate unique key for domain-wise display
-                  const uniqueKey = isIndividualDomain 
-                    ? `${parentBatch.request_id}-${scan.domainIndex}-${scan.url}`
-                    : scan.request_id;
-
-                  // Prepare metrics for individual domains
-                  const pqcScore = scan.raw_response?.pqc_analysis?.overall_score?.toFixed(1) || 'N/A';
-                  const pqcGrade = scan.raw_response?.pqc_analysis?.overall_grade || 'N/A';
-                  const quantumStatus = scan.raw_response?.pqc_analysis?.quantum_ready ? 'Quantum Ready' : 'Not Ready';
+                                    // Generate unique key for domain-wise display
+                                    // Use database ID if available for guaranteed uniqueness
+                                    const uniqueKey = isIndividualDomain
+                                      ? (scan.id
+                                          ? `result-${scan.id}`
+                                          : `${parentBatch.request_id}-${scan.domainIndex}-${Date.now()}-${Math.random()}`)
+                                      : (scan.id
+                                          ? `batch-result-${scan.id}`
+                                          : scan.request_id);
+                  // Prepare metrics for individual domains (null-safe pqc_analysis)
+                  const pqcAnalysis = scan.raw_response?.pqc_analysis;
+                  const pqcScore = pqcAnalysis && typeof pqcAnalysis.overall_score === 'number'
+                    ? pqcAnalysis.overall_score.toFixed(1)
+                    : 'N/A';
+                  const pqcGrade = pqcAnalysis?.overall_grade || 'N/A';
+                  const quantumStatus = pqcAnalysis?.quantum_ready === true ? 'Quantum Ready' : 'Not Ready';
 
                   return (
                     <UnifiedResultCard
                       key={uniqueKey}
+                      className={scan.status === 'processing' ? 'animate-pulse bg-gradient-to-r from-transparent via-primary/5 to-transparent bg-[length:1000px_100%]' : ''}
                       title={isIndividualDomain ? scan.url : `Request ID: ${scan.request_id}`}
                       description={isIndividualDomain ? '' : new Date(scan.requested_at || parentBatch.requested_at).toLocaleString()}
                       status={
@@ -1682,14 +1636,14 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                         { 
                           label: "Status", 
                           value: quantumStatus,
-                          valueClassName: scan.raw_response?.pqc_analysis?.quantum_ready ? 'text-success' : 'text-destructive'
+                          valueClassName: pqcAnalysis?.quantum_ready ? 'text-success' : 'text-destructive'
                         }
                       ] : [
                         { label: "URLs", value: scan.total_urls },
                         { label: "Execution Time", value: executionTime }
                       ]}
                       actions={[
-                        ...((scan.status === 'completed' || (scan.status === 'failed' && (isIndividualDomain || (scan.detailedResults && scan.detailedResults.length > 0)))) ? [{
+                        ...((scan.status === 'completed' || scan.scan_status === 'http_skipped' || (scan.status === 'failed' && (isIndividualDomain || (scan.detailedResults && scan.detailedResults.length > 0)))) ? [{
                           label: "View Results",
                           icon: <Eye size={16} />,
                           onClick: () => {
@@ -1727,6 +1681,8 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                           </span>
                         </div>
                       )}
+
+
                       
                       {/* PROGRESS DISPLAY */}
                       {scan.status === 'processing' && expandedProgress.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
@@ -1767,7 +1723,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                                 }}
                                 domainProgress={{
                                   [scan.url]: {
-                                    status: scan.scan_status?.toLowerCase() === 'success' || scan.scan_status?.toLowerCase() === 'completed' 
+                                    status: scan.scan_status?.toLowerCase() === 'completed' 
                                       ? 'completed' 
                                       : scan.scan_status?.toLowerCase() === 'http_skipped' 
                                       ? 'http_skipped' 
@@ -1795,7 +1751,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                                     
                                     const scanStatus = result.scan_status?.toLowerCase();
                                     let status = 'failed';
-                                    if (scanStatus === 'success' || scanStatus === 'completed') {
+                                    if (scanStatus === 'completed') {
                                       status = 'completed';
                                     } else if (scanStatus === 'http_skipped') {
                                       status = 'http_skipped';
