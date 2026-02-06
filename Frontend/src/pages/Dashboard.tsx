@@ -83,16 +83,23 @@ export default function Dashboard() {
     );
   }
 
-  if (!selectedOrg) {
-    return (
-      <div className="p-8 text-center text-muted-foreground">
-        No organization data available
-      </div>
-    );
-  }
+  // ===== COMPUTE METRICS FROM DASHBOARD-2 DATA OR USE EMPTY STATE =====
+  const summary = selectedOrg?.summary || {
+    total_applications: 0,
+    total_vulnerabilities: 0,
+    secure_applications: 0,
+    pqc_readiness_percent: 0,
+  };
 
-  // ===== COMPUTE METRICS FROM DASHBOARD-2 DATA =====
-  const { summary, applications, risk_distribution, organization_name } = selectedOrg;
+  const applications = selectedOrg?.applications || [];
+  const risk_distribution =
+    selectedOrg?.risk_distribution ?? {
+      Low: 0,
+      Medium: 0,
+      High: 0,
+      "Very High": 0,
+    };
+  const organization_name = selectedOrg?.organization_name || "Organization";
 
   return (
     <motion.div
@@ -137,6 +144,19 @@ export default function Dashboard() {
           </div>
         </motion.div>
       </motion.header>
+
+      {/* ===== EMPTY STATE NOTICE (if no data) ===== */}
+      {!selectedOrg && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4"
+        >
+          <p className="text-sm text-blue-800 dark:text-blue-300">
+            No organization data available. Showing empty dashboard structure.
+          </p>
+        </motion.div>
+      )}
 
       {/* ===== METRIC CARDS (Dashboard-1 UI + Dashboard-2 data) ===== */}
       <motion.div
