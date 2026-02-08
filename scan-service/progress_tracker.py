@@ -201,11 +201,10 @@ class ScanProgressTracker:
         completed_progress = 0
         for domain_progress in self.domains.values():
             if domain_progress.status == "completed":
+                # Completed domain = all phases done
                 completed_progress += total_phases
             elif domain_progress.status == "failed":
-                completed_progress += len(domain_progress.phases)
-            else:
-                # In progress - count completed phases
+                # Failed domain = count phases attempted before failure
                 completed_progress += len(domain_progress.phases)
         
         percentage = round((completed_progress / total_possible_progress) * 100, 2) if total_possible_progress > 0 else 0
@@ -285,3 +284,11 @@ class ScanProgressTracker:
             },
             "timestamp": datetime.now().isoformat()
         }
+    
+    def get_failed_domains(self) -> List[str]:
+        """Get list of domains that failed scanning"""
+        return [
+            domain 
+            for domain, progress in self.domains.items() 
+            if progress.status == "failed"
+        ]

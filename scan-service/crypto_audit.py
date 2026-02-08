@@ -1179,6 +1179,11 @@ async def scan_domain(request: ScanRequest):
             batch_id = request.batch_id
             logger.info(f"♻️  Reusing existing batch: {batch_id}")
         
+        # ✅ ADD THIS: Update batch status to "processing" BEFORE scanning starts
+        if request.save_to_db:
+            await db_handler.update_batch_status(batch_id, "processing", 0, 0)
+            logger.info(f"📝 Batch {batch_id} status set to 'processing'")
+        
         # Use the raw domains from the validated model string
         domains = [d.strip() for d in request.domain.split(',')]
         
@@ -1249,6 +1254,18 @@ async def scan_domain(request: ScanRequest):
                         retry_state.add_success(result)
                         retry_state.remove_success(domain) # Remove from failed_domains list
                         logger.info(f"[{round_num}] Success: {domain}")
+                        
+                        # ✅ ADD THIS: Update batch progress after each successful scan
+                        if request.save_to_db:
+                            successful_count = len(retry_state.successful_domains)
+                            failed_count = len(retry_state.failed_domains)
+                            await db_handler.update_batch_status(
+                                batch_id, 
+                                "processing",  # Still processing
+                                successful_count, 
+                                failed_count
+                            )
+                        
                         time.sleep(5)  # ✅ Increased to 5 seconds
                         
                     except HTTPException as e:
@@ -1258,9 +1275,31 @@ async def scan_domain(request: ScanRequest):
                         retry_state.add_failure(domain, e.detail, round_num)
                         logger.error(f"[{round_num} Failed: {domain} - {e.detail}")
                         
+                        # ✅ ADD THIS: Update failed count
+                        if request.save_to_db:
+                            successful_count = len(retry_state.successful_domains)
+                            failed_count = len(retry_state.failed_domains)
+                            await db_handler.update_batch_status(
+                                batch_id, 
+                                "processing", 
+                                successful_count, 
+                                failed_count
+                            )
+                        
                     except Exception as e:
                         retry_state.add_failure(domain, str(e), round_num)
                         logger.error(f"[{round_num}] Failed: {domain} - {str(e)}")
+                        
+                        # ✅ ADD THIS: Update failed count
+                        if request.save_to_db:
+                            successful_count = len(retry_state.successful_domains)
+                            failed_count = len(retry_state.failed_domains)
+                            await db_handler.update_batch_status(
+                                batch_id, 
+                                "processing", 
+                                successful_count, 
+                                failed_count
+                            )
             
             # Update domains to scan for next round
             domains_to_scan = retry_state.get_failed_domains()
@@ -1282,8 +1321,20 @@ async def scan_domain(request: ScanRequest):
         
         final_failed_scans = list(retry_state.failed_domains.values())
         
+        # ✅ ADD THIS: Update batch to "completed" when all scans finish
+        if request.save_to_db:
+            final_status = "completed" if len(retry_state.successful_domains) > 0 else "failed"
+            await db_handler.update_batch_status(
+                batch_id, 
+                final_status, 
+                len(retry_state.successful_domains), 
+                len(final_failed_scans)
+            )
+            logger.info(f"✅ Batch {batch_id} marked as '{final_status}'")
+        
         # Prepare final response
         final_response = {
+            "batch_id": batch_id,
             "summary": {
                 "total_domains": len(domains),
                 "successful": len(retry_state.successful_domains),
@@ -1823,25 +1874,76 @@ async def execute_queued_scan(batch_id: str, domains_str: str, max_concurrent: i
 @app.get("/batch/{batch_id}")
 async def get_batch_status(batch_id: str):
     """
-    Poll to get batch status and results.
-    Statuses: pending → processing → completed/failed
+    Poll to get batch status and results with LIVE progress tracking.
+    Returns: batch info + real-time domain completion counts
     """
     logger.info(f"Polling batch status for: {batch_id}")
     
     try:
-        # Get batch from database
-        response = await call_service("GET", f"{db_handler.db_service_url}/scans/batch/{batch_id}", timeout=10)
+        # Get batch metadata from database
+        batch_response = await db_handler.get_batch_info(batch_id)
         
-        if response.status_code == 404:
+        if not batch_response:
             raise APIError(404, "batch_not_found", f"Batch {batch_id} not found")
         
-        if response.status_code != 200:
-            raise APIError(500, "batch_fetch_failed", f"Failed to fetch batch: {response.status_code}")
+        batch_data = batch_response
         
-        batch_data = response.json()
-        logger.info(f"Batch {batch_id} status: {batch_data.get('status')}")
+        # ✅ FETCH LIVE RESULTS TO CALCULATE PROGRESS
+        results = await db_handler.get_scan_results(batch_id=batch_id, limit=1000) # Fetch all results
         
-        return batch_data
+        # ✅ CALCULATE LIVE STATS
+        successful_count = len([r for r in results if r.get('scan_status') == 'completed'])
+        failed_count = len([r for r in results if r.get('scan_status') in ['failed', 'http_skipped']])
+        total_completed = successful_count + failed_count
+        
+        # ✅ CALCULATE TOTAL EXECUTION TIME
+        execution_time = sum(r.get('execution_time_seconds', 0) for r in results)
+        
+        # ✅ DETERMINE TOTAL DOMAINS
+        total_domains = batch_data.get('total_urls', 0)
+        if total_domains == 0 and batch_data.get('request_payload'):
+            # Fallback: count domains from request payload
+            payload = batch_data['request_payload']
+            domains = payload.get('domains', [])
+            if not domains and payload.get('domain_string'):
+                domains = payload['domain_string'].split(',')
+            total_domains = len(domains)
+        
+        # ✅ UPDATE STATUS IF ALL DOMAINS PROCESSED
+        current_status = batch_data.get('status', 'pending')
+        if current_status == 'processing' and total_completed >= total_domains:
+            # All domains done - update to completed/failed
+            if failed_count == total_domains:
+                current_status = 'failed'
+            else:
+                current_status = 'completed'
+            
+            # Update database
+            await db_handler.update_batch_status(
+                batch_id, 
+                current_status, 
+                successful_count, 
+                failed_count
+            )
+        
+        # ✅ RETURN ENHANCED RESPONSE
+        response = {
+            "batch_id": batch_id,
+            "status": current_status,
+            "total_domains": total_domains,
+            "successful_count": successful_count,
+            "failed_count": failed_count,
+            "completed_count": total_completed,
+            "execution_time_seconds": round(execution_time, 2),
+            "created_at": batch_data.get('created_at'),
+            "request_payload": batch_data.get('request_payload'),
+            # ✅ OPTIONALLY INCLUDE RESULTS (can be large)
+            # "results": results  # Uncomment if you want full results in polling
+        }
+        
+        logger.info(f"Batch {batch_id} progress: {total_completed}/{total_domains} ({current_status})")
+        
+        return response
     
     except APIError:
         raise

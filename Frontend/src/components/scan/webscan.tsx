@@ -102,8 +102,8 @@ interface WebScanProps {
 
 interface ScanResult {
   request_id: string;
-  id?: number; // ADD THIS for individual result deletion
-  batch_id?: string; // ADD THIS
+  id?: number;
+  batch_id?: string;
   primary_domain?: string;
   domain_list?: string[];
   url: string;
@@ -112,6 +112,14 @@ interface ScanResult {
   total_urls: number;
   execution_time_seconds?: number;
   scan_status?: ScanStatus;
+  
+  // ✅ ADD THESE NEW FIELDS
+  progressPercentage?: number;
+  completedUrls?: number;
+  successful_count?: number;
+  failed_count?: number;
+  
+  // ... rest of existing fields
   tls_version?: string;
   public_key_size_bits?: number;
   cipher_suite_name?: string;
@@ -499,6 +507,7 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
     // ✅ FIX: Load execution times AND detailed results for completed batches
     const batchesWithExecutionTime = await Promise.all(
       batches.map(async (batch: any) => {
+        // ✅ ONLY load details for COMPLETED batches
         if (batch.status === 'completed' && batch.batch_id) {
           try {
             const details = await loadBatchDetails(normalizedBaseUrl, batch.batch_id);
@@ -511,6 +520,7 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
             return batch;
           }
         }
+        // ✅ Return batch as-is if not completed
         return batch;
       })
     );
@@ -626,35 +636,40 @@ const loadBatchDetails = async (apiBaseUrl: string, batchId: string): Promise<Sc
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case 'completed': return <div className="h-2 w-2 bg-success rounded-full" />;
-    case 'failed': return <div className="h-2 w-2 bg-destructive rounded-full" />;
-    case 'processing': return <div className="h-2 w-2 bg-primary rounded-full animate-pulse" />;
-    default: return <div className="h-2 w-2 bg-warning rounded-full" />;
+    case 'completed': 
+      return <div className="h-2 w-2 bg-success rounded-full" />;
+    case 'failed': 
+      return <div className="h-2 w-2 bg-destructive rounded-full" />;
+    case 'processing': 
+      return (
+        <div className="relative h-2 w-2">
+          <div className="absolute h-2 w-2 bg-primary rounded-full animate-ping" />
+          <div className="absolute h-2 w-2 bg-primary rounded-full" />
+        </div>
+      );
+    case 'pending':
+      return <div className="h-2 w-2 bg-warning rounded-full animate-pulse" />;
+    default: 
+      return <div className="h-2 w-2 bg-muted-foreground rounded-full" />;
   }
 };
 
 const connectSSEWithPost = async (
   apiBaseUrl: string,
   domains: string,
-  saveToDb: boolean,  // ADD THIS PARAMETER
+  saveToDb: boolean,
   onStart: (requestId: string) => void,
   onProgress: (data: any) => void,
   onComplete: (data: any) => void,
   onError: (error: string) => void
 ) => {
   try {
-    // Normalize API base URL (remove trailing slash)
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
-    const fullUrl = `${normalizedBaseUrl}/scan-with-progress`;
+    const fullUrl = `${normalizedBaseUrl}/scan-with-progress`;  // ✅ CORRECT ENDPOINT
 
-    console.log('🔍 Attempting to connect to:', fullUrl);
-    console.log('📦 Request body:', {
-      domain: domains,
-      max_concurrent: 5,
-      save_to_db: saveToDb  // ADD THIS
-    });
+    console.log('🔍 SSE Connection:', fullUrl);
 
-    const response = await fetch(fullUrl, { // We are deliberately not using apiFetch here because it parses the response body as JSON
+    const response = await fetch(fullUrl, {  // ✅ DO NOT use apiFetch (it parses JSON)
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -663,7 +678,7 @@ const connectSSEWithPost = async (
       body: JSON.stringify({
         domain: domains,
         max_concurrent: 5,
-        save_to_db: saveToDb  // ADD THIS - This is critical!
+        save_to_db: saveToDb
       })
     });
 
@@ -679,6 +694,7 @@ const connectSSEWithPost = async (
     }
 
     let buffer = '';
+    let batchIdReceived = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -687,33 +703,29 @@ const connectSSEWithPost = async (
 
       buffer += decoder.decode(value, { stream: true });
       
-      // Process complete SSE messages
       const lines = buffer.split('\n\n');
-      buffer = lines.pop() || ''; // Keep incomplete message in buffer
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
             const data = JSON.parse(line.slice(6));
             
-            if (data.type === 'start') {
-              onStart(data.request_id);
-              onProgress(data);
-            } else if (data.type === 'domain_processing') {
-              onProgress(data);
-            } else if (data.type === 'round_start') { // Restored this handler
-              onProgress(data);
+            // ✅ CRITICAL: Extract batch_id from FIRST event
+            if (!batchIdReceived && data.batch_id) {
+              onStart(data.batch_id);
+              batchIdReceived = true;
+            }
+            
+            // ✅ Route events to appropriate handlers
+            if (data.type === 'progress_snapshot') {
+              onProgress(data);  // ✅ THIS UPDATES PROGRESS BAR
             } else if (data.type === 'domain_complete') {
               onProgress(data);
-            } else if (data.type === 'round_complete') {
-              onProgress(data);
-            } else if (data.type === 'retry_wait') {
-              // Handle retry_wait separately to show a specific message
-              onProgress(data);
-            } else if (data.type === 'cancelled') {
+            } else if (data.type === 'complete' || data.type === 'progress_summary') {
               onComplete(data);
-              return;
-            } else if (data.type === 'complete') {
+              return;  // ✅ Exit SSE stream
+            } else if (data.type === 'cancelled') {
               onComplete(data);
               return;
             }
@@ -724,8 +736,8 @@ const connectSSEWithPost = async (
       }
     }
   } catch (err) {
-    console.error('Fetch SSE error:', err);
-    onError(err instanceof Error ? err.message : 'Unknown error'); // Pass empty tempRequestId on fetch error
+    console.error('SSE error:', err);
+    onError(err instanceof Error ? err.message : 'Unknown error');
   }
 };
 
@@ -753,6 +765,218 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
   const [expandedDomainUrl, setExpandedDomainUrl] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false); // Track if we've already auto-loaded
+
+  // ✅ NEW: Track live SSE progress separately from database
+  const [liveProgress, setLiveProgress] = useState<{[key: string]: {
+    percentage: number;
+    completed: number;
+    total: number;
+    current_phase?: string;
+    current_domain?: string;
+    eta_seconds?: number;
+  }}> ({});
+
+  // ✅ NEW: Track active SSE connections
+  const [activeSSEConnections, setActiveSSEConnections] = useState<Set<string>>(new Set());
+
+  // Add these new state variables at the top of the component (around line 300)
+  const [pollingBatches, setPollingBatches] = useState<Set<string>>(new Set());
+  const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // ✅ NEW FUNCTION: Poll a specific batch for status updates
+  const startPollingBatch = (batchId: string) => {
+    // ✅ Skip if temporary ID
+    if (batchId.startsWith('temp_')) {
+      console.warn(`⚠️ Skipping poll for temporary ID: ${batchId}`);
+      return;
+    }
+    
+    // ✅ CRITICAL: Don't poll if SSE is active
+    if (activeSSEConnections.has(batchId)) {
+      console.log(`⏸️ SSE active for ${batchId}, skipping polling`);
+      return;
+    }
+    
+    // ✅ Don't start duplicate polling
+    if (pollingBatches.has(batchId)) {
+      console.log(`Already polling ${batchId}`);
+      return;
+    }
+
+    console.log(`🔄 Starting polling for batch ${batchId}`);
+    setPollingBatches(prev => new Set(prev).add(batchId));
+
+    const pollInterval = setInterval(async () => {
+      try {
+        // ✅ CRITICAL: Stop polling if SSE became active
+        if (activeSSEConnections.has(batchId)) {
+          console.log(`🛑 SSE became active for ${batchId}, stopping polling`);
+          stopPollingBatch(batchId);
+          return;
+        }
+        
+        console.log(`📡 Polling batch ${batchId}...`);
+        const response = await apiFetch(`${apiBaseUrl}/batch/${batchId}`);
+        
+        // Update scan history with latest status
+        setScanHistory(prev => prev.map(scan => {
+          if (scan.batch_id === batchId || scan.request_id === batchId) {
+            // Calculate progress for batch scans
+            const totalUrls = response.total_domains || scan.total_urls;
+            const completedUrls = (response.successful_count || 0) + (response.failed_count || 0);
+            const progressPercentage = totalUrls > 0 ? (completedUrls / totalUrls) * 100 : 0;
+
+            return {
+              ...scan,
+              status: response.status,
+              scan_status: normalizeScanStatus({ status: response.status }),
+              total_urls: totalUrls,
+              successful_count: response.successful_count || 0,
+              failed_count: response.failed_count || 0,
+              execution_time_seconds: response.execution_time_seconds || scan.execution_time_seconds,
+              // ✅ ADD PROGRESS TRACKING
+              progressPercentage,
+              completedUrls,
+              // ✅ Store detailed results if available
+              detailedResults: response.results || scan.detailedResults
+            };
+          }
+          return scan;
+        }));
+
+        // ✅ STOP POLLING IF SCAN IS COMPLETE OR FAILED
+        if (response.status === 'completed' || response.status === 'failed') {
+          console.log(`✅ Batch ${batchId} finished with status: ${response.status}`);
+          stopPollingBatch(batchId);
+
+          // Load full batch details for completed scans
+          if (response.status === 'completed') {
+            const details = await loadBatchDetails(apiBaseUrl, batchId);
+            setScanHistory(prev => prev.map(scan =>
+              scan.batch_id === batchId || scan.request_id === batchId
+                ? { ...scan, detailedResults: details }
+                : scan
+            ));
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Error polling batch ${batchId}:`, error);
+        // Don't stop polling on error - backend might be temporarily unavailable
+      }
+    }, 3000); // Poll every 3 seconds
+
+    pollingIntervalsRef.current.set(batchId, pollInterval);
+  };
+
+  // ✅ NEW FUNCTION: Stop polling a batch
+  const stopPollingBatch = (batchId: string) => {
+    const interval = pollingIntervalsRef.current.get(batchId);
+    if (interval) {
+      clearInterval(interval);
+      pollingIntervalsRef.current.delete(batchId);
+    }
+    setPollingBatches(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(batchId);
+      return newSet;
+    });
+    console.log(`⏹️ Stopped polling batch ${batchId}`);
+  };
+
+  // ✅ Clean up SSE connections on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all live progress
+      setLiveProgress({});
+      setActiveSSEConnections(new Set());
+      
+      // Stop all polling
+      pollingIntervalsRef.current.forEach(interval => clearInterval(interval));
+      pollingIntervalsRef.current.clear();
+    };
+  }, []);
+
+  // ✅ AUTO-START POLLING FOR PENDING/PROCESSING SCANS ON LOAD
+  useEffect(() => {
+    const processingScans = scanHistory.filter(scan => 
+      scan.status === 'pending' || scan.status === 'processing'
+    );
+
+    processingScans.forEach(scan => {
+      const batchId = scan.batch_id || scan.request_id;
+      if (batchId && !pollingBatches.has(batchId)) {
+        startPollingBatch(batchId);
+      }
+    });
+  }, [scanHistory.length]); // Only run when number of scans changes
+
+
+  // ✅ NEW PROGRESS CALCULATION (REPLACE)
+  const getProgressForBatch = (batchId: string, scan: ScanResult) => {
+    // ✅ 1. If SSE is active, use live progress
+    if (liveProgress[batchId]) {
+      return {
+        percentage: liveProgress[batchId].percentage,
+        completed: liveProgress[batchId].completed,
+        current_phase: liveProgress[batchId].current_phase,
+        current_domain: liveProgress[batchId].current_domain,
+        eta_seconds: liveProgress[batchId].eta_seconds
+      };
+    }
+    
+    // ✅ 2. Fallback to database polling
+    if (scan.progressPercentage !== undefined) {
+      return {
+        percentage: scan.progressPercentage,
+        completed: scan.completedUrls || 0,
+        current_phase: undefined,
+        current_domain: undefined,
+        eta_seconds: undefined
+      };
+    }
+    
+    // ✅ 3. Default to 0
+    return {
+      percentage: 0,
+      completed: 0,
+      current_phase: undefined,
+      current_domain: undefined,
+      eta_seconds: undefined
+    };
+  };
+
+// ✅ NEW: Update live progress from SSE
+const updateLiveProgress = (batchId: string, data: any) => {
+  setLiveProgress(prev => ({
+    ...prev,
+    [batchId]: {
+      percentage: data.percentage || 0,
+      completed: data.completed || 0,
+      total: data.total || 0,
+      current_phase: data.current_phase,
+      current_domain: data.current_domain,
+      eta_seconds: data.eta_seconds
+    }
+  }));
+  
+  // ✅ Mark SSE as active
+  setActiveSSEConnections(prev => new Set(prev).add(batchId));
+};
+
+// ✅ NEW: Clear live progress when SSE ends
+const clearLiveProgress = (batchId: string) => {
+  setLiveProgress(prev => {
+    const newProgress = { ...prev };
+    delete newProgress[batchId];
+    return newProgress;
+  });
+  
+  setActiveSSEConnections(prev => {
+    const newSet = new Set(prev);
+    newSet.delete(batchId);
+    return newSet;
+  });
+};
 
 
   // Load historical scans on component mount from the API
@@ -1060,66 +1284,149 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
       .split(/[\n,\s]+/)
       .map(u => u.trim())
       .filter(u => u !== '');
-  
+
     if (urlList.length === 0) {
       showMessage('Please enter at least one URL', 'error');
       return;
     }
-  
+
     setIsScanning(true);
     setUrls('');
     showMessage(`Starting scan for ${urlList.length} URL(s)...`, 'info');
-  
+
+    // ✅ CRITICAL: Create optimistic entry BEFORE SSE
+    const tempBatchId = `temp_${Date.now()}`;
+    const optimisticScan: ScanResult = {
+      request_id: tempBatchId,
+      batch_id: tempBatchId,
+      url: urlList.length === 1 ? urlList[0] : `Batch with ${urlList.length} domains`,
+      primary_domain: urlList[0],
+      domain_list: urlList,
+      status: 'processing',  // ✅ Set to processing immediately
+      scan_status: 'pending',
+      requested_at: new Date().toISOString(),
+      total_urls: urlList.length,
+      execution_time_seconds: 0,
+      progressPercentage: 0,  // ✅ Start at 0%
+      completedUrls: 0,
+      successful_count: 0, // Initialize
+      failed_count: 0,     // Initialize
+      detailedResults: []
+    };
+
+    setScanHistory(prev => [optimisticScan, ...prev]);
+    setActiveTab('history');  // ✅ Switch to history BEFORE starting scan
+
     try {
-      // ✅ FIX: Use /scan endpoint directly (same as Swagger UI)
-      const response = await apiFetch(`${apiBaseUrl}/scan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          domain: urlList.join(','),
-          max_concurrent: 5,
-          save_to_db: true  // ✅ This ensures DB storage
-        })
-      });
-  
-      console.log('✅ Scan completed:', response);
-      
-      // Extract batch_id from response
-      // The /scan endpoint returns the result directly, but we need to find the batch_id
-      // For single domain: response is the scan result with batch_id
-      // For multiple domains: response has successful_scans array
-      
-      let batchId: string | undefined;
-      if (response.successful_scans && response.successful_scans.length > 0) {
-        // Multi-domain scan
-        batchId = response.successful_scans[0]?.batch_id;
-      } else if (response.batch_id) {
-        // Single domain scan
-        batchId = response.batch_id;
-      }
-  
-      showMessage(
-        `✅ Scan completed successfully!`, 
-        'success'
-      );
-  
-      // Refresh history to show new scan
-      setTimeout(async () => {
-        const historicalScans = await loadHistoricalScans(apiBaseUrl);
-        if (historicalScans && historicalScans.length > 0) {
-          setScanHistory(historicalScans);
-        }
+      // ✅ CRITICAL: Use SSE endpoint instead of blocking POST
+      await connectSSEWithPost(
+        apiBaseUrl,
+        urlList.join(','),
+        true,  // save_to_db
         
-        // Switch to history tab
-        setActiveTab('history');
-      }, 1000);
-  
+        // ✅ ON START: Update with real batch_id
+        (realBatchId: string) => {
+          console.log('🆔 Received real batch ID:', realBatchId);
+          setScanHistory(prev => prev.map(scan =>
+            scan.request_id === tempBatchId
+              ? { ...scan, request_id: realBatchId, batch_id: realBatchId }
+              : scan
+          ));
+          setCurrentRequestId(realBatchId);
+        },
+        
+        // ✅ ON PROGRESS: Update live progress
+        (data: any) => {
+          console.log('📊 Progress update:', data);
+          
+          if (data.type === 'progress_snapshot') {
+            const batchId = data.batch_id || currentRequestId || tempBatchId;
+            
+            // ✅ CRITICAL: Update live progress state
+            updateLiveProgress(batchId, data);
+            
+            // ✅ Also update scan history for persistence
+            setScanHistory(prev => prev.map(scan => {
+              if (scan.batch_id === batchId || scan.batch_id === tempBatchId) {
+                return {
+                  ...scan,
+                  progressPercentage: data.percentage || 0,
+                  completedUrls: data.completed || 0,
+                  total_urls: data.total || scan.total_urls,
+                  status: 'processing'
+                };
+              }
+              return scan;
+            }));
+          }
+          
+          // ✅ Update domain-level progress
+          if (data.type === 'domain_complete') {
+            setDomainProgress(prev => ({
+              ...prev,
+              [data.domain]: {
+                status: data.status,
+                duration: data.duration,
+                round: data.round
+              }
+            }));
+          }
+        },
+        
+        // ✅ ON COMPLETE: Load final results from database
+        async (data: any) => {
+          console.log('✅ Scan complete:', data);
+          setIsScanning(false);
+          setIsCancelling(false);
+          setCurrentRequestId(null);
+          
+          const batchId = data.batch_id || currentRequestId || tempBatchId;
+          
+          // ✅ CRITICAL: Clear live progress
+          clearLiveProgress(batchId);
+          
+          // ✅ Load full results from database
+          try {
+            const details = await loadBatchDetails(apiBaseUrl, batchId);
+            
+            setScanHistory(prev => prev.map(scan =>
+              scan.batch_id === batchId || scan.request_id === tempBatchId
+                ? {
+                    ...scan,
+                    status: 'completed',
+                    scan_status: 'completed',
+                    progressPercentage: 100,
+                    completedUrls: scan.total_urls,
+                    successful_count: data.successful_count || scan.successful_count,
+                    failed_count: data.failed_count || scan.failed_count,
+                    detailedResults: details
+                  }
+                : scan
+            ));
+            
+            showMessage('✅ Scan completed successfully!', 'success');
+          } catch (error) {
+            console.error('Failed to load results:', error);
+            showMessage('Scan completed but failed to load results', 'warning');
+          }
+        },
+        
+        // ✅ ON ERROR: Handle failures
+        (error: string) => {
+          console.error('❌ Scan failed:', error);
+          setIsScanning(false);
+          setIsCancelling(false);
+          setCurrentRequestId(null);
+          
+          setScanHistory(prev => prev.filter(s => !s.request_id.startsWith('temp_')));
+          showMessage(`Scan failed: ${error}`, 'error');
+        }
+      );
     } catch (error) {
-      console.error('❌ Scan failed:', error);
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      showMessage(`Scan failed: ${errorMsg}`, 'error');
-    } finally {
+      console.error('❌ SSE connection failed:', error);
       setIsScanning(false);
+      setScanHistory(prev => prev.filter(s => !s.request_id.startsWith('temp_')));
+      showMessage('Failed to connect to scan service', 'error');
     }
   };
 
@@ -1610,171 +1917,256 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
                   const quantumStatus = pqcAnalysis?.quantum_ready === true ? 'Quantum Ready' : 'Not Ready';
 
                   return (
-                    <UnifiedResultCard
-                      key={uniqueKey}
-                      className={scan.status === 'processing' ? 'animate-pulse bg-gradient-to-r from-transparent via-primary/5 to-transparent bg-[length:1000px_100%]' : ''}
-                      title={isIndividualDomain ? scan.url : `Request ID: ${scan.request_id}`}
-                      description={isIndividualDomain ? '' : new Date(scan.requested_at || parentBatch.requested_at).toLocaleString()}
-                      status={
-                        scan.status === 'completed' ? 'success' :
-                        scan.status === 'failed' || scan.error_message ? 'error' :
-                        scan.status === 'processing' ? 'info' : 'warning'
-                      }
-                      statusLabel={getQuantumStatus()}
-                      icon={getStatusIcon(scan.status)}
-                      metrics={isIndividualDomain ? [
-                        { 
-                          label: "PQC Score", 
-                          value: pqcScore,
-                          valueClassName: getGradeColor(pqcGrade)
-                        },
-                        { 
-                          label: "Grade", 
-                          value: pqcGrade,
-                          valueClassName: getGradeColor(pqcGrade)
-                        },
-                        { 
-                          label: "Status", 
-                          value: quantumStatus,
-                          valueClassName: pqcAnalysis?.quantum_ready ? 'text-success' : 'text-destructive'
-                        }
-                      ] : [
-                        { label: "URLs", value: scan.total_urls },
-                        { label: "Execution Time", value: executionTime }
-                      ]}
-                      actions={[
-                        ...((scan.status === 'completed' || scan.scan_status === 'http_skipped' || (scan.status === 'failed' && (isIndividualDomain || (scan.detailedResults && scan.detailedResults.length > 0)))) ? [{
-                          label: "View Results",
-                          icon: <Eye size={16} />,
-                          onClick: () => {
-                            if (isIndividualDomain) {
-                              // For individual domains, directly open the domain detail modal
-                              setExpandedDomainUrl(scan.url);
-                              handleLoadBatchDetails(parentBatch.request_id);
-                            } else {
-                              // For batches, show the batch results page
-                              handleLoadBatchDetails(scan.request_id);
-                            }
-                          },
-                          variant: "outline" as const
-                        }] : []),
-                        ...((scan.status === 'failed' || scan.status === 'pending' || scan.status === 'processing') ? [{
-                          label: retryingId === parentBatch.request_id ? "Retrying..." : "Retry",
-                          icon: retryingId === parentBatch.request_id ? <RefreshCw size={16} className="animate-spin" /> : <RotateCcw size={16} />,
-                          onClick: () => retryScan(parentBatch),
-                          variant: "outline" as const,
-                          disabled: retryingId === parentBatch.request_id
-                        }] : []),
-                        {
-                          label: "Delete",
-                          icon: <Trash2 size={16} />,
-                          onClick: deleteLogic,
-                          variant: "destructive" as const
-                        }
-                      ]}
-                    >
-                      {!isIndividualDomain && (domainLabel || shouldShowDomainHint) && (
-                        <div className="mb-3 text-sm">
-                          <span className="font-semibold text-foreground">Domain:</span>{' '}
-                          <span className="text-muted-foreground break-all">
-                            {domainLabel || 'Load results to view domain'}
-                          </span>
-                        </div>
-                      )}
-
-
-                      
-                      {/* PROGRESS DISPLAY */}
-                      {scan.status === 'processing' && expandedProgress.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
-                        <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="mt-4 col-span-full"
-                        >
-                          <ProgressDisplay 
-                            scanProgress={scanProgress} 
-                            domainProgress={domainProgress}
-                            processingDomains={processingDomains}
-                            onCancel={handleCancelScan}
-                            roundHistory={roundHistory}
-                            isCancelling={isCancelling}
-                            currentRound={currentRound}
-                            isActiveProgress={true}
-                          />
-                        </motion.div>
-                      )}
-
-                      {/* SUMMARY DISPLAY */}
-                      {(scan.status === 'completed' || scan.status === 'failed') && 
-                        expandedSummary.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="mt-4 col-span-full border-t pt-4"
-                          >
-                            {/* For individual domains, show their specific results */}
-                            {isIndividualDomain ? (
-                              <ProgressDisplay 
-                                scanProgress={{ 
-                                  total: 1, 
-                                  completed: 1 
-                                }}
-                                domainProgress={{
-                                  [scan.url]: {
-                                    status: scan.scan_status?.toLowerCase() === 'completed' 
-                                      ? 'completed' 
-                                      : scan.scan_status?.toLowerCase() === 'http_skipped' 
-                                      ? 'http_skipped' 
-                                      : 'failed',
-                                    duration: scan.execution_time_seconds,
-                                    error: scan.error_message,
-                                    round: 1
-                                  }
-                                }}
-                                processingDomains={{}}
-                                roundHistory={[]}
-                                isActiveProgress={false}
-                              />
-                            ) : (
-                              <ProgressDisplay 
-                                scanProgress={{ 
-                                  total: scan.total_urls, 
-                                  completed: scan.total_urls 
-                                }}
-                                domainProgress={(() => {
-                                  const progress: {[key: string]: DomainProgressInfo} = {};
-                                  
-                                  scan.detailedResults?.forEach((result) => {
-                                    const domain = result.url;
-                                    
-                                    const scanStatus = result.scan_status?.toLowerCase();
-                                    let status = 'failed';
-                                    if (scanStatus === 'completed') {
-                                      status = 'completed';
-                                    } else if (scanStatus === 'http_skipped') {
-                                      status = 'http_skipped';
-                                    }
-                                    
-                                    progress[domain] = {
-                                      status: status,
-                                      duration: result.execution_time_seconds,
-                                      error: result.error_message,
-                                      round: (result as any).round || 1
-                                    };
-                                  });
-                                  
-                                  return progress;
-                                })()}
-                                processingDomains={{}}
-                                roundHistory={[]}
-                                isActiveProgress={false}
-                              />
-                            )}
-                          </motion.div>
-                        )}
-                    </UnifiedResultCard>
+                                        <UnifiedResultCard
+                                          key={uniqueKey}
+                                          className={scan.status === 'processing' ? 'animate-pulse bg-gradient-to-r from-transparent via-primary/5 to-transparent bg-[length:1000px_100%]' : ''}
+                                          title={isIndividualDomain ? scan.url : `Request ID: ${scan.request_id}`}
+                                          description={isIndividualDomain ? '' : new Date(scan.requested_at || parentBatch.requested_at).toLocaleString()}
+                                          status={
+                                            scan.status === 'completed' ? 'success' :
+                                            scan.status === 'failed' || scan.error_message ? 'error' :
+                                            scan.status === 'processing' ? 'info' : 'warning'
+                                          }
+                                          statusLabel={getQuantumStatus()}
+                                          icon={getStatusIcon(scan.status)}
+                                          metrics={isIndividualDomain ? [
+                                            { 
+                                              label: "PQC Score", 
+                                              value: pqcScore,
+                                              valueClassName: getGradeColor(pqcGrade)
+                                            },
+                                            { 
+                                              label: "Grade", 
+                                              value: pqcGrade,
+                                              valueClassName: getGradeColor(pqcGrade)
+                                            },
+                                            { 
+                                              label: "Status", 
+                                              value: quantumStatus,
+                                              valueClassName: pqcAnalysis?.quantum_ready ? 'text-success' : 'text-destructive'
+                                            }
+                                          ] : [
+                                            { label: "URLs", value: scan.total_urls },
+                                            // ✅ SHOW LIVE PROGRESS FOR PROCESSING SCANS
+                                            ...(scan.status === 'processing' || scan.status === 'pending' ? [{
+                                              label: "Progress",
+                                              value: `${scan.completedUrls || 0}/${scan.total_urls}`,
+                                              valueClassName: 'text-primary'
+                                            }] : []),
+                                            { label: "Execution Time", value: executionTime }
+                                          ]}
+                                          actions={[
+                                            ...((scan.status === 'completed' || scan.scan_status === 'http_skipped' || (scan.status === 'failed' && (isIndividualDomain || (scan.detailedResults && scan.detailedResults.length > 0)))) ? [{
+                                              label: "View Results",
+                                              icon: <Eye size={16} />,
+                                              onClick: () => {
+                                                if (isIndividualDomain) {
+                                                  // For individual domains, directly open the domain detail modal
+                                                  setExpandedDomainUrl(scan.url);
+                                                  handleLoadBatchDetails(parentBatch.request_id);
+                                                } else {
+                                                  // For batches, show the batch results page
+                                                  handleLoadBatchDetails(scan.request_id);
+                                                }
+                                              },
+                                              variant: "outline" as const
+                                            }] : []),
+                                            ...((scan.status === 'failed' || scan.status === 'pending' || scan.status === 'processing') ? [{
+                                              label: retryingId === parentBatch.request_id ? "Retrying..." : "Retry",
+                                              icon: retryingId === parentBatch.request_id ? <RefreshCw size={16} className="animate-spin" /> : <RotateCcw size={16} />,
+                                              onClick: () => retryScan(parentBatch),
+                                              variant: "outline" as const,
+                                              disabled: retryingId === parentBatch.request_id
+                                            }] : []),
+                                            {
+                                              label: "Delete",
+                                              icon: <Trash2 size={16} />,
+                                              onClick: deleteLogic,
+                                              variant: "destructive" as const
+                                            }
+                                          ]}
+                                        >
+                                          {!isIndividualDomain && (domainLabel || shouldShowDomainHint) && (
+                                            <div className="mb-3 text-sm">
+                                              <span className="font-semibold text-foreground">Domain:</span>{' '}
+                                              <span className="text-muted-foreground break-all">
+                                                {domainLabel || 'Load results to view domain'}
+                                              </span>
+                                            </div>
+                                          )}
+                    
+                    
+                                          {/* ✅ REPLACE existing progress bar code */}
+                                          {(scan.status === 'processing' || scan.status === 'pending') && (
+                                            <div className="mt-4 space-y-2">
+                                              {(() => {
+                                                const batchId = scan.batch_id || scan.request_id;
+                                                const progress = getProgressForBatch(batchId, scan);
+                                                
+                                                return (
+                                                  <>
+                                                    <div className="flex items-center justify-between text-sm">
+                                                      <span className="text-muted-foreground">
+                                                        {activeSSEConnections.has(batchId) ? (
+                                                          <UnifiedInlineRefresh 
+                                                            isRefreshing={true} 
+                                                            size="sm" 
+                                                            label={
+                                                              progress.current_phase 
+                                                                ? `${progress.current_phase.replace(/_/g, ' ')}...`
+                                                                : 'Scanning...'
+                                                            }
+                                                            className="text-primary" 
+                                                          />
+                                                        ) : (
+                                                          'Pending...'
+                                                        )}
+                                                      </span>
+                                                      <div className="flex items-center gap-2">
+                                                        <span className="font-medium">
+                                                          {progress.percentage.toFixed(0)}%
+                                                        </span>
+                                                        {progress.eta_seconds && progress.eta_seconds > 0 && (
+                                                          <span className="text-xs text-muted-foreground">
+                                                            ETA: {progress.eta_seconds}s
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                    
+                                                    {/* ✅ Show current domain being scanned */}
+                                                    {progress.current_domain && (
+                                                      <div className="text-xs text-muted-foreground">
+                                                        Scanning: {progress.current_domain}
+                                                      </div>
+                                                    )}
+                                                    
+                                                    {/* ✅ Smooth progress bar */}
+                                                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                                                      <motion.div
+                                                        className="bg-primary h-full rounded-full"
+                                                        initial={{ width: 0 }}
+                                                        animate={{ width: `${progress.percentage}%` }}
+                                                        transition={{ duration: 0.5, ease: "easeInOut" }}
+                                                      />
+                                                    </div>
+                                                    
+                                                    {/* ✅ Domain breakdown */}
+                                                    {scan.total_urls > 1 && (
+                                                      <div className="mt-3 text-xs text-muted-foreground space-y-1">
+                                                        <div className="flex justify-between">
+                                                          <span>✅ Successful:</span>
+                                                          <span className="font-medium text-success">{scan.successful_count || 0}</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                          <span>❌ Failed:</span>
+                                                          <span className="font-medium text-destructive">{scan.failed_count || 0}</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                          <span>⏳ Remaining:</span>
+                                                          <span className="font-medium text-warning">
+                                                            {scan.total_urls - (progress.completed || 0)}
+                                                          </span>
+                                                        </div>
+                                                      </div>
+                                                    )}
+                                                  </>
+                                                );
+                                              })()}
+                                            </div>
+                                          )}
+                                          
+                                          {/* PROGRESS DISPLAY */}
+                                          {scan.status === 'processing' && expandedProgress.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="mt-4 col-span-full"
+                                            >
+                                              <ProgressDisplay 
+                                                scanProgress={scanProgress} 
+                                                domainProgress={domainProgress}
+                                                processingDomains={processingDomains}
+                                                onCancel={handleCancelScan}
+                                                roundHistory={roundHistory}
+                                                isCancelling={isCancelling}
+                                                currentRound={currentRound}
+                                                isActiveProgress={true}
+                                              />
+                                            </motion.div>
+                                          )}
+                    
+                                          {/* SUMMARY DISPLAY */}
+                                          {(scan.status === 'completed' || scan.status === 'failed') && 
+                                            expandedSummary.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
+                                              <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="mt-4 col-span-full border-t pt-4"
+                                              >
+                                                {/* For individual domains, show their specific results */}
+                                                {isIndividualDomain ? (
+                                                  <ProgressDisplay 
+                                                    scanProgress={{ 
+                                                      total: 1, 
+                                                      completed: 1 
+                                                    }}
+                                                    domainProgress={{
+                                                      [scan.url]: {
+                                                        status: scan.scan_status?.toLowerCase() === 'completed' 
+                                                          ? 'completed' 
+                                                          : scan.scan_status?.toLowerCase() === 'http_skipped' 
+                                                          ? 'http_skipped' 
+                                                          : 'failed',
+                                                        duration: scan.execution_time_seconds,
+                                                        error: scan.error_message,
+                                                        round: 1
+                                                      }
+                                                    }}
+                                                    processingDomains={{}}
+                                                    roundHistory={[]}
+                                                    isActiveProgress={false}
+                                                  />
+                                                ) : (
+                                                  <ProgressDisplay 
+                                                    scanProgress={{ 
+                                                      total: scan.total_urls, 
+                                                      completed: scan.total_urls 
+                                                    }}
+                                                    domainProgress={(() => {
+                                                      const progress: {[key: string]: DomainProgressInfo} = {};
+                                                      
+                                                      scan.detailedResults?.forEach((result) => {
+                                                        const domain = result.url;
+                                                        
+                                                        const scanStatus = result.scan_status?.toLowerCase();
+                                                        let status = 'failed';
+                                                        if (scanStatus === 'completed') {
+                                                          status = 'completed';
+                                                        } else if (scanStatus === 'http_skipped') {
+                                                          status = 'http_skipped';
+                                                        }
+                                                        
+                                                        progress[domain] = {
+                                                          status: status,
+                                                          duration: result.execution_time_seconds,
+                                                          error: result.error_message,
+                                                          round: (result as any).round || 1
+                                                        };
+                                                      });
+                                                      
+                                                      return progress;
+                                                    })()}
+                                                    processingDomains={{}}
+                                                    roundHistory={[]}
+                                                    isActiveProgress={false}
+                                                  />
+                                                )}
+                                              </motion.div>
+                                            )}
+                                        </UnifiedResultCard>
                   )
                 })}
               </div>
