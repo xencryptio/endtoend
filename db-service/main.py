@@ -23,6 +23,7 @@ from logging_middleware import correlation_middleware
 from dashboard.router import router as dashboard_router
 from export.router import router as export_router
 from vulnerabilities.router import router as vulnerabilities_router
+from applications.router import router as applications_router # NEW IMPORT
 
 from database import get_scandb_session, get_repo_scanner_session, get_system_scanner_session
 
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(dashboard_router)
 app.include_router(export_router)
 app.include_router(vulnerabilities_router)
+app.include_router(applications_router)
 
 
 

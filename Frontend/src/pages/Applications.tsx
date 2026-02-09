@@ -116,7 +116,7 @@ function applicationsFilterReducer(state: any, action: any) {
 
 // API fetching and transformation
 const fetchApplications = async (): Promise<ApplicationApiResponse[]> => {
-  const apiUrl = 'https://backend-ed29.onrender.com/api';
+  const apiUrl = 'http://localhost:8001/applications';
   const endpoint = `${apiUrl}/apps`;
 
   console.log('🌐 [API] Fetching applications from:', endpoint);
