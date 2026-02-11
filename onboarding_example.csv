@@ -1,0 +1,4 @@
+organization_name,organization_email,suborganization_name,application_name,repo_url,repo_name,branch_to_scan,domain,hostname,ip_address,operating_system
+Amazon Inc.,security@amazon.com,Amazon Web Services (AWS),EC2,https://github.com/aws/amazon-ec2-metadata-mock,amazon-ec2-metadata-mock,main,console.aws.amazon.com,ec2-prod-1,172.18.0.11,Linux
+Amazon Inc.,security@amazon.com,Amazon Retail,Online Store,https://github.com/amzn/selling-partner-api-models,selling-partner-api-models,main,www.amazon.com,retail-web-1,172.18.0.9,Linux
+Amazon Inc.,security@amazon.com,Amazon Prime,Prime Video,https://github.com/aws-samples/amazon-ivs-player-web-sample,amazon-ivs-player-web-sample,master,www.primevideo.com,primevideo-stream-1,172.18.0.12,Linux

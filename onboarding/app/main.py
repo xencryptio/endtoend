@@ -1406,6 +1406,243 @@ async def delete_batch_job(job_id: str):
     return {"message": "Job deleted successfully"}
 
 
+# ==================== CSV TEMPLATE & UNIFIED CSV ONBOARDING ====================
+
+CSV_TEMPLATE_HEADER = [
+    "organization_name",
+    "organization_email",
+    "suborganization_name",
+    "application_name",
+    "repo_url",
+    "repo_name",
+    "branch_to_scan",
+    "domain",
+    "hostname",
+    "ip_address",
+    "operating_system"
+]
+
+CSV_TEMPLATE_EXAMPLE_ROWS = [
+    ["Acme Corp", "security@acme.com", "Cloud Division", "Web App", "https://github.com/acme/webapp", "webapp", "main", "www.acme.com", "web-server-1", "192.168.1.10", "Linux"],
+    ["Acme Corp", "security@acme.com", "Cloud Division", "Web App", "https://github.com/acme/api", "api", "develop", "api.acme.com", "", "", ""],
+    ["Acme Corp", "security@acme.com", "Cloud Division", "Mobile App", "", "", "", "mobile.acme.com", "mobile-server-1", "192.168.1.20", "Linux"],
+    ["Acme Corp", "security@acme.com", "Enterprise Division", "ERP System", "https://github.com/acme/erp", "erp", "main", "erp.acme.com", "erp-server-1", "192.168.2.10", "Windows"],
+]
+
+
+@app.get("/api/onboarding/csv-template",
+         summary="Download CSV template for onboarding",
+         description="Returns a CSV template file that can be filled out and uploaded for onboarding.")
+async def download_csv_template():
+    """Generate and return a CSV template file for onboarding."""
+    import csv
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header
+    writer.writerow(CSV_TEMPLATE_HEADER)
+    
+    # Write example rows
+    for row in CSV_TEMPLATE_EXAMPLE_ROWS:
+        writer.writerow(row)
+    
+    # Prepare response
+    output.seek(0)
+    content = output.getvalue()
+    
+    return StreamingResponse(
+        io.BytesIO(content.encode('utf-8')),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=onboarding_template.csv"
+        }
+    )
+
+
+def parse_csv_to_json_payload(df: pd.DataFrame, created_by: Optional[str] = None) -> dict:
+    """
+    Convert a flat CSV DataFrame to hierarchical JSON payload for onboarding.
+    
+    CSV columns:
+    - organization_name, organization_email
+    - suborganization_name, application_name
+    - repo_url, repo_name, branch_to_scan
+    - domain
+    - hostname, ip_address, operating_system
+    
+    Each row represents one resource (repo, domain, or server) within an app/suborg/org hierarchy.
+    """
+    # Normalize column names
+    df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
+    
+    # Get organization info from first non-null row
+    org_name = None
+    org_email = None
+    for _, row in df.iterrows():
+        if pd.notna(row.get('organization_name')):
+            org_name = str(row['organization_name']).strip()
+            org_email = str(row.get('organization_email', '')).strip() if pd.notna(row.get('organization_email')) else None
+            break
+    
+    if not org_name:
+        raise ValueError("organization_name is required in CSV")
+    
+    # Build hierarchical structure
+    # Structure: org -> suborgs -> apps -> (repos, domains, servers)
+    suborgs_map = {}  # suborg_name -> {apps: {app_name -> {repos, domains, servers}}}
+    
+    for _, row in df.iterrows():
+        suborg_name = str(row.get('suborganization_name', '')).strip() if pd.notna(row.get('suborganization_name')) else None
+        app_name = str(row.get('application_name', '')).strip() if pd.notna(row.get('application_name')) else None
+        
+        # Skip rows without suborg or app
+        if not suborg_name or not app_name:
+            continue
+        
+        # Initialize suborg if not exists
+        if suborg_name not in suborgs_map:
+            suborgs_map[suborg_name] = {"apps": {}}
+        
+        # Initialize app if not exists
+        if app_name not in suborgs_map[suborg_name]["apps"]:
+            suborgs_map[suborg_name]["apps"][app_name] = {
+                "repositories": [],
+                "domains": [],
+                "servers": []
+            }
+        
+        app_data = suborgs_map[suborg_name]["apps"][app_name]
+        
+        # Add repository if present
+        repo_url = str(row.get('repo_url', '')).strip() if pd.notna(row.get('repo_url')) else None
+        if repo_url:
+            repo_name = str(row.get('repo_name', '')).strip() if pd.notna(row.get('repo_name')) else repo_url.split('/')[-1]
+            branch = str(row.get('branch_to_scan', 'main')).strip() if pd.notna(row.get('branch_to_scan')) else 'main'
+            # Avoid duplicates
+            if not any(r['repo_url'] == repo_url for r in app_data["repositories"]):
+                app_data["repositories"].append({
+                    "repo_url": repo_url,
+                    "repo_name": repo_name,
+                    "branch_to_scan": branch
+                })
+        
+        # Add domain if present
+        domain = str(row.get('domain', '')).strip() if pd.notna(row.get('domain')) else None
+        if domain:
+            # Avoid duplicates
+            if not any(d['domain'] == domain for d in app_data["domains"]):
+                app_data["domains"].append({"domain": domain})
+        
+        # Add server if present
+        hostname = str(row.get('hostname', '')).strip() if pd.notna(row.get('hostname')) else None
+        ip_address = str(row.get('ip_address', '')).strip() if pd.notna(row.get('ip_address')) else None
+        if hostname or ip_address:
+            os_type = str(row.get('operating_system', 'Linux')).strip() if pd.notna(row.get('operating_system')) else 'Linux'
+            # Avoid duplicates
+            server_key = (hostname, ip_address)
+            if not any((s.get('hostname'), s.get('ip_address')) == server_key for s in app_data["servers"]):
+                app_data["servers"].append({
+                    "hostname": hostname,
+                    "ip_address": ip_address,
+                    "operating_system": os_type
+                })
+    
+    # Convert to JSON payload format
+    suborganizations = []
+    for suborg_name, suborg_data in suborgs_map.items():
+        applications = []
+        for app_name, app_resources in suborg_data["apps"].items():
+            applications.append({
+                "application_name": app_name,
+                "repositories": app_resources["repositories"],
+                "domains": app_resources["domains"],
+                "servers": app_resources["servers"]
+            })
+        suborganizations.append({
+            "suborganization_name": suborg_name,
+            "applications": applications
+        })
+    
+    payload = {
+        "organization": {
+            "organization_name": org_name,
+            "organization_email": org_email
+        },
+        "suborganizations": suborganizations,
+        "created_by": created_by
+    }
+    
+    return payload
+
+
+@app.post("/api/onboarding/csv",
+          summary="Onboard organization via unified CSV file",
+          description="""
+          Accepts a single CSV file with all organization data in a flat format.
+          The CSV is converted to JSON and processed the same way as JSON onboarding.
+          
+          CSV Columns:
+          - organization_name, organization_email (required for at least one row)
+          - suborganization_name, application_name (required to group resources)
+          - repo_url, repo_name, branch_to_scan (optional - for repositories)
+          - domain (optional - for TLS scanning)
+          - hostname, ip_address, operating_system (optional - for servers)
+          
+          Download the template from /api/onboarding/csv-template
+          """)
+async def onboarding_csv_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="CSV file with organization data"),
+    created_by: Optional[str] = None
+):
+    """Process unified CSV file and onboard organization."""
+    logger.info(f"Received CSV onboarding upload: {file.filename}")
+    
+    # Validate file type
+    if not file.filename.endswith('.csv'):
+        raise APIError(
+            status_code=400, 
+            error_code="invalid_file_type", 
+            message="File must be a CSV file (.csv)"
+        )
+    
+    try:
+        # Read and parse CSV
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content))
+        
+        if df.empty:
+            raise APIError(
+                status_code=400, 
+                error_code="empty_csv", 
+                message="CSV file is empty"
+            )
+        
+        logger.info(f"Parsed CSV with {len(df)} rows and columns: {list(df.columns)}")
+        
+        # Convert CSV to JSON payload
+        payload_dict = parse_csv_to_json_payload(df, created_by)
+        
+        logger.info(f"Converted CSV to payload: org={payload_dict['organization']['organization_name']}, "
+                   f"suborgs={len(payload_dict.get('suborganizations', []))}")
+        
+        # Parse into Pydantic model
+        payload = OnboardingPayload.parse_obj(payload_dict)
+        
+        # Reuse the JSON onboarding flow
+        return await api_onboarding(background_tasks, payload)
+        
+    except ValueError as e:
+        logger.error(f"CSV validation error: {e}")
+        raise APIError(status_code=400, error_code="csv_validation_error", message=str(e))
+    except pd.errors.EmptyDataError:
+        raise APIError(status_code=400, error_code="empty_csv", message="CSV file is empty or invalid")
+    except Exception as e:
+        logger.exception(f"Failed to process CSV onboarding: {e}")
+        raise APIError(status_code=500, error_code="csv_processing_failed", message=str(e))
+
+
 # ==================== HEALTH CHECK ====================
 
 @app.get("/health")

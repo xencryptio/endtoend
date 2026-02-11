@@ -38,12 +38,14 @@ const downloadSample = (path: string, filename?: string) => {
 };
 
 const OnboardingNipunPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'history' | 'data' | 'json'>('json');
+  const [activeTab, setActiveTab] = useState<'history' | 'data' | 'json' | 'csv'>('json');
   const [isOnboardingSubmitting, setIsOnboardingSubmitting] = useState(false);
   const [onboardingJSON, setOnboardingJSON] = useState<string>('');
   const [onboardingResponse, setOnboardingResponse] = useState<any | null>(null);
   const [onboardingBatches, setOnboardingBatches] = useState<OnboardingBatch[]>([]);
   const [isLoadingBatches, setIsLoadingBatches] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvCreatedBy, setCsvCreatedBy] = useState<string>('');
   
   // Onboarding Data states
   const [orgs, setOrgs] = useState<any[]>([]);
@@ -237,6 +239,64 @@ const OnboardingNipunPage: React.FC = () => {
     }
   };
 
+  const handleDownloadCSVTemplate = async () => {
+    try {
+      const res = await fetch(`${BATCH_API_BASE}/api/onboarding/csv-template`);
+      if (!res.ok) throw new Error('Failed to download template');
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'onboarding_template.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('CSV template downloaded');
+    } catch (err) {
+      console.error('Failed to download CSV template:', err);
+      toast.error('Failed to download CSV template');
+    }
+  };
+
+  const handleCSVOnboardingSubmit = async () => {
+    if (!csvFile) {
+      toast.error('Please select a CSV file');
+      return;
+    }
+
+    setIsOnboardingSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', csvFile);
+      if (csvCreatedBy) {
+        formData.append('created_by', csvCreatedBy);
+      }
+
+      const res = await fetch(`${BATCH_API_BASE}/api/onboarding/csv`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(JSON.stringify(data));
+
+      setOnboardingResponse(data);
+      setCsvFile(null);
+      toast.success('CSV onboarding submitted successfully');
+      
+      // Reload onboarding batches to show the new one
+      setTimeout(() => loadOnboardingBatches(), 1000);
+    } catch (err: any) {
+      console.error('CSV onboarding error', err);
+      toast.error('CSV onboarding failed: ' + (err.message || err));
+    } finally {
+      setIsOnboardingSubmitting(false);
+    }
+  };
+
   return (
     <motion.div
       className="min-h-screen bg-background"
@@ -305,6 +365,16 @@ const OnboardingNipunPage: React.FC = () => {
             }`}
           >
             JSON Onboarding
+          </button>
+          <button
+            onClick={() => setActiveTab('csv')}
+            className={`px-6 py-3 border-b-2 transition-colors ${
+              activeTab === 'csv'
+                ? 'border-primary text-primary'
+                : 'border-transparent hover:text-primary'
+            }`}
+          >
+            CSV Onboarding
           </button>
         </div>
 
@@ -596,6 +666,152 @@ const OnboardingNipunPage: React.FC = () => {
                   {onboardingResponse && (
                     <div className="mt-4 p-4 bg-success/10 border border-success/20 rounded-lg">
                       <h4 className="text-sm font-semibold text-success mb-2">Onboarding Successful!</h4>
+                      <pre className="text-xs font-mono overflow-auto max-h-[200px]">
+                        {JSON.stringify(onboardingResponse, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </UnifiedCard>
+            </motion.div>
+          )}
+
+          {/* CSV Onboarding Tab */}
+          {activeTab === 'csv' && (
+            <motion.div
+              key="csv-tab"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.2 }}
+            >
+              <UnifiedCard>
+                <div className="p-6 space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">CSV Onboarding</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Download the CSV template, fill it with your organization data, then upload it.
+                      All repositories and domains will be scanned automatically.
+                    </p>
+                  </div>
+
+                  {/* Step 1: Download Template */}
+                  <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-bold">1</span>
+                      <h4 className="font-medium">Download CSV Template</h4>
+                    </div>
+                    <p className="text-sm text-muted-foreground ml-8">
+                      Get the template with the correct column structure. Fill it with your organization, 
+                      suborganizations, applications, repositories, domains, and servers.
+                    </p>
+                    <div className="ml-8">
+                      <Button
+                        onClick={handleDownloadCSVTemplate}
+                        variant="outline"
+                        className="gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download CSV Template
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Fill and Upload */}
+                  <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm font-bold">2</span>
+                      <h4 className="font-medium">Upload Filled CSV</h4>
+                    </div>
+                    <p className="text-sm text-muted-foreground ml-8">
+                      After filling the template, upload it here. Each row represents one resource under its hierarchy.
+                    </p>
+                    
+                    <div className="ml-8 space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Created By (optional)</label>
+                        <Input
+                          value={csvCreatedBy}
+                          onChange={(e) => setCsvCreatedBy(e.target.value)}
+                          placeholder="your.email@company.com"
+                          className="max-w-md"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">CSV File</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="file"
+                            accept=".csv"
+                            onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
+                            className="block w-full max-w-md text-sm text-muted-foreground
+                              file:mr-4 file:py-2 file:px-4
+                              file:rounded-md file:border-0
+                              file:text-sm file:font-medium
+                              file:bg-primary file:text-primary-foreground
+                              hover:file:bg-primary/90
+                              cursor-pointer"
+                          />
+                          {csvFile && (
+                            <span className="text-sm text-muted-foreground">
+                              {csvFile.name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <Button
+                        onClick={handleCSVOnboardingSubmit}
+                        disabled={isOnboardingSubmitting || !csvFile}
+                        className="gap-2"
+                      >
+                        {isOnboardingSubmitting ? (
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        {isOnboardingSubmitting ? 'Processing...' : 'Upload & Onboard'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* CSV Format Info */}
+                  <div className="p-4 border rounded-lg space-y-3">
+                    <h4 className="font-medium">CSV Column Format</h4>
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <p><strong>Required:</strong> organization_name, suborganization_name, application_name</p>
+                      <p><strong>Optional:</strong> organization_email, repo_url, repo_name, branch_to_scan, domain, hostname, ip_address, operating_system</p>
+                    </div>
+                    <div className="bg-muted p-3 rounded text-xs font-mono overflow-x-auto">
+                      <table className="min-w-full">
+                        <thead>
+                          <tr className="text-left border-b">
+                            <th className="pr-4 pb-2">organization_name</th>
+                            <th className="pr-4 pb-2">suborganization_name</th>
+                            <th className="pr-4 pb-2">application_name</th>
+                            <th className="pr-4 pb-2">repo_url</th>
+                            <th className="pr-4 pb-2">domain</th>
+                            <th className="pr-4 pb-2">hostname</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className="pr-4 py-1">Acme Corp</td>
+                            <td className="pr-4 py-1">Cloud Division</td>
+                            <td className="pr-4 py-1">Web App</td>
+                            <td className="pr-4 py-1">https://github.com/acme/webapp</td>
+                            <td className="pr-4 py-1">www.acme.com</td>
+                            <td className="pr-4 py-1">web-server-1</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {onboardingResponse && (
+                    <div className="mt-4 p-4 bg-success/10 border border-success/20 rounded-lg">
+                      <h4 className="text-sm font-semibold text-success mb-2">CSV Onboarding Successful!</h4>
                       <pre className="text-xs font-mono overflow-auto max-h-[200px]">
                         {JSON.stringify(onboardingResponse, null, 2)}
                       </pre>
