@@ -96,9 +96,9 @@ class ScanProgressTracker:
         "formatting"           # Format for frontend
     ]
     
-    def __init__(self, total_domains: int, batch_id: str):
+    def __init__(self, total_domains: int, request_id: str):
         self.total_domains = total_domains
-        self.batch_id = batch_id
+        self.request_id = request_id
         self.domains: Dict[str, DomainProgress] = {}
         
         # Completion tracking
@@ -220,7 +220,7 @@ class ScanProgressTracker:
         
         return {
             "type": "progress_snapshot",
-            "batch_id": self.batch_id,
+            "request_id": self.request_id,
             "total": self.total_domains,
             "completed": self.completed_count,
             "failed": self.failed_count,
@@ -272,7 +272,7 @@ class ScanProgressTracker:
         
         return {
             "type": "progress_summary",
-            "batch_id": self.batch_id,
+            "request_id": self.request_id,
             "total_domains": self.total_domains,
             "completed": self.completed_count,
             "failed": self.failed_count,

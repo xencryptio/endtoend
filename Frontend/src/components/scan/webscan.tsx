@@ -103,7 +103,6 @@ interface WebScanProps {
 interface ScanResult {
   request_id: string;
   id?: number;
-  batch_id?: string;
   primary_domain?: string;
   domain_list?: string[];
   url: string;
@@ -113,7 +112,7 @@ interface ScanResult {
   execution_time_seconds?: number;
   scan_status?: ScanStatus;
   
-  // ✅ ADD THESE NEW FIELDS
+  // Progress fields
   progressPercentage?: number;
   completedUrls?: number;
   successful_count?: number;
@@ -399,41 +398,10 @@ const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
 // UTILITY FUNCTIONS
 // ============================================================================
 
-const deleteScanBatch = async (apiBaseUrl: string, batchId: string): Promise<boolean> => {
-  try {
-    const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
-    
-    // FIXED: Use correct endpoint path
-    const deleteUrl = `${normalizedBaseUrl}/scans/batch/${batchId}`;
-    console.log('🗑️ Attempting to delete batch at:', deleteUrl);
-    
-    const response = await apiFetch(deleteUrl, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    console.log('Response status:', response.status);
-    
-    if (response) {
-      console.log('✅ Batch deleted successfully:', response);
-      return true;
-    } else {
-      console.error('❌ Delete failed with status');
-      return false;
-    }
-  } catch (error) {
-    console.error('❌ Error deleting batch:', error);
-    return false;
-  }
-};
-
 const deleteScanResult = async (apiBaseUrl: string, resultId: number): Promise<boolean> => {
   try {
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
     
-    // FIXED: Use correct endpoint path
     const deleteUrl = `${normalizedBaseUrl}/scans/result/${resultId}`;
     console.log('🗑️ Attempting to delete result at:', deleteUrl);
     
@@ -492,94 +460,46 @@ const clearAllScans = async (apiBaseUrl: string): Promise<boolean> => {
 
 const loadHistoricalScans = async (apiBaseUrl: string) => {
   try {
-    // Call the scan-service which proxies to db-service
+    // Call the scan-service which proxies to db-service - now uses single scan results
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
-    console.log(`🔄 Fetching batches from: ${normalizedBaseUrl}/batches`);
+    console.log(`🔄 Fetching scan results from: ${normalizedBaseUrl}/results`);
     
-    const response = await apiFetch(`${normalizedBaseUrl}/batches`);
+    const response = await apiFetch(`${normalizedBaseUrl}/results`);
     console.log(`✅ Response received:`, response);
     
-    // Handle both array and object with 'batches' key
-    const batches = Array.isArray(response) ? response : (response.batches || []);
-    console.log(`📊 Loaded ${batches.length} batches from database`);
-    console.log(`📋 Batches:`, batches);
+    // Handle both array and object with 'results' key
+    const results = Array.isArray(response) ? response : (response.results || []);
+    console.log(`📊 Loaded ${results.length} scan results from database`);
     
-    // ✅ FIX: Load execution times AND detailed results for completed batches
-    const batchesWithExecutionTime = await Promise.all(
-      batches.map(async (batch: any) => {
-        // ✅ ONLY load details for COMPLETED batches
-        if (batch.status === 'completed' && batch.batch_id) {
-          try {
-            const details = await loadBatchDetails(normalizedBaseUrl, batch.batch_id);
-            const totalExecutionTime = details.reduce((sum: number, result: any) => 
-              sum + (result.execution_time_seconds || 0), 0
-            );
-            return { ...batch, execution_time_seconds: totalExecutionTime, detailedResults: details };
-          } catch (error) {
-            console.warn(`Failed to load details for batch ${batch.batch_id}:`, error);
-            return batch;
-          }
-        }
-        // ✅ Return batch as-is if not completed
-        return batch;
-      })
-    );
-    
-    // Convert batches to ScanResult format
-    const result = batchesWithExecutionTime.map((batch: any) => {
-      // ✅ FIX: Calculate total from successful + failed counts
-      const totalUrls = (batch.successful_count || 0) + (batch.failed_count || 0);
-      const rp = batch.request_payload || {};
-      const rpDomains = Array.isArray(rp.domains) ? rp.domains : [];
-      const rpDomainString = typeof rp.domain_string === 'string' ? rp.domain_string : '';
-      const parsedFromString = rpDomainString
-        ? rpDomainString
-            .split(/[\n,\s]+/)
-            .map((d: string) => d.trim())
-            .filter((d: string) => d.length > 0)
-        : [];
-
-      const rawDomainCandidates = Array.isArray(batch.domains)
-        ? batch.domains
-        : Array.isArray(batch.domain_list)
-        ? batch.domain_list
-        : Array.isArray(batch.urls)
-        ? batch.urls
-        : Array.isArray(batch.url_list)
-        ? batch.url_list
-        : Array.isArray(batch.domain_urls)
-        ? batch.domain_urls
-        : [];
-      const domainCandidates = [
-        ...rawDomainCandidates.map((d: any) => (typeof d === 'string' ? d : d?.domain || d?.url)),
-        ...rpDomains.map((d: any) => (typeof d === 'string' ? d : d?.domain || d?.url)),
-        ...parsedFromString
-      ]
-        .filter((d: any): d is string => Boolean(d))
-        .filter((value: string, index: number, self: string[]) => self.indexOf(value) === index);
-      const primaryDomain = domainCandidates[0] || batch.domain || batch.url;
+    // Convert results to ScanResult format (each is now independent)
+    const convertedResults = results.map((result: any): ScanResult => {
+      const normalizedStatus = normalizeScanStatus(result);
       
       return {
-        request_id: batch.batch_id,
-        batch_id: batch.batch_id,
-        url: primaryDomain || `Batch with ${totalUrls} domains`,
-        primary_domain: primaryDomain,
-        domain_list: domainCandidates.length > 0 ? domainCandidates : [],
-        status: batch.status as 'pending' | 'processing' | 'completed' | 'failed',
-        requested_at: batch.created_at,
-        total_urls: totalUrls,
-        execution_time_seconds: batch.execution_time_seconds || 0,
-        scan_status: normalizeScanStatus({ status: batch.status }),
-        successful_count: batch.successful_count || 0,
-        failed_count: batch.failed_count || 0,
-        error_message: batch.status === 'failed' ? 'Batch processing failed' : undefined,
-        finalDomainProgress: {},
-        detailedResults: batch.detailedResults || [] // ✅ Use pre-loaded detailed results
+        request_id: result.request_id || `scan_${result.id}`,
+        id: result.id,
+        url: result.url || 'Unknown URL',
+        primary_domain: result.url,
+        domain_list: [result.url].filter(Boolean),
+        status: result.status as 'pending' | 'processing' | 'completed' | 'failed',
+        requested_at: result.created_at || result.requested_at,
+        total_urls: 1, // Each result is a single URL
+        execution_time_seconds: result.execution_time_seconds || 0,
+        scan_status: normalizedStatus,
+        successful_count: normalizedStatus === 'completed' ? 1 : 0,
+        failed_count: normalizedStatus === 'failed' || normalizedStatus === 'http_skipped' ? 1 : 0,
+        error_message: result.error_message,
+        tls_version: result.tls_version,
+        public_key_size_bits: result.public_key_size_bits,
+        cipher_suite_name: result.cipher_suite_name,
+        pqc_analysis: result.pqc_analysis || result.raw_response?.pqc_analysis,
+        raw_response: result.raw_response,
+        finalDomainProgress: {}
       };
     });
     
-    console.log(`✅ Converted ${result.length} scans for display`);
-    return result;
+    console.log(`✅ Converted ${convertedResults.length} scans for display`);
+    return convertedResults;
   } catch (error) {
     console.error('❌ Error loading historical scans from database:', error);
     if (error instanceof Error) {
@@ -590,49 +510,32 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
   }
 };
 
-const loadBatchDetails = async (apiBaseUrl: string, batchId: string): Promise<ScanResult[]> => {
+// Load details for a specific scan result by ID
+const loadScanDetails = async (apiBaseUrl: string, resultId: number): Promise<ScanResult | null> => {
   try {
-    // Normalize base URL to avoid trailing slash
     const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
+    const response = await apiFetch(`${normalizedBaseUrl}/results/${resultId}`);
     
-    // Fetch batch results
-    const response = await apiFetch(`${normalizedBaseUrl}/results/batch/${batchId}`);
-    
-    console.log(`API Response for batch ${batchId}:`, response);
-    
-    const results = Array.isArray(response) ? response : (response.results || response.data || []);
-    
-    if (!results || results.length === 0) {
-      console.warn(`No results found for batch ${batchId}`);
-      return [];
+    if (!response) {
+      console.warn(`No result found for ID ${resultId}`);
+      return null;
     }
     
-    // Map and normalize results
-    return results.map((result: any): ScanResult => {
-      const normalizedStatus = normalizeScanStatus(result);
-      console.log(`🔍 Normalizing result for ${result.url}:`, {
-        original_scan_status: result.scan_status,
-        original_status: result.status,
-        normalized: normalizedStatus
-      });
-      
-      return {
-        ...result,
-        scan_status: normalizedStatus,
-        domain_list: Array.isArray(result.domain_list)
-          ? result.domain_list.filter((d): d is string => typeof d === 'string')
-          : [],
-        total_urls: result.total_urls ?? 1,
-        execution_time_seconds: result.execution_time_seconds ?? 0
-      };
-    });
+    const normalizedStatus = normalizeScanStatus(response);
+    
+    return {
+      ...response,
+      request_id: response.request_id || `scan_${response.id}`,
+      scan_status: normalizedStatus,
+      domain_list: [response.url].filter(Boolean),
+      total_urls: 1,
+      execution_time_seconds: response.execution_time_seconds ?? 0
+    };
   } catch (error) {
-    console.error('Error loading batch details:', error);
-    throw error;
+    console.error('Error loading scan details:', error);
+    return null;
   }
 };
-
-
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -694,7 +597,7 @@ const connectSSEWithPost = async (
     }
 
     let buffer = '';
-    let batchIdReceived = false;
+    let requestIdReceived = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -711,13 +614,13 @@ const connectSSEWithPost = async (
           try {
             const data = JSON.parse(line.slice(6));
             
-            // ✅ CRITICAL: Extract batch_id from FIRST event
-            if (!batchIdReceived && data.batch_id) {
-              onStart(data.batch_id);
-              batchIdReceived = true;
+            // Extract request_id from FIRST event (no longer batch_id)
+            if (!requestIdReceived && (data.request_id || data.batch_id)) {
+              onStart(data.request_id || data.batch_id);
+              requestIdReceived = true;
             }
             
-            // ✅ Route events to appropriate handlers
+            // Route events to appropriate handlers
             if (data.type === 'progress_snapshot') {
               onProgress(data);  // ✅ THIS UPDATES PROGRESS BAR
             } else if (data.type === 'domain_complete') {
@@ -815,52 +718,42 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
           return;
         }
         
-        console.log(`📡 Polling batch ${batchId}...`);
-        const response = await apiFetch(`${apiBaseUrl}/batch/${batchId}`);
+        console.log(`📡 Polling scan ${batchId}...`);
+        // Poll for scan status - use results endpoint for single-scan architecture
+        const response = await apiFetch(`${apiBaseUrl}/results`);
+        const results = Array.isArray(response) ? response : (response.results || []);
+        const matchingResult = results.find((r: any) => r.request_id === batchId);
+        
+        if (!matchingResult) {
+          console.log(`No matching result found for ${batchId}`);
+          return;
+        }
         
         // Update scan history with latest status
         setScanHistory(prev => prev.map(scan => {
-          if (scan.batch_id === batchId || scan.request_id === batchId) {
-            // Calculate progress for batch scans
-            const totalUrls = response.total_domains || scan.total_urls;
-            const completedUrls = (response.successful_count || 0) + (response.failed_count || 0);
-            const progressPercentage = totalUrls > 0 ? (completedUrls / totalUrls) * 100 : 0;
-
+          if (scan.request_id === batchId) {
             return {
               ...scan,
-              status: response.status,
-              scan_status: normalizeScanStatus({ status: response.status }),
-              total_urls: totalUrls,
-              successful_count: response.successful_count || 0,
-              failed_count: response.failed_count || 0,
-              execution_time_seconds: response.execution_time_seconds || scan.execution_time_seconds,
-              // ✅ ADD PROGRESS TRACKING
-              progressPercentage,
-              completedUrls,
-              // ✅ Store detailed results if available
-              detailedResults: response.results || scan.detailedResults
+              status: matchingResult.status,
+              scan_status: normalizeScanStatus({ status: matchingResult.status }),
+              total_urls: 1,
+              successful_count: matchingResult.status === 'completed' ? 1 : 0,
+              failed_count: matchingResult.status === 'failed' ? 1 : 0,
+              execution_time_seconds: matchingResult.execution_time_seconds || scan.execution_time_seconds,
+              progressPercentage: matchingResult.status === 'completed' ? 100 : (matchingResult.status === 'processing' ? 50 : 0),
+              completedUrls: matchingResult.status === 'completed' ? 1 : 0
             };
           }
           return scan;
         }));
 
         // ✅ STOP POLLING IF SCAN IS COMPLETE OR FAILED
-        if (response.status === 'completed' || response.status === 'failed') {
-          console.log(`✅ Batch ${batchId} finished with status: ${response.status}`);
+        if (matchingResult.status === 'completed' || matchingResult.status === 'failed') {
+          console.log(`✅ Scan ${batchId} finished with status: ${matchingResult.status}`);
           stopPollingBatch(batchId);
-
-          // Load full batch details for completed scans
-          if (response.status === 'completed') {
-            const details = await loadBatchDetails(apiBaseUrl, batchId);
-            setScanHistory(prev => prev.map(scan =>
-              scan.batch_id === batchId || scan.request_id === batchId
-                ? { ...scan, detailedResults: details }
-                : scan
-            ));
-          }
         }
       } catch (error) {
-        console.error(`❌ Error polling batch ${batchId}:`, error);
+        console.error(`❌ Error polling scan ${batchId}:`, error);
         // Don't stop polling on error - backend might be temporarily unavailable
       }
     }, 3000); // Poll every 3 seconds
@@ -868,7 +761,7 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
     pollingIntervalsRef.current.set(batchId, pollInterval);
   };
 
-  // ✅ NEW FUNCTION: Stop polling a batch
+  // ✅ NEW FUNCTION: Stop polling a scan
   const stopPollingBatch = (batchId: string) => {
     const interval = pollingIntervalsRef.current.get(batchId);
     if (interval) {
@@ -903,24 +796,24 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, i
     );
 
     processingScans.forEach(scan => {
-      const batchId = scan.batch_id || scan.request_id;
-      if (batchId && !pollingBatches.has(batchId)) {
-        startPollingBatch(batchId);
+      const requestId = scan.request_id;
+      if (requestId && !pollingBatches.has(requestId)) {
+        startPollingBatch(requestId);
       }
     });
   }, [scanHistory.length]); // Only run when number of scans changes
 
 
-  // ✅ NEW PROGRESS CALCULATION (REPLACE)
-  const getProgressForBatch = (batchId: string, scan: ScanResult) => {
+  // ✅ Progress calculation for scan
+  const getProgressForScan = (requestId: string, scan: ScanResult) => {
     // ✅ 1. If SSE is active, use live progress
-    if (liveProgress[batchId]) {
+    if (liveProgress[requestId]) {
       return {
-        percentage: liveProgress[batchId].percentage,
-        completed: liveProgress[batchId].completed,
-        current_phase: liveProgress[batchId].current_phase,
-        current_domain: liveProgress[batchId].current_domain,
-        eta_seconds: liveProgress[batchId].eta_seconds
+        percentage: liveProgress[requestId].percentage,
+        completed: liveProgress[requestId].completed,
+        current_phase: liveProgress[requestId].current_phase,
+        current_domain: liveProgress[requestId].current_domain,
+        eta_seconds: liveProgress[requestId].eta_seconds
       };
     }
     
@@ -1021,40 +914,29 @@ const clearLiveProgress = (batchId: string) => {
         return false;
       });
 
-      // If not found, try loading details sequentially for completed scans until a match
+      // If not found, check completed scans directly (single-scan architecture)
       if (!matchingScan) {
-        console.log('📥 No scans with loaded details, searching completed scans for domain...');
+        console.log('📥 Searching completed scans for domain...');
 
         // Sort completed scans by newest first
         const completedScans = scanHistory
           .filter(scan => scan.status === 'completed')
           .sort((a, b) => new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime());
 
-        const findMatch = async () => {
-          for (const scan of completedScans) {
-            console.log('🔄 Loading batch details for scan:', scan.request_id);
-            try {
-              const details = await loadBatchDetails(apiBaseUrl, scan.batch_id!);
-              // Update in-memory history so UI remains consistent
-              setScanHistory(prev => prev.map(s => s.request_id === scan.request_id ? { ...s, detailedResults: details } : s));
+        // In single-scan architecture, each scan has its own URL
+        const foundScan = completedScans.find(scan => 
+          scan.url?.toLowerCase().includes(domainLower)
+        );
 
-              const hasMatch = details?.some(r => r.url?.toLowerCase().includes(domainLower));
-              if (hasMatch) {
-                console.log('✅ Found matching domain in scan:', scan.request_id);
-                setActiveTab('history');
-                setHasAutoLoaded(true);
-                setViewingResultsFor(scan.request_id);
-                return;
-              }
-            } catch (e) {
-              console.warn('Failed loading details for scan', scan.request_id, e);
-            }
-          }
-          console.log('⚠️ No completed scans contained the target domain');
-        };
-
-        // Trigger the search and exit effect
-        findMatch();
+        if (foundScan) {
+          console.log('✅ Found matching domain in scan:', foundScan.request_id);
+          setActiveTab('history');
+          setHasAutoLoaded(true);
+          setViewingResultsFor(foundScan.request_id);
+          return;
+        }
+        
+        console.log('⚠️ No completed scans contained the target domain');
         return;
       }
 
@@ -1103,29 +985,24 @@ const clearLiveProgress = (batchId: string) => {
   const retryScan = async (scan: ScanResult) => {
     setRetryingId(scan.request_id);
     try {
-      // CRITICAL FIX: Fetch actual domains from batch details, not from scan.url
-      // scan.url contains "Batch with X domains" which is not valid for retry
-      showMessage(`Loading batch details for retry...`, 'info');
+      // For single-scan architecture, just use the URL from the scan
+      showMessage(`Preparing retry for ${scan.url}...`, 'info');
       
       let domainsToRetry: string[] = [];
-      try {
-        const batchDetails = await loadBatchDetails(apiBaseUrl, scan.batch_id || scan.request_id);
-        if (batchDetails && batchDetails.length > 0) {
-          // Extract unique domains from batch results
-          domainsToRetry = [...new Set(batchDetails.map((result: any) => result.url || result.domain).filter(Boolean))];
-          console.log(`📋 Found ${domainsToRetry.length} domains to retry:`, domainsToRetry);
-        }
-      } catch (error) {
-        console.error('Failed to load batch details for retry:', error);
+      
+      // Single scan - use the URL directly
+      if (scan.url && !scan.url.startsWith('Batch')) {
+        domainsToRetry = [scan.url];
+        console.log(`📋 Found domain to retry:`, domainsToRetry);
       }
       
-      // Fallback: if no domains found, check if scan.url is a valid domain
+      // If no domains found, check if scan.url is a valid domain
       if (domainsToRetry.length === 0) {
         if (scan.url && !scan.url.toLowerCase().startsWith('batch with')) {
           domainsToRetry = [scan.url] as string[];
           console.log(`📋 Using scan.url as fallback: ${scan.url}`);
         } else {
-          showMessage(`Cannot retry: No valid domains found in batch`, 'error');
+          showMessage(`Cannot retry: No valid domains found in scan`, 'error');
           return;
         }
       }
@@ -1133,11 +1010,11 @@ const clearLiveProgress = (batchId: string) => {
       showMessage(`Retrying scan for ${domainsToRetry.length} domain(s)...`, 'info');
       
       // DELETE the old failed scan FIRST before creating new one
-      const idToDelete = scan.batch_id || scan.request_id;
+      const idToDelete = scan.id;
       console.log(`🗑️ Deleting old scan with ID: ${idToDelete}`);
-      console.log(`📌 Scan object before delete:`, { request_id: scan.request_id, batch_id: scan.batch_id, status: scan.status });
+      console.log(`📌 Scan object before delete:`, { request_id: scan.request_id, id: scan.id, status: scan.status });
       
-      const deleteSuccess = await deleteScanBatch(apiBaseUrl, idToDelete);
+      const deleteSuccess = idToDelete ? await deleteScanResult(apiBaseUrl, idToDelete) : false;
       console.log(`✅ Delete success: ${deleteSuccess}`);
       
       if (deleteSuccess) {
@@ -1295,11 +1172,10 @@ const clearLiveProgress = (batchId: string) => {
     showMessage(`Starting scan for ${urlList.length} URL(s)...`, 'info');
 
     // ✅ CRITICAL: Create optimistic entry BEFORE SSE
-    const tempBatchId = `temp_${Date.now()}`;
+    const tempRequestId = `temp_${Date.now()}`;
     const optimisticScan: ScanResult = {
-      request_id: tempBatchId,
-      batch_id: tempBatchId,
-      url: urlList.length === 1 ? urlList[0] : `Batch with ${urlList.length} domains`,
+      request_id: tempRequestId,
+      url: urlList.length === 1 ? urlList[0] : `Scanning ${urlList.length} domains`,
       primary_domain: urlList[0],
       domain_list: urlList,
       status: 'processing',  // ✅ Set to processing immediately
@@ -1324,15 +1200,15 @@ const clearLiveProgress = (batchId: string) => {
         urlList.join(','),
         true,  // save_to_db
         
-        // ✅ ON START: Update with real batch_id
-        (realBatchId: string) => {
-          console.log('🆔 Received real batch ID:', realBatchId);
+        // ✅ ON START: Update with real request_id
+        (realRequestId: string) => {
+          console.log('🆔 Received real request ID:', realRequestId);
           setScanHistory(prev => prev.map(scan =>
-            scan.request_id === tempBatchId
-              ? { ...scan, request_id: realBatchId, batch_id: realBatchId }
+            scan.request_id === tempRequestId
+              ? { ...scan, request_id: realRequestId }
               : scan
           ));
-          setCurrentRequestId(realBatchId);
+          setCurrentRequestId(realRequestId);
         },
         
         // ✅ ON PROGRESS: Update live progress
@@ -1340,14 +1216,14 @@ const clearLiveProgress = (batchId: string) => {
           console.log('📊 Progress update:', data);
           
           if (data.type === 'progress_snapshot') {
-            const batchId = data.batch_id || currentRequestId || tempBatchId;
+            const requestId = data.request_id || currentRequestId || tempRequestId;
             
             // ✅ CRITICAL: Update live progress state
-            updateLiveProgress(batchId, data);
+            updateLiveProgress(requestId, data);
             
             // ✅ Also update scan history for persistence
             setScanHistory(prev => prev.map(scan => {
-              if (scan.batch_id === batchId || scan.batch_id === tempBatchId) {
+              if (scan.request_id === requestId || scan.request_id === tempRequestId) {
                 return {
                   ...scan,
                   progressPercentage: data.percentage || 0,
@@ -1380,17 +1256,17 @@ const clearLiveProgress = (batchId: string) => {
           setIsCancelling(false);
           setCurrentRequestId(null);
           
-          const batchId = data.batch_id || currentRequestId || tempBatchId;
+          const requestId = data.request_id || currentRequestId || tempRequestId;
           
           // ✅ CRITICAL: Clear live progress
-          clearLiveProgress(batchId);
+          clearLiveProgress(requestId);
           
-          // ✅ Load full results from database
+          // ✅ Reload results from database to get final saved data
           try {
-            const details = await loadBatchDetails(apiBaseUrl, batchId);
+            const historicalScans = await loadHistoricalScans(apiBaseUrl);
             
             setScanHistory(prev => prev.map(scan =>
-              scan.batch_id === batchId || scan.request_id === tempBatchId
+              scan.request_id === requestId || scan.request_id === tempRequestId
                 ? {
                     ...scan,
                     status: 'completed',
@@ -1398,11 +1274,15 @@ const clearLiveProgress = (batchId: string) => {
                     progressPercentage: 100,
                     completedUrls: scan.total_urls,
                     successful_count: data.successful_count || scan.successful_count,
-                    failed_count: data.failed_count || scan.failed_count,
-                    detailedResults: details
+                    failed_count: data.failed_count || scan.failed_count
                   }
                 : scan
             ));
+            
+            // Refresh history with latest data
+            if (historicalScans && historicalScans.length > 0) {
+              setScanHistory(historicalScans);
+            }
             
             showMessage('✅ Scan completed successfully!', 'success');
           } catch (error) {
@@ -1449,51 +1329,23 @@ const clearLiveProgress = (batchId: string) => {
     });
   };
 
-  const handleLoadBatchDetails = async (requestId: string) => {
+  // Handle viewing scan details (for single scan architecture)
+  const handleViewScanDetails = async (requestId: string) => {
     const scan = scanHistory.find(s => s.request_id === requestId);
-    if (!scan || !scan.batch_id) {
-      showMessage('Could not find batch to load.', 'error');
+    if (!scan) {
+      showMessage('Could not find scan to view.', 'error');
       return;
     }
   
     try {
-      console.log(`Loading batch details for ${scan.batch_id}...`);
-      const details = await loadBatchDetails(apiBaseUrl, scan.batch_id);
-      console.log(`Loaded ${details.length} details for batch ${scan.batch_id}`, details);
+      console.log(`Loading scan details for ${requestId}...`);
       
-      if (details && details.length > 0) {
-        // ✅ FIX: Calculate total execution time from all results
-        const totalExecutionTime = details.reduce((sum, result) => {
-          return sum + (result.execution_time_seconds || 0);
-        }, 0);
-        const singleDomain = details.length === 1 ? details[0].url : undefined;
-  
-        // ✅ Update scan history with new data
-        setScanHistory(prev => prev.map(s =>
-          s.request_id === requestId
-            ? {
-                ...s,
-                detailedResults: details,
-                execution_time_seconds: totalExecutionTime,
-                primary_domain: singleDomain || s.primary_domain,
-                domain_list: details
-                  .map((d) => d.url)
-                  .filter((url): url is string => Boolean(url))
-              }
-            : s
-        ));
-        
-        // ✅ FIX: Delay navigation until after state is committed
-        setTimeout(() => {
-          setViewingResultsFor(requestId);
-        }, 0);
-      } else {
-        showMessage('No details found for this batch. The batch may have no results.', 'warning');
-        console.warn(`No details returned for batch ${scan.batch_id}`);
-      }
+      // For single scan architecture, the scan itself has all the details
+      // Just navigate to the detail view
+      setViewingResultsFor(requestId);
     } catch (error) {
-      console.error('Error loading batch details:', error);
-      showMessage('Failed to load batch details: ' + (error instanceof Error ? error.message : 'Unknown error'), 'error');
+      console.error('Error loading scan details:', error);
+      showMessage('Failed to load scan details: ' + (error instanceof Error ? error.message : 'Unknown error'), 'error');
     }
   };
 
@@ -1796,26 +1648,18 @@ const clearLiveProgress = (batchId: string) => {
               </UnifiedCard>
             ) : (
               <div className="space-y-4">
-                {/* Flatten scan history to show domain-wise results */}
-                {scanHistory.flatMap((scan) => {
-                  // If scan has detailed results (individual domains), show each domain separately
-                  if (scan.detailedResults && scan.detailedResults.length > 0) {
-                    return scan.detailedResults.map((domainScan, idx) => ({
-                      ...domainScan,
-                      parentBatch: scan,
-                      domainIndex: idx,
-                      isIndividualDomain: true
-                    }));
-                  }
-                  // Otherwise show the batch as-is
-                  return [{
+                {/* Each scan is now an individual domain scan (single-scan architecture) */}
+                {scanHistory.map((scan) => {
+                  // In single-scan architecture, each scan IS an individual domain
+                  // Mark it as such for proper display
+                  return {
                     ...scan,
                     parentBatch: scan,
                     domainIndex: 0,
-                    isIndividualDomain: false
-                  }];
+                    isIndividualDomain: true // All scans are individual domains now
+                  };
                 }).filter(item => item && item.parentBatch).map((scan) => {
-                  const isIndividualDomain = scan.isIndividualDomain === true;
+                  const isIndividualDomain = true; // Single-scan architecture - always individual
                   const parentBatch = scan.parentBatch || scan;
                   
                   const executionTime = (() => {
@@ -1842,19 +1686,24 @@ const clearLiveProgress = (batchId: string) => {
                   })();
 
                   const deleteLogic = async () => {
-                    // For individual domain results, delete the entire parent batch
-                    const batchId = parentBatch.batch_id || parentBatch.request_id;
-                    showMessage('Deleting scan batch...', 'info');
+                    // Delete the individual scan result
+                    const resultId = scan.id || parentBatch.id;
+                    showMessage('Deleting scan result...', 'info');
                     
-                    const success = await deleteScanBatch(apiBaseUrl, batchId);
+                    if (!resultId) {
+                      showMessage('Cannot delete: no result ID', 'error');
+                      return;
+                    }
+                    
+                    const success = await deleteScanResult(apiBaseUrl, resultId);
                     
                     if (success) {
                       setScanHistory(prev => 
                         prev.filter(s => s.request_id !== parentBatch.request_id)
                       );
-                      showMessage('Scan batch deleted successfully', 'success');
+                      showMessage('Scan result deleted successfully', 'success');
                     } else {
-                      showMessage('Failed to delete scan batch', 'error');
+                      showMessage('Failed to delete scan result', 'error');
                     }
                   };
 
@@ -1963,10 +1812,10 @@ const clearLiveProgress = (batchId: string) => {
                                                 if (isIndividualDomain) {
                                                   // For individual domains, directly open the domain detail modal
                                                   setExpandedDomainUrl(scan.url);
-                                                  handleLoadBatchDetails(parentBatch.request_id);
+                                                  handleViewScanDetails(parentBatch.request_id);
                                                 } else {
-                                                  // For batches, show the batch results page
-                                                  handleLoadBatchDetails(scan.request_id);
+                                                  // For single scans, show the scan results page
+                                                  handleViewScanDetails(scan.request_id);
                                                 }
                                               },
                                               variant: "outline" as const
@@ -1996,18 +1845,18 @@ const clearLiveProgress = (batchId: string) => {
                                           )}
                     
                     
-                                          {/* ✅ REPLACE existing progress bar code */}
+                                          {/* ✅ Progress bar for processing scans */}
                                           {(scan.status === 'processing' || scan.status === 'pending') && (
                                             <div className="mt-4 space-y-2">
                                               {(() => {
-                                                const batchId = scan.batch_id || scan.request_id;
-                                                const progress = getProgressForBatch(batchId, scan);
+                                                const requestId = scan.request_id;
+                                                const progress = getProgressForScan(requestId, scan);
                                                 
                                                 return (
                                                   <>
                                                     <div className="flex items-center justify-between text-sm">
                                                       <span className="text-muted-foreground">
-                                                        {activeSSEConnections.has(batchId) ? (
+                                                        {activeSSEConnections.has(requestId) ? (
                                                           <UnifiedInlineRefresh 
                                                             isRefreshing={true} 
                                                             size="sm" 

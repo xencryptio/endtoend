@@ -8,89 +8,14 @@ import logging
 
 
 # ============================================================
-# SCAN BATCH OPERATIONS
-# ============================================================
-
-def create_scan_batch(db: Session, batch: schemas.ScanBatchCreate) -> models.ScanBatch:
-    """Create a new scan batch."""
-    db_batch = models.ScanBatch(**batch.model_dump())
-    db.add(db_batch)
-    db.commit()
-    db.refresh(db_batch)
-    return db_batch
-
-
-def get_scan_batch(db: Session, batch_id: str) -> Optional[models.ScanBatch]:
-    """Get a scan batch by its batch_id."""
-    return db.query(models.ScanBatch).filter(
-        models.ScanBatch.batch_id == batch_id
-    ).first()
-
-
-def get_scan_batches(
-    db: Session,
-    skip: int = 0,
-    limit: int = 100,
-    status: str = None  # NEW: Filter by status
-) -> List[models.ScanBatch]:
-    """Get all scan batches with pagination and optional status filter."""
-    query = db.query(models.ScanBatch).order_by(
-        models.ScanBatch.created_at.desc()
-    )
-    
-    # Apply status filter if provided
-    if status:
-        query = query.filter(models.ScanBatch.status == status)
-    
-    return query.offset(skip).limit(limit).all()
-
-def update_scan_batch_status(
-    db: Session,
-    batch_id: str,
-    status: str,
-    successful_count: int = None,
-    failed_count: int = None
-) -> Optional[models.ScanBatch]:
-    """Update scan batch status and counts."""
-    batch = get_scan_batch(db, batch_id)
-    if batch:
-        batch.status = status
-        if successful_count is not None:
-            batch.successful_count = successful_count
-        if failed_count is not None:
-            batch.failed_count = failed_count
-        db.commit()
-        db.refresh(batch)
-    return batch
-
-
-def delete_scan_batch_completely(db: Session, batch_id: str) -> bool:
-    """Delete a scan batch and ALL its associated results from database."""
-    try:
-        batch_to_delete = db.query(models.ScanBatch).filter(
-            models.ScanBatch.batch_id == batch_id
-        ).first()
-        if not batch_to_delete:
-            return False
-
-        db.delete(batch_to_delete)
-        db.commit()
-        return True
-    except Exception as e:
-        db.rollback()
-        print(f"Error deleting batch {batch_id}: {e}")
-        return False
-
-
-# ============================================================
-# SCAN RESULT OPERATIONS
+# SCAN RESULT OPERATIONS (No Batch - Each Scan is Independent)
 # ============================================================
 
 def create_scan_result(
     db: Session,
     scan: schemas.ScanResultCreate
 ) -> models.ScanResult:
-    """Create a new scan result and extract normalized fields."""
+    """Create a new scan result (standalone - no batch)."""
     scan_data = scan.model_dump()
     log = logging.getLogger(__name__)
 
@@ -133,7 +58,6 @@ def create_scan_result(
 
         log.info(f"Saved to database with ID: {db_scan.id}. Stored PQC Score: {db_scan.pqc_overall_score}, Stored PQC Grade: {db_scan.pqc_overall_grade}")
 
-        update_batch_counts(db, scan.batch_id)
         return db_scan
 
     except Exception as e:
@@ -149,22 +73,33 @@ def get_scan_result(db: Session, result_id: int) -> Optional[models.ScanResult]:
     ).first()
 
 
+def get_scan_result_by_request_id(db: Session, request_id: str) -> Optional[models.ScanResult]:
+    """Get a scan result by its request_id."""
+    return db.query(models.ScanResult).filter(
+        models.ScanResult.request_id == request_id
+    ).first()
+
+
+def get_scan_result_by_url(db: Session, url: str) -> Optional[models.ScanResult]:
+    """Get the most recent scan result for a URL."""
+    return db.query(models.ScanResult).filter(
+        models.ScanResult.url == url
+    ).order_by(models.ScanResult.id.desc()).first()
+
+
 def get_scan_results(
     db: Session,
-    batch_id: Optional[str] = None,
     status: Optional[str] = None,
     skip: int = 0,
     limit: int = 100
 ) -> List[models.ScanResult]:
     """Get scan results with optional filtering."""
     query = db.query(models.ScanResult)
-    if batch_id:
-        query = query.filter(models.ScanResult.batch_id == batch_id)
     if status:
         query = query.filter(models.ScanResult.status == status)
 
     return query.order_by(
-        models.ScanResult.requested_at.desc()
+        models.ScanResult.id.desc()
     ).offset(skip).limit(limit).all()
 
 
@@ -201,12 +136,11 @@ def update_scan_result(
 
     db.commit()
     db.refresh(result)
-    update_batch_counts(db, result.batch_id)
     return result
 
 
 def delete_single_scan_result(db: Session, result_id: int) -> bool:
-    """Delete a single scan result and update batch counts."""
+    """Delete a single scan result."""
     try:
         result = db.query(models.ScanResult).filter(
             models.ScanResult.id == result_id
@@ -214,10 +148,8 @@ def delete_single_scan_result(db: Session, result_id: int) -> bool:
         if not result:
             return False
 
-        batch_id = result.batch_id
         db.delete(result)
         db.commit()
-        update_batch_counts(db, batch_id)
         return True
     except Exception as e:
         db.rollback()
@@ -229,54 +161,19 @@ def delete_single_scan_result(db: Session, result_id: int) -> bool:
 # BULK OPERATIONS
 # ============================================================
 
-def delete_all_scans(db: Session) -> Tuple[int, int]:
-    """Delete all scan results and batches. Returns (results_deleted, batches_deleted)."""
+def delete_all_scans(db: Session) -> int:
+    """Delete all scan results. Returns count of deleted results."""
     results_deleted = db.query(models.ScanResult).delete()
-    batches_deleted = db.query(models.ScanBatch).delete()
     db.commit()
-    return results_deleted, batches_deleted
+    return results_deleted
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# STATISTICS
 # ============================================================
-
-def update_batch_counts(db: Session, batch_id: str):
-    """Recalculate and update batch success/failure counts."""
-    batch = get_scan_batch(db, batch_id)
-    if batch:
-        successful = db.query(models.ScanResult).filter(
-            models.ScanResult.batch_id == batch_id,
-            models.ScanResult.status == "completed"
-        ).count()
-
-        failed = db.query(models.ScanResult).filter(
-            models.ScanResult.batch_id == batch_id,
-            models.ScanResult.status == "failed"
-        ).count()
-
-        http_skipped = db.query(models.ScanResult).filter(
-            models.ScanResult.scan_status == "http_skipped"
-        ).count()
-
-        batch.successful_count = successful
-        # Failed count should include both actual failures and skipped domains
-        batch.failed_count = failed + http_skipped
-        
-        total = batch.total_urls
-        if successful + failed + http_skipped >= total:
-            batch.status = "completed"
-        elif failed == total:
-            batch.status = "failed"
-        else:
-            batch.status = "in_progress"
-
-        db.commit()
-
 
 def get_scan_statistics(db: Session) -> dict:
     """Get database statistics."""
-    total_batches = db.query(models.ScanBatch).count()
     total_results = db.query(models.ScanResult).count()
 
     successful = db.query(models.ScanResult).filter(
@@ -302,7 +199,6 @@ def get_scan_statistics(db: Session) -> dict:
     ).scalar()
 
     return {
-        "total_batches": total_batches,
         "total_results": total_results,
         "successful_scans": successful,
         "failed_scans": failed,

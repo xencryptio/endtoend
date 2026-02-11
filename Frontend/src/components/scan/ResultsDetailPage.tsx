@@ -1140,9 +1140,23 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack, tar
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDomain, setSelectedDomain] = useState<ScanResult | null>(null);
 
+  // For single-scan architecture: if no detailedResults, the scan itself is the result
+  // Show DomainDetailPage directly
+  const isSingleScan = !scan.detailedResults || scan.detailedResults.length === 0;
+  
+  // If this is a single scan, show the domain detail page directly
+  if (isSingleScan && scan.url && !scan.url.startsWith('Scanning')) {
+    return (
+      <DomainDetailPage 
+        result={scan} 
+        onBack={onBack} 
+      />
+    );
+  }
+
   // If a target domain is provided (e.g., from Applications page), pre-filter to it
   useEffect(() => {
-    if (targetDomain) {
+    if (targetDomain && scan.detailedResults) {
       setSearchQuery(targetDomain);
       // Auto-select the domain if found
       const matchingResult = scan.detailedResults?.find(

@@ -13,39 +13,16 @@ class ScanStatusEnum(str, enum.Enum):
     FAILED = "failed"
     HTTP_SKIPPED = "http_skipped"
     IN_PROGRESS = "in_progress"
-class ScanBatch(Base):
-    """
-    Represents a single scan request (can contain multiple URLs).
-    Each batch has a unique batch_id.
-    """
-    __tablename__ = "scan_batches"
-
-    id = Column(Integer, primary_key=True, index=True)
-    batch_id = Column(String, unique=True, index=True, nullable=False)
-    total_urls = Column(Integer, nullable=False)
-    successful_count = Column(Integer, default=0)
-    failed_count = Column(Integer, default=0)
-    max_concurrent = Column(Integer, default=5)
-    status = Column(SQLEnum(ScanStatusEnum), default=ScanStatusEnum.PENDING, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    request_payload = Column(JSON, nullable=True)  # Stores domains, scan params, etc.
-    
-    # Relationship to scan results
-    scan_results = relationship("ScanResult", back_populates="batch", cascade="all, delete-orphan")
-
-    def __repr__(self):
-        return f"<ScanBatch(batch_id={self.batch_id}, total_urls={self.total_urls}, status={self.status})>"
 
 
 class ScanResult(Base):
     """
     Represents a single URL scan result with normalized structured fields.
+    Each scan is independent - no batch grouping.
     """
     __tablename__ = "scan_results"
 
     id = Column(Integer, primary_key=True, index=True)
-    batch_id = Column(String, ForeignKey("scan_batches.batch_id", ondelete="CASCADE"), nullable=False, index=True)
     request_id = Column(String, unique=True, index=True, nullable=False)
     url = Column(String, nullable=False, index=True)
     
@@ -107,9 +84,6 @@ class ScanResult(Base):
     pqc_overall_score = Column(Float, nullable=True, index=True)
     pqc_overall_grade = Column(String(5), nullable=True, index=True)
     pqc_security_level = Column(String(50), nullable=True)
-    
-    # Relationship to batch
-    batch = relationship("ScanBatch", back_populates="scan_results")
 
     def __repr__(self):
         return f"<ScanResult(id={self.id}, url={self.url}, status={self.scan_status}, pqc_grade={self.pqc_overall_grade})>"
@@ -120,7 +94,6 @@ from sqlalchemy import Index
 
 # Composite indexes for fast filtering
 Index('idx_scan_results_status_pqc', ScanResult.scan_status, ScanResult.pqc_overall_grade)
-Index('idx_scan_results_batch_status', ScanResult.batch_id, ScanResult.scan_status)
 Index('idx_scan_results_quantum_ready', ScanResult.pqc_quantum_ready, ScanResult.pqc_overall_score)
 
 # ===================== ONBOARDING MODELS =====================

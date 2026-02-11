@@ -341,86 +341,51 @@ class TLSScanRow(BaseModel):
 
 
 async def scan_single_tls_domain(domain: str) -> ScanResult:
-    """Scan a single domain using TLS scanner with queue-based API and polling."""
+    """Scan a single domain using TLS scanner with direct API call."""
     logger.info(f"🔍 Initiating TLS scan for domain: {domain}")
     try:
-        # Step 1: Create scan request (queue-based)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Use direct /scan endpoint for single-scan architecture
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{TLS_SCANNER_URL}/create-scan-request",
-                json={"domain": domain},
-                timeout=30.0
+                f"{TLS_SCANNER_URL}/scan",
+                json={
+                    "domain": domain,
+                    "max_concurrent": 1,
+                    "save_to_db": True
+                },
+                timeout=120.0
             )
             response.raise_for_status()
-            batch_data = response.json()
-            batch_id = batch_data.get('batch_id')
+            scan_data = response.json()
             
-            if not batch_id:
-                logger.error(f"Failed to get batch_id for {domain}")
+            # The /scan endpoint returns the result directly (not in a results array)
+            # Check for scan_status in the response
+            status = scan_data.get('scan_status', 'unknown')
+            
+            if status == 'completed':
+                logger.info(f"✅ TLS scan completed successfully for {domain}")
+                return ScanResult(
+                    domain_or_repo=domain,
+                    status="completed",
+                    timestamp=datetime.utcnow()
+                )
+            elif status == 'http_skipped':
+                logger.warning(f"⚠️ TLS scan skipped for {domain} - HTTP only")
+                return ScanResult(
+                    domain_or_repo=domain,
+                    status="http_skipped",
+                    error="Domain uses HTTP only, no TLS",
+                    timestamp=datetime.utcnow()
+                )
+            else:
+                error_msg = scan_data.get('error_message', 'Unknown error')
+                logger.error(f"❌ TLS scan failed for {domain}: {error_msg}")
                 return ScanResult(
                     domain_or_repo=domain,
                     status="failed",
-                    error="Failed to create scan request",
+                    error=error_msg,
                     timestamp=datetime.utcnow()
                 )
-            
-            logger.info(f"📝 Scan queued for {domain}, batch_id: {batch_id}")
-            
-            # Step 2: Poll for completion
-            max_polls = 120  # 120 polls * 5 seconds = 10 minutes max wait
-            poll_interval = 5  # 5 seconds between polls
-            
-            for poll_count in range(max_polls):
-                await asyncio.sleep(poll_interval)
-                
-                # Get batch status
-                status_response = await client.get(
-                    f"{TLS_SCANNER_URL}/batch/{batch_id}",
-                    timeout=10.0
-                )
-                status_response.raise_for_status()
-                batch_status = status_response.json()
-                
-                status = batch_status.get('status')
-                logger.debug(f"📊 Poll {poll_count + 1}/{max_polls} for {domain}: status={status}")
-                
-                if status == 'completed':
-                    successful = batch_status.get('successful_count', 0)
-                    failed = batch_status.get('failed_count', 0)
-                    
-                    if successful > 0:
-                        logger.info(f"TLS scan completed successfully for {domain}")
-                        return ScanResult(
-                            domain_or_repo=domain,
-                            status="completed",
-                            timestamp=datetime.utcnow()
-                        )
-                    else:
-                        logger.error(f"TLS scan failed for {domain}: {failed} failed")
-                        return ScanResult(
-                            domain_or_repo=domain,
-                            status="failed",
-                            error=f"Scan completed but failed ({failed} failures)",
-                            timestamp=datetime.utcnow()
-                        )
-                
-                elif status == 'failed':
-                    logger.error(f"TLS scan batch failed for {domain}")
-                    return ScanResult(
-                        domain_or_repo=domain,
-                        status="failed",
-                        error="Scan batch marked as failed",
-                        timestamp=datetime.utcnow()
-                    )
-            
-            # Timeout after max polls
-            logger.error(f"⏱️ TLS scan for {domain} timed out after {max_polls * poll_interval} seconds")
-            return ScanResult(
-                domain_or_repo=domain,
-                status="failed",
-                error=f"Scan timeout ({max_polls * poll_interval} seconds exceeded)",
-                timestamp=datetime.utcnow()
-            )
 
     except httpx.TimeoutException:
         logger.error(f"⏱️ TLS scan request for {domain} timed out.")

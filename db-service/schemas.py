@@ -6,67 +6,28 @@ from datetime import datetime
 from models import ScanStatusEnum
 
 # ============================================================
-# SCAN BATCH SCHEMAS
-# ============================================================
-
-class ScanBatchBase(BaseModel):
-    batch_id: str
-    total_urls: int = 0
-    max_concurrent: int = 5
-    request_payload: Optional[Dict[str, Any]] = None
-
-class ScanBatchCreate(ScanBatchBase):
-    status: str = "pending"
-
-class ScanBatch(ScanBatchBase):
-    id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    successful_count: int = 0
-    failed_count: int = 0
-    status: str
-
-    class Config:
-        from_attributes = True
-
-class ScanBatchUpdate(BaseModel):
-    status: Optional[str] = None
-    successful_count: Optional[int] = None
-    failed_count: Optional[int] = None
-    updated_at: Optional[datetime] = None
-
-class ScanBatchWithResults(ScanBatch):
-    """Batch with all its scan results included"""
-    scan_results: List["ScanResult"] = []
-
-    class Config:
-        from_attributes = True
-
-# ============================================================
-# SCAN RESULT SCHEMAS
+# SCAN RESULT SCHEMAS (No Batch - Each Scan is Independent)
 # ============================================================
 
 class ScanResultBase(BaseModel):
-    batch_id: str
     url: str
     scan_type: str = "crypto_audit"
 
 class ScanResultCreate(BaseModel):
     """
     Schema for creating a scan result.
-    ✅ FIXED: Accepts pqc_overall_* and scan_status
+    Each scan is independent - no batch grouping required.
     """
-    batch_id: str
     request_id: str
     url: str    
-    scan_status: ScanStatusEnum = ScanStatusEnum.PENDING  # ✅ Use Enum
-    status: str = "pending" # Keep for backward compatibility
+    scan_status: ScanStatusEnum = ScanStatusEnum.PENDING
+    status: str = "pending"  # Keep for backward compatibility
     scan_type: str = "crypto_audit"
     requested_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     execution_time_seconds: Optional[float] = None
     
-    # ✅ Accept pqc_overall_* (will be extracted from raw_response if missing)
+    # PQC scores
     pqc_overall_score: Optional[float] = None
     pqc_overall_grade: Optional[str] = None
     
@@ -99,19 +60,16 @@ class ScanResult(ScanResultBase):
 
     raw_response: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-
-# Update forward reference
-ScanBatchWithResults.model_rebuild()
 
 # ============================================================
 # STATISTICS SCHEMA
 # ============================================================
 
 class ScanStatistics(BaseModel):
-    total_batches: int
     total_results: int
     successful_scans: int
     failed_scans: int
@@ -122,7 +80,6 @@ class ScanStatistics(BaseModel):
 
 class DeleteResponse(BaseModel):
     message: str
-    batch_id: Optional[str] = None
     result_id: Optional[int] = None
     deleted_count: Optional[int] = None
     timestamp: Optional[str] = None
@@ -140,11 +97,10 @@ class ScanResultWithNormalized(BaseModel):
     When sent to frontend: includes BOTH for backward compatibility
     """
     id: int
-    batch_id: str
     request_id: Optional[str] = None
     url: str
     status: str
-    scan_status: Optional[ScanStatusEnum] = None # <-- ADD THIS
+    scan_status: Optional[ScanStatusEnum] = None
     scan_type: str
     
     # Timestamps
@@ -205,13 +161,8 @@ class ScanResultWithNormalized(BaseModel):
     # ============================================================
     raw_response: Optional[Dict[str, Any]] = None
     
-    class Config:
-        from_attributes = True
-
-
-class ScanBatchWithNormalizedResults(ScanBatch):
-    """Batch with all its scan results (with normalized fields)."""
-    scan_results: List[ScanResultWithNormalized] = []
+    # Timestamps
+    created_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -220,7 +171,6 @@ class ScanBatchWithNormalizedResults(ScanBatch):
 class ClearAllResponse(BaseModel):
     message: str
     deleted_results: int
-    deleted_batches: int
     timestamp: str
     
     class Config:
