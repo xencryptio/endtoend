@@ -34,7 +34,7 @@
             {"domain": "www.amazon.com"}
           ],
           "servers": [
-            {"hostname": "retail-web-1", "ip_address": "172.18.0.9", "operating_system": "Linux"}
+            {"hostname": "retail-web-1", "ip_address": "172.18.0.2", "operating_system": "Linux"}
           ]
         }
       ]

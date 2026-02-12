@@ -2551,7 +2551,7 @@ const AgentRow: React.FC<{
                   icon={<Play size={14} className="mr-2" />}
                 />
               </Button>
-              {agent.status === 'inactive' && (
+              {(agent.status === 'inactive' || agent.status === 'unknown') && (
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2560,7 +2560,7 @@ const AgentRow: React.FC<{
                   disabled={isDeleting}
                   size="sm"
                   variant="destructive"
-                  title="Delete inactive agent"
+                  title={`Delete ${agent.status} agent`}
                 >
                   {isDeleting ? (
                     <Loader size={14} className="animate-spin" />
