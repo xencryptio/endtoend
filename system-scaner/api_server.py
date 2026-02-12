@@ -292,7 +292,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 # Configuration
-AGENT_TIMEOUT_MINUTES = 5
+AGENT_TIMEOUT_MINUTES = 2  # Agent is inactive if no heartbeat for 2+ minutes
 AGENT_FOLDERS = {
     "linux": "agents/linux",
     "windows": "agents/windows"
