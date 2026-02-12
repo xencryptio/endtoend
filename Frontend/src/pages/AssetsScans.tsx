@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight } from 'lucide-react';
+import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,10 @@ interface Agent {
   last_seen: string;
   status: string;
   minutes_since_last_seen: number;
+  // Organization tracking (from onboarding)
+  organization_name?: string;
+  suborganization_name?: string;
+  application_name?: string;
 }
 
 interface Task {
@@ -1279,6 +1283,42 @@ const CryptoAuditDashboard: React.FC = () => {
     }
   };
 
+  const [deletingAgents, setDeletingAgents] = useState<Set<string>>(new Set());
+
+  const deleteAgent = async (agentId: string, hostname: string) => {
+    if (!confirm(`Are you sure you want to delete agent "${hostname}"?\n\nThis will permanently remove the agent and all its scan history.`)) {
+      return;
+    }
+    
+    setDeletingAgents(prev => new Set(prev).add(agentId));
+    try {
+      const data = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/agent/${agentId}`, {
+        method: 'DELETE'
+      });
+      if (data.success) {
+        // Remove from local state
+        await fetchAgents();
+        await fetchTasks();
+        // Clean up expanded states
+        setExpandedAgents(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(agentId);
+          return newSet;
+        });
+        agentResults.delete(agentId);
+      }
+    } catch (error) {
+      console.error('Error deleting agent:', error);
+      alert('Failed to delete agent. Please try again.');
+    } finally {
+      setDeletingAgents(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(agentId);
+        return newSet;
+      });
+    }
+  };
+
   const retryFetchResult = async (agentId: string, taskId: string) => {
     setRetryingResults(prev => new Set(prev).add(taskId));
     try {
@@ -1738,6 +1778,8 @@ const CryptoAuditDashboard: React.FC = () => {
                                     setSelectedAgent(agent);
                                     setCurrentPage('agent-results');
                                   }}
+                                  onDeleteAgent={deleteAgent}
+                                  isDeleting={deletingAgents.has(agent.agent_id)}
                                 />
                               ))}
                             </tbody>
@@ -2384,6 +2426,8 @@ const AgentRow: React.FC<{
   retryingResults: Set<string>;
   getRelativeTime: (date: string) => string;
   onNavigateToResults: (agent: Agent) => void;
+  onDeleteAgent: (agentId: string, hostname: string) => void;
+  isDeleting: boolean;
 }> = ({
   agent,
   info,
@@ -2401,7 +2445,9 @@ const AgentRow: React.FC<{
   onRetryFetch,
   retryingResults,
   getRelativeTime,
-  onNavigateToResults
+  onNavigateToResults,
+  onDeleteAgent,
+  isDeleting
 }) => {
     const isScanning = isScanTriggered || (info?.in_progress_tasks ?? 0) > 0;
 
@@ -2435,6 +2481,13 @@ const AgentRow: React.FC<{
                 <div className="text-xs text-muted-foreground font-mono mt-0.5">
                   ID: {agent.agent_id.substring(0, 12)}
                 </div>
+                {(agent.organization_name || agent.suborganization_name) && (
+                  <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                    {agent.organization_name && <span>{agent.organization_name}</span>}
+                    {agent.suborganization_name && <span> → {agent.suborganization_name}</span>}
+                    {agent.application_name && <span className="text-muted-foreground"> / {agent.application_name}</span>}
+                  </div>
+                )}
               </div>
             </div>
           </td>
@@ -2482,21 +2535,41 @@ const AgentRow: React.FC<{
           </td>
 
           <td className="px-6 py-4 text-center">
-            <Button
-              onClick={(e) => {
-                e.stopPropagation();
-                onTriggerScan();
-              }}
-              disabled={isScanning}
-              size="sm"
-            >
-              <UnifiedActionLoading
-                isLoading={isScanning}
-                loadingText="Scanning..."
-                defaultText="Scan"
-                icon={<Play size={14} className="mr-2" />}
-              />
-            </Button>
+            <div className="flex items-center justify-center gap-2">
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTriggerScan();
+                }}
+                disabled={isScanning}
+                size="sm"
+              >
+                <UnifiedActionLoading
+                  isLoading={isScanning}
+                  loadingText="Scanning..."
+                  defaultText="Scan"
+                  icon={<Play size={14} className="mr-2" />}
+                />
+              </Button>
+              {agent.status === 'inactive' && (
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteAgent(agent.agent_id, agent.hostname);
+                  }}
+                  disabled={isDeleting}
+                  size="sm"
+                  variant="destructive"
+                  title="Delete inactive agent"
+                >
+                  {isDeleting ? (
+                    <Loader size={14} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                </Button>
+              )}
+            </div>
           </td>
 
           <td className="px-6 py-4 text-center">

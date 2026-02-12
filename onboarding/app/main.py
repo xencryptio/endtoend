@@ -13,7 +13,7 @@ from typing import List, Optional, Dict, Any
 import pandas as pd
 import httpx
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import io
 import uuid
 from enum import Enum
@@ -28,6 +28,13 @@ from exceptions import APIError # Import APIError
 # Setup unified logging
 setup_logging("ONBOARDING-SERVICE", logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- IST Timezone Configuration ---
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_now():
+    """Get current time in IST timezone"""
+    return datetime.now(IST).replace(tzinfo=None)  # Store without timezone info for consistency
 
 app = FastAPI(title="Excel Batch Scanner API", version="1.0.0")
 app.middleware("http")(correlation_middleware) # Add correlation middleware
@@ -80,12 +87,14 @@ TLS_SCANNER_URL = os.getenv("TLS_SCANNER_URL", "http://localhost:8000")
 REPO_SCANNER_URL = os.getenv("REPO_SCANNER_URL", "http://localhost:8003")
 MAX_CONCURRENT_SCANS = int(os.getenv("MAX_CONCURRENT_SCANS", "5"))
 DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db-service:8001")
+SYSTEM_SCAN_URL = os.getenv("SYSTEM_SCAN_URL", "http://system-scan:9000")
 
 # Add debug logging
 logger.info(f"Configuration loaded:")
 logger.info(f"   TLS_SCANNER_URL: {TLS_SCANNER_URL}")
 logger.info(f"   REPO_SCANNER_URL: {REPO_SCANNER_URL}")
 logger.info(f"   DB_SERVICE_URL: {DB_SERVICE_URL}")
+logger.info(f"   SYSTEM_SCAN_URL: {SYSTEM_SCAN_URL}")
 logger.info(f"   MAX_CONCURRENT_SCANS: {MAX_CONCURRENT_SCANS}")
 
 # GitHub API Configuration
@@ -218,6 +227,98 @@ class OnboardingPayload(BaseModel):
     domains: Optional[List[OnboardingDomain]] = []
     suborganizations: Optional[List[SubOrganizationPayload]] = []
     created_by: Optional[str] = None
+
+
+# ==================== AGENT REGISTRATION HELPER ====================
+
+async def register_server_as_agent(server: dict, org_context: dict = None) -> dict:
+    """
+    Register a server as an agent in the system-scan service.
+    This pre-registers the agent so when the actual agent is installed, 
+    it will match by IP and become active.
+    
+    Args:
+        server: Server dict with ip_address, hostname, server_name, operating_system
+        org_context: Dict with organization_name, suborganization_name, application_name
+        
+    Returns:
+        dict with registration result
+    """
+    ip_address = server.get("ip_address")
+    if not ip_address:
+        logger.warning(f"Server {server.get('server_name', 'unknown')} has no IP address, skipping agent registration")
+        return {"success": False, "reason": "no_ip_address"}
+    
+    # Generate a placeholder agent_id (will be replaced when real agent connects)
+    agent_id = f"onboarded_{uuid.uuid4()}"
+    hostname = server.get("hostname") or server.get("server_name") or f"server-{ip_address}"
+    os_info = server.get("operating_system") or "Unknown OS (Pending Agent Installation)"
+    
+    # Extract organization context
+    org_context = org_context or {}
+    
+    registration_payload = {
+        "agent_id": agent_id,
+        "hostname": hostname,
+        "ip_address": ip_address,
+        "os_info": os_info,
+        "timestamp": get_ist_now().isoformat(),  # Use IST
+        # Organization tracking
+        "organization_name": org_context.get("organization_name"),
+        "suborganization_name": org_context.get("suborganization_name") or server.get("suborganization_name"),
+        "application_name": org_context.get("application_name") or server.get("application_name")
+    }
+    
+    try:
+        response = await call_service(
+            "POST", 
+            f"{SYSTEM_SCAN_URL}/api/v1/agent/register", 
+            json=registration_payload,
+            timeout=10.0
+        )
+        result = response.json()
+        registered_agent_id = result.get("agent_id", agent_id)
+        logger.info(f"Registered server {hostname} ({ip_address}) as agent {registered_agent_id} [Org: {org_context.get('organization_name')}, SubOrg: {org_context.get('suborganization_name')}]")
+        
+        # Trigger a pending scan for this agent (will execute when agent becomes active)
+        try:
+            scan_response = await call_service(
+                "POST",
+                f"{SYSTEM_SCAN_URL}/api/v1/admin/trigger-scan/{registered_agent_id}",
+                timeout=10.0
+            )
+            scan_result = scan_response.json()
+            logger.info(f"Pre-created scan task for agent {registered_agent_id}: {scan_result.get('task_id', 'unknown')}")
+        except Exception as scan_err:
+            logger.warning(f"Could not pre-create scan task for {registered_agent_id}: {scan_err}")
+        
+        return {"success": True, "agent_id": registered_agent_id, "ip_address": ip_address}
+    except Exception as e:
+        logger.exception(f"Failed to register server {hostname} ({ip_address}) as agent: {e}")
+        return {"success": False, "reason": str(e), "ip_address": ip_address}
+
+
+async def register_servers_as_agents(servers: list, org_context: dict = None) -> list:
+    """
+    Register multiple servers as agents in parallel.
+    
+    Args:
+        servers: List of server dicts
+        org_context: Dict with organization_name, suborganization_name, application_name
+        
+    Returns:
+        List of registration results
+    """
+    if not servers:
+        return []
+    
+    tasks = [register_server_as_agent(server, org_context) for server in servers]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    successful = sum(1 for r in results if isinstance(r, dict) and r.get("success"))
+    logger.info(f"Registered {successful}/{len(servers)} servers as agents")
+    
+    return results
 
 
 # ==================== GITHUB INTEGRATION HELPERS AND ENDPOINTS ====================
@@ -860,11 +961,15 @@ async def api_onboarding(
 
     # 3) Create bulk servers
     created_servers = []
+    all_servers_for_agent_registration = []  # Collect all servers for agent registration
     if payload.servers:
         try:
             servers_payload = [s.model_dump() for s in payload.servers]
             svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_payload)
             created_servers = svr_resp.json()
+            # Add organization name for agent registration
+            servers_for_agents = [{**s.model_dump(), "organization_name": payload.organization.organization_name} for s in payload.servers]
+            all_servers_for_agent_registration.extend(servers_for_agents)
             logger.info(f"Created {len(created_servers)} servers for org {org_id}")
         except Exception as e:
             logger.exception(f"Failed to create servers: {e}")
@@ -918,13 +1023,33 @@ async def api_onboarding(
 
                     # Servers
                     if app_payload.servers:
-                        servers_payload = []
+                        servers_db_payload = []  # For db-service (clean, no extra fields)
+                        servers_agent_payload = []  # For agent registration (with org names)
                         for s in app_payload.servers:
-                            sd = {**s.model_dump(), "organization_id": org_id, "suborganization_id": suborg_id, "application_id": app_id}
-                            servers_payload.append(sd)
+                            # Clean payload for db-service
+                            sd_db = {
+                                **s.model_dump(), 
+                                "organization_id": org_id, 
+                                "suborganization_id": suborg_id, 
+                                "application_id": app_id
+                            }
+                            servers_db_payload.append(sd_db)
+                            
+                            # Full payload for agent registration (includes names)
+                            sd_agent = {
+                                **s.model_dump(),
+                                "organization_id": org_id, 
+                                "suborganization_id": suborg_id, 
+                                "application_id": app_id,
+                                "organization_name": payload.organization.organization_name,
+                                "suborganization_name": so.suborganization_name,
+                                "application_name": app_payload.application_name
+                            }
+                            servers_agent_payload.append(sd_agent)
                         try:
-                            svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_payload)
-                            logger.info(f"Created {len(servers_payload)} servers for app {app_id}")
+                            svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_db_payload)
+                            all_servers_for_agent_registration.extend(servers_agent_payload)  # Add to agent registration list
+                            logger.info(f"Created {len(servers_db_payload)} servers for app {app_id}")
                         except Exception as e:
                             logger.exception(f"Failed to create app servers for app {app_id}: {e}")
 
@@ -1017,6 +1142,21 @@ async def api_onboarding(
         except Exception as e:
             logger.exception(f"Failed to schedule TLS/domain scan job {scan_job_id}: {e}")
 
+    # 6b) Register servers as agents in system-scan service (for Crypto Inventory)
+    registered_agents = []
+    if all_servers_for_agent_registration:
+        try:
+            logger.info(f"Registering {len(all_servers_for_agent_registration)} servers as agents for Crypto Inventory...")
+            # Pass organization context for tracking
+            org_context = {
+                "organization_name": payload.organization.organization_name
+            }
+            registered_agents = await register_servers_as_agents(all_servers_for_agent_registration, org_context)
+            successful_registrations = sum(1 for r in registered_agents if isinstance(r, dict) and r.get("success"))
+            logger.info(f"Successfully registered {successful_registrations}/{len(all_servers_for_agent_registration)} servers as agents")
+        except Exception as e:
+            logger.exception(f"Failed to register servers as agents (non-blocking): {e}")
+
     # 7) Create onboarding batch tracking record
     onboarding_batch_id = None
     try:
@@ -1044,9 +1184,10 @@ async def api_onboarding(
         "created_repositories": len(created_repos),
         "created_servers": len(created_servers),
         "created_domains": len(created_domains),
+        "registered_agents": len([r for r in registered_agents if isinstance(r, dict) and r.get("success")]),
         "onboarding_job": job_data if 'job_data' in locals() else None,
         "triggered_scans": triggered_scans,
-        "message": "Onboarding accepted; scans queued (if any)."
+        "message": "Onboarding accepted; scans queued (if any). Servers registered as agents in Crypto Inventory."
     }
 
 

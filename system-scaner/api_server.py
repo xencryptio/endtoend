@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse # Im
 from fastapi.exceptions import RequestValidationError # Import RequestValidationError
 from pydantic import BaseModel, ValidationError
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uvicorn
 import json
 import os
@@ -22,6 +22,13 @@ import requests
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import os
+
+# --- IST Timezone Configuration ---
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_now():
+    """Get current time in IST timezone"""
+    return datetime.now(IST).replace(tzinfo=None)  # Store without timezone info for consistency
 
 # --- Remote Scoring Configuration ---
 SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
@@ -247,7 +254,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -305,7 +312,11 @@ class Agent(Base):
     ip_address = Column(String, nullable=False)
     os_info = Column(String, nullable=False)
     registered_at = Column(DateTime, nullable=False)
-    last_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=True)  # NULL for onboarded agents awaiting real agent
+    # Organization tracking (populated during onboarding)
+    organization_name = Column(String, nullable=True)
+    suborganization_name = Column(String, nullable=True)
+    application_name = Column(String, nullable=True)
     tasks = relationship("Task", back_populates="agent", cascade="all, delete-orphan")
     results = relationship("Result", back_populates="agent", cascade="all, delete-orphan")
 
@@ -339,6 +350,10 @@ class AgentRegistration(BaseModel):
     ip_address: str
     os_info: str
     timestamp: str
+    # Optional organization tracking (from onboarding)
+    organization_name: Optional[str] = None
+    suborganization_name: Optional[str] = None
+    application_name: Optional[str] = None
 
 class SystemInfo(BaseModel):
     agent_id: str
@@ -375,7 +390,7 @@ def get_agent_status(agent: Agent) -> str:
         return "unknown"
     
     try:
-        time_diff = datetime.now() - agent.last_seen
+        time_diff = get_ist_now() - agent.last_seen
         if time_diff > timedelta(minutes=AGENT_TIMEOUT_MINUTES):
             return "inactive"
         return "active"
@@ -384,12 +399,12 @@ def get_agent_status(agent: Agent) -> str:
         return "unknown"
 
 def update_agent_last_seen(db: Session, agent_id: str):
-    """Update the last_seen timestamp for an agent"""
+    """Update the last_seen timestamp for an agent using IST"""
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
     if agent:
-        agent.last_seen = datetime.now()
+        agent.last_seen = get_ist_now()
         db.commit()
-        logger.debug(f"Updated last_seen for {agent_id}")
+        logger.debug(f"Updated last_seen for {agent_id} (IST)")
 
 def get_folder_files(folder_name: str):
     """Get list of files in a folder with their sizes"""
@@ -413,29 +428,86 @@ def get_folder_files(folder_name: str):
 # Endpoints
 @app.post("/api/v1/agent/register")
 async def register_agent(registration: AgentRegistration, db: Session = Depends(get_db)):
-    """Register a new agent with system information"""
+    """Register a new agent with system information.
+    
+    If an agent with the same IP address already exists, reuse that agent record
+    instead of creating a new one. This handles reinstallation scenarios.
+    
+    Agents registered via onboarding (agent_id starts with 'onboarded_') will have
+    last_seen set to None so they show as inactive until a real agent connects.
+    """
     logger.info("Entered /api/v1/agent/register endpoint")
     try:
+        # Use IST for all timestamps
+        timestamp = get_ist_now()
+        
+        # Check if this is a pre-registered agent from onboarding (no real agent installed yet)
+        is_onboarded_placeholder = registration.agent_id.startswith("onboarded_")
+        
+        # For onboarded placeholders, set last_seen to None (will show as inactive)
+        # For real agents, use the IST timestamp
+        effective_last_seen = None if is_onboarded_placeholder else timestamp
+        
+        # First, check if agent with same agent_id exists
         agent = db.query(Agent).filter(Agent.agent_id == registration.agent_id).first()
-        timestamp = datetime.fromisoformat(registration.timestamp)
+        
         if agent:
+            # Agent ID matches - update existing agent
             agent.hostname = registration.hostname
             agent.ip_address = registration.ip_address
             agent.os_info = registration.os_info
-            agent.last_seen = timestamp
+            # Only update last_seen for real agents, not onboarded placeholders
+            if not is_onboarded_placeholder:
+                agent.last_seen = timestamp
+            # Update org info if provided (from onboarding)
+            if registration.organization_name:
+                agent.organization_name = registration.organization_name
+            if registration.suborganization_name:
+                agent.suborganization_name = registration.suborganization_name
+            if registration.application_name:
+                agent.application_name = registration.application_name
+            logger.info(f"Agent updated (same ID): {registration.agent_id} ({registration.hostname})")
         else:
-            agent = Agent(
-                agent_id=registration.agent_id,
-                hostname=registration.hostname,
-                ip_address=registration.ip_address,
-                os_info=registration.os_info,
-                registered_at=timestamp,
-                last_seen=timestamp
-            )
-            db.add(agent)
+            # Check if there's an existing agent with same IP address
+            existing_agent_by_ip = db.query(Agent).filter(
+                Agent.ip_address == registration.ip_address
+            ).first()
+            
+            if existing_agent_by_ip:
+                # Reuse existing agent record - keep the original agent_id (due to FK constraints)
+                logger.info(f"Found existing agent with same IP {registration.ip_address}, reactivating...")
+                existing_agent_by_ip.hostname = registration.hostname
+                existing_agent_by_ip.os_info = registration.os_info
+                # Only update last_seen for real agents
+                if not is_onboarded_placeholder:
+                    existing_agent_by_ip.last_seen = timestamp
+                # Update org info if provided (from onboarding)
+                if registration.organization_name:
+                    existing_agent_by_ip.organization_name = registration.organization_name
+                if registration.suborganization_name:
+                    existing_agent_by_ip.suborganization_name = registration.suborganization_name
+                if registration.application_name:
+                    existing_agent_by_ip.application_name = registration.application_name
+                agent = existing_agent_by_ip
+                logger.info(f"Agent reactivated (same IP): {existing_agent_by_ip.agent_id} ({registration.hostname})")
+            else:
+                # New agent - create new record
+                agent = Agent(
+                    agent_id=registration.agent_id,
+                    hostname=registration.hostname,
+                    ip_address=registration.ip_address,
+                    os_info=registration.os_info,
+                    registered_at=timestamp,
+                    last_seen=effective_last_seen,  # None for onboarded placeholders
+                    organization_name=registration.organization_name,
+                    suborganization_name=registration.suborganization_name,
+                    application_name=registration.application_name
+                )
+                db.add(agent)
+                logger.info(f"New agent registered: {registration.agent_id} ({registration.hostname}) [placeholder={is_onboarded_placeholder}]")
+        
         db.commit()
-        logger.info(f"Agent registered: {registration.agent_id} ({registration.hostname})")
-        return {"success": True, "message": "Agent registered successfully", "agent_id": registration.agent_id}
+        return {"success": True, "message": "Agent registered successfully", "agent_id": agent.agent_id}
     except SQLAlchemyError as e:
         db.rollback()
         logger.exception("Agent registration failed")
@@ -455,6 +527,28 @@ async def receive_system_info(system_info: SystemInfo, db: Session = Depends(get
         logger.exception("Failed to process system info")
         raise APIError(status_code=500, error_code="system_info_failed", message=f"Failed to process system info: {str(e)}")
 
+@app.delete("/api/v1/agent/{agent_id}")
+async def delete_agent(agent_id: str, db: Session = Depends(get_db)):
+    """Delete an agent and all its associated tasks and results"""
+    logger.info(f"Entered DELETE /api/v1/agent/{agent_id} endpoint")
+    try:
+        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
+        if not agent:
+            raise APIError(status_code=404, error_code="agent_not_found", message=f"Agent {agent_id} not found")
+        
+        hostname = agent.hostname
+        db.delete(agent)  # Cascade will delete tasks and results
+        db.commit()
+        
+        logger.info(f"Agent deleted: {agent_id} ({hostname})")
+        return {"success": True, "message": f"Agent {hostname} deleted successfully", "agent_id": agent_id}
+    except APIError:
+        raise
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.exception("Agent deletion failed")
+        raise APIError(status_code=500, error_code="delete_failed", message=f"Failed to delete agent: {str(e)}")
+
 @app.get("/api/v1/agent/fetchaction/{agent_id}")
 async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
     """Agent polls this endpoint to check if a scan is requested"""
@@ -464,7 +558,7 @@ async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
         task = db.query(Task).filter(Task.agent_id == agent_id, Task.status == 'pending').order_by(Task.created_at).first()
         if task:
             task.status = 'in_progress'
-            task.started_at = datetime.now()
+            task.started_at = get_ist_now()
             db.commit()
             logger.info(f"Scan task dispatched to agent: {agent_id}")
             return FetchActionResponse(scan_flag=True, task_id=task.task_id, message="Crypto audit scan requested")
@@ -509,7 +603,7 @@ async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
             agent_id=audit_data.agent_id,
             task_id=audit_data.task_id,
             audit_results=json.dumps(scored_results),  # Store scored results
-            received_at=datetime.now(),
+            received_at=get_ist_now(),
             submitted_at=datetime.fromisoformat(audit_data.timestamp)
         )
         db.add(new_result)
@@ -517,7 +611,7 @@ async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
         task = db.query(Task).filter(Task.task_id == audit_data.task_id).first()
         if task:
             task.status = 'completed'
-            task.completed_at = datetime.now()
+            task.completed_at = get_ist_now()
         
         db.commit()
         logger.info(f"Audit results received from: {audit_data.agent_id} (Task: {audit_data.task_id})")
@@ -540,8 +634,8 @@ async def trigger_scan(agent_id: str, db: Session = Depends(get_db)):
         if status == "inactive":
             logger.warning(f"Triggering scan for inactive agent: {agent_id}")
         
-        task_id = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-        new_task = Task(task_id=task_id, agent_id=agent_id, status="pending", created_at=datetime.now())
+        task_id = f"task_{get_ist_now().strftime('%Y%m%d_%H%M%S_%f')}"
+        new_task = Task(task_id=task_id, agent_id=agent_id, status="pending", created_at=get_ist_now())
         db.add(new_task)
         db.commit()
         
@@ -557,14 +651,17 @@ async def list_agents(db: Session = Depends(get_db)):
     """List all registered agents with current status"""
     logger.info("Entered /api/v1/admin/agents endpoint")
     try:
-        agents = db.query(Agent).order_by(Agent.last_seen.desc()).all()
+        agents = db.query(Agent).order_by(Agent.last_seen.desc().nullslast()).all()
         agents_with_status = []
         for agent in agents:
             agent_dict = {c.name: getattr(agent, c.name) for c in agent.__table__.columns}
             agent_dict["status"] = get_agent_status(agent)
             try:
-                time_diff = datetime.now() - agent.last_seen
-                agent_dict["minutes_since_last_seen"] = int(time_diff.total_seconds() / 60)
+                if agent.last_seen:
+                    time_diff = get_ist_now() - agent.last_seen
+                    agent_dict["minutes_since_last_seen"] = int(time_diff.total_seconds() / 60)
+                else:
+                    agent_dict["minutes_since_last_seen"] = 999999  # Never seen (onboarded placeholder)
             except:
                 agent_dict["minutes_since_last_seen"] = 999999
             agents_with_status.append(agent_dict)
@@ -575,7 +672,7 @@ async def list_agents(db: Session = Depends(get_db)):
         return {
             "success": True, "count": len(agents_with_status), "active_count": active_count,
             "inactive_count": len(agents_with_status) - active_count,
-            "timeout_minutes": AGENT_TIMEOUT_MINUTES, "server_time": datetime.now().isoformat(),
+            "timeout_minutes": AGENT_TIMEOUT_MINUTES, "server_time": get_ist_now().isoformat(),
             "agents": agents_with_status
         }
     except Exception as e:
@@ -638,13 +735,18 @@ async def get_stats(db: Session = Depends(get_db)):
     logger.info("Entered /api/v1/admin/stats endpoint")
     try:
         total_agents = db.query(func.count(Agent.agent_id)).scalar()
-        active_agents = db.query(func.count(Agent.agent_id)).filter(Agent.last_seen > datetime.now() - timedelta(minutes=AGENT_TIMEOUT_MINUTES)).scalar()
+        # Count active agents: those with last_seen within timeout AND not NULL
+        cutoff_time = get_ist_now() - timedelta(minutes=AGENT_TIMEOUT_MINUTES)
+        active_agents = db.query(func.count(Agent.agent_id)).filter(
+            Agent.last_seen.isnot(None),
+            Agent.last_seen > cutoff_time
+        ).scalar()
         task_stats = db.query(Task.status, func.count(Task.status)).group_by(Task.status).all()
         result_count = db.query(func.count(Result.result_id)).scalar()
         
         logger.info("Stats retrieved successfully")
         return {
-            "success": True, "timestamp": datetime.now().isoformat(),
+            "success": True, "timestamp": get_ist_now().isoformat(),
             "agents": {"total": total_agents, "active": active_agents, "inactive": total_agents - active_agents},
             "tasks": {"total": sum(c for s, c in task_stats), **{s: c for s, c in task_stats}},
             "results": {"total": result_count}

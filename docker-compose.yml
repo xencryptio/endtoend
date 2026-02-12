@@ -285,104 +285,116 @@ services:
         max-size: "10m"
         max-file: "5"
 
-  # ---------------------------------------------------------------------------
-  # LINUX AGENT #1 - MODERN
-  # ---------------------------------------------------------------------------
-  linux-agent-modern:
-    build:
-      context: ./system-scaner/agents/linux
-      dockerfile: Dockerfile.modern
-      args:
-        API_SERVER: http://system-scan:9000
-    container_name: linux-agent-modern
-    hostname: ubuntu-modern-agent
-    depends_on:
-      system-scan:
-        condition: service_healthy
-    environment:
-      - AGENT_PROFILE=modern
-      - API_BASE_URL=http://system-scan:9000
-      - POLL_INTERVAL=10
-      - AGENT_NAME=ubuntu-modern-agent
-    networks:
-      - xencrypt-network
-    restart: unless-stopped
-    privileged: false
-    cap_add:
-      - SYS_ADMIN
-    volumes:
-      - agent-modern-data:/var/lib/crypto_agent
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+  # ===========================================================================
+  # DEMO LINUX AGENTS - COMMENTED OUT
+  # ===========================================================================
+  # These are test/demo agents. To enable them:
+  # 1. Uncomment the entire block below (remove the # at the start of each line)
+  # 2. Run: docker-compose up -d linux-agent-modern linux-agent-legacy linux-agent-mixed
+  # 
+  # To disable again:
+  # 1. Comment out the block below (add # at the start of each line)
+  # 2. Run: docker-compose down linux-agent-modern linux-agent-legacy linux-agent-mixed
+  # ===========================================================================
 
-  # ---------------------------------------------------------------------------
-  # LINUX AGENT #2 - LEGACY
-  # ---------------------------------------------------------------------------
-  linux-agent-legacy:
-    build:
-      context: ./system-scaner/agents/linux
-      dockerfile: Dockerfile.legacy
-      args:
-        API_SERVER: http://system-scan:9000
-    container_name: linux-agent-legacy
-    hostname: debian-legacy-agent
-    depends_on:
-      system-scan:
-        condition: service_healthy
-    environment:
-      - AGENT_PROFILE=legacy
-      - API_BASE_URL=http://system-scan:9000
-      - POLL_INTERVAL=10
-      - AGENT_NAME=debian-legacy-agent
-    networks:
-      - xencrypt-network
-    restart: unless-stopped
-    privileged: false
-    cap_add:
-      - SYS_ADMIN
-    volumes:
-      - agent-legacy-data:/var/lib/crypto_agent
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+  # # ---------------------------------------------------------------------------
+  # # LINUX AGENT #1 - MODERN (Ubuntu)
+  # # ---------------------------------------------------------------------------
+  # linux-agent-modern:
+  #   build:
+  #     context: ./system-scaner/agents/linux
+  #     dockerfile: Dockerfile.modern
+  #     args:
+  #       API_SERVER: http://system-scan:9000
+  #   container_name: linux-agent-modern
+  #   hostname: ubuntu-modern-agent
+  #   depends_on:
+  #     system-scan:
+  #       condition: service_healthy
+  #   environment:
+  #     - AGENT_PROFILE=modern
+  #     - API_BASE_URL=http://system-scan:9000
+  #     - POLL_INTERVAL=10
+  #     - AGENT_NAME=ubuntu-modern-agent
+  #   networks:
+  #     - xencrypt-network
+  #   restart: unless-stopped
+  #   privileged: false
+  #   cap_add:
+  #     - SYS_ADMIN
+  #   volumes:
+  #     - agent-modern-data:/var/lib/crypto_agent
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "5"
 
-  # ---------------------------------------------------------------------------
-  # LINUX AGENT #3 - MIXED
-  # ---------------------------------------------------------------------------
-  linux-agent-mixed:
-    build:
-      context: ./system-scaner/agents/linux
-      dockerfile: Dockerfile.mixed
-      args:
-        API_SERVER: http://system-scan:9000
-    container_name: linux-agent-mixed
-    hostname: alpine-mixed-agent
-    depends_on:
-      system-scan:
-        condition: service_healthy
-    environment:
-      - AGENT_PROFILE=mixed
-      - API_BASE_URL=http://system-scan:9000
-      - POLL_INTERVAL=10
-      - AGENT_NAME=alpine-mixed-agent
-    networks:
-      - xencrypt-network
-    restart: unless-stopped
-    privileged: false
-    cap_add:
-      - SYS_ADMIN
-    volumes:
-      - agent-mixed-data:/var/lib/crypto_agent
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+  # # ---------------------------------------------------------------------------
+  # # LINUX AGENT #2 - LEGACY (Debian)
+  # # ---------------------------------------------------------------------------
+  # linux-agent-legacy:
+  #   build:
+  #     context: ./system-scaner/agents/linux
+  #     dockerfile: Dockerfile.legacy
+  #     args:
+  #       API_SERVER: http://system-scan:9000
+  #   container_name: linux-agent-legacy
+  #   hostname: debian-legacy-agent
+  #   depends_on:
+  #     system-scan:
+  #       condition: service_healthy
+  #   environment:
+  #     - AGENT_PROFILE=legacy
+  #     - API_BASE_URL=http://system-scan:9000
+  #     - POLL_INTERVAL=10
+  #     - AGENT_NAME=debian-legacy-agent
+  #   networks:
+  #     - xencrypt-network
+  #   restart: unless-stopped
+  #   privileged: false
+  #   cap_add:
+  #     - SYS_ADMIN
+  #   volumes:
+  #     - agent-legacy-data:/var/lib/crypto_agent
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "5"
+
+  # # ---------------------------------------------------------------------------
+  # # LINUX AGENT #3 - MIXED (Alpine)
+  # # ---------------------------------------------------------------------------
+  # linux-agent-mixed:
+  #   build:
+  #     context: ./system-scaner/agents/linux
+  #     dockerfile: Dockerfile.mixed
+  #     args:
+  #       API_SERVER: http://system-scan:9000
+  #   container_name: linux-agent-mixed
+  #   hostname: alpine-mixed-agent
+  #   depends_on:
+  #     system-scan:
+  #       condition: service_healthy
+  #   environment:
+  #     - AGENT_PROFILE=mixed
+  #     - API_BASE_URL=http://system-scan:9000
+  #     - POLL_INTERVAL=10
+  #     - AGENT_NAME=alpine-mixed-agent
+  #   networks:
+  #     - xencrypt-network
+  #   restart: unless-stopped
+  #   privileged: false
+  #   cap_add:
+  #     - SYS_ADMIN
+  #   volumes:
+  #     - agent-mixed-data:/var/lib/crypto_agent
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "5"
 
 # =============================================================================
 # NETWORKS

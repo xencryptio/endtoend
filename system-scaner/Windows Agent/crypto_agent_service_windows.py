@@ -110,7 +110,7 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
                 "agent_id": self.agent_id,
                 "hostname": self.hostname,
                 "ip_address": self.ip_address,
-                "platform": self.platform,  # ✅ EXPLICIT PLATFORM
+                "platform": "Windows",  # Explicit platform string
                 "os_info": os_info,
                 "kernel_version": platform.release(),
                 "timestamp": datetime.now().isoformat()
@@ -131,6 +131,18 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
             response = requests.post(url, json=system_info, timeout=10)
             
             if response.status_code == 200:
+                data = response.json()
+                # Use the agent_id returned by server (may differ if reactivated by IP)
+                server_agent_id = data.get("agent_id", self.agent_id)
+                if server_agent_id != self.agent_id:
+                    logger.info(f"Server assigned existing agent ID: {server_agent_id}")
+                    self.agent_id = server_agent_id
+                    # Save the server-assigned ID to local file
+                    try:
+                        with open(AGENT_ID_FILE, 'w') as f:
+                            f.write(server_agent_id)
+                    except Exception as e:
+                        logger.warning(f"Could not save server agent ID to file: {e}")
                 logger.info("Agent registered successfully")
                 self.registered = True
                 return True
