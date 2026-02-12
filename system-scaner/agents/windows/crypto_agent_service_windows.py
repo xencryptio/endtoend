@@ -135,7 +135,15 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
 
                 response = await call_service("POST", url, json=system_info, headers=headers, timeout=10)
                 
-                return response.status_code == 200
+                if response.status_code == 200:
+                    # Use the agent_id assigned by the server (may be different if IP matched existing agent)
+                    result = response.json()
+                    server_agent_id = result.get("agent_id")
+                    if server_agent_id and server_agent_id != self.agent_id:
+                        logger.info(f"Server assigned existing agent_id: {server_agent_id} (IP matched)")
+                        self.agent_id = server_agent_id
+                    return True
+                return False
                     
             except httpx.RequestError as e:
                 logger.error(f"Registration request failed: {e}")
@@ -146,7 +154,7 @@ class CryptoAgentService(win32serviceutil.ServiceFramework):
         
         success = asyncio.run(_async_register())
         if success:
-            logger.info("Agent registered successfully")
+            logger.info(f"Agent registered successfully with ID: {self.agent_id}")
             self.registered = True
         return success
     
