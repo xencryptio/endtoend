@@ -25,12 +25,10 @@ class ScanResult(Base):
     id = Column(Integer, primary_key=True, index=True)
     request_id = Column(String, unique=True, index=True, nullable=False)
     url = Column(String, nullable=False, index=True)
-    
-    scan_status = Column(
-        SQLEnum(ScanStatusEnum, name="scan_status_enum", create_type=False), 
-        default=ScanStatusEnum.PENDING,
-        nullable=False
-    )
+
+    # Store as plain String(50) — avoids PostgreSQL ENUM type dependency.
+    # Python-level validation is handled by ScanStatusEnum in Pydantic schemas.
+    scan_status = Column(String(50), default="pending", nullable=False)
     status = Column(String, index=True, nullable=False)  # Keep for backward compatibility
     scan_type = Column(String, default="crypto_audit")
     

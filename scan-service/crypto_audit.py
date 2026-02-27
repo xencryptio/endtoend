@@ -44,65 +44,187 @@ SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
 # --- Feature Flag for Internal Scanner ---
 USE_INTERNAL_SCANNER = os.getenv("USE_INTERNAL_SCANNER", "true") == "true"
 
-def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:
-    """Transform SSL Labs data to standard scoring format"""
-    algorithms = []
-    
-    # TLS 1.2 ciphers
-    tls12_suites = scan_data.get("tls_configuration", {}).get("tls_1.2_cipher_suites", {}).get("suites", [])
-    for idx, suite in enumerate(tls12_suites):
-        if suite.get("key_exchange"):
-            algorithms.append({
-                "name": suite["key_exchange"],
-                "algorithm_type": "kex",
-                "curve": suite.get("curve"),
-                "curve_bits": suite.get("curve_bits"),
-                "position": idx,
-                "context": {"protocol": "TLS 1.2", "cipher_suite": suite["name"]}
-            })
-        
-        if suite.get("encryption"):
-            enc = suite["encryption"]
-            if "ChaCha20" in enc:
-                key_size = 256
-            else:
-                key_size = 256 if "256" in enc else 128
-            algorithms.append({
-                "name": suite["encryption"],
-                "algorithm_type": "symmetric",
-                "key_size": key_size,
-                "position": idx,
-                "context": {"protocol": "TLS 1.2"}
-            })
+def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:  # noqa: C901
+    """Transform TLS scan data into the standard algorithm-scoring payload.
 
-    # TLS 1.3 ciphers
-    tls13_suites = scan_data.get("tls_configuration", {}).get("tls_1.3_cipher_suites", {}).get("suites", [])
+    Key design decisions that fix the original scoring bugs:
+
+    1. **Named/elliptic curves first** — ``supported_elliptic_curves`` holds every
+       group the server actively supports (X25519, secp256r1, X25519MLKEM768, …).
+       These are added as ``kex`` entries at the best positions so the scorer sees
+       the *actual* key-exchange capability, not just the generic "ECDHE" label.
+
+    2. **No duplicate ECDHE kex** — TLS 1.2/1.3 cipher-suite rows whose
+       ``key_exchange`` is only "ECDHE" / "ECDH" are skipped for kex scoring
+       because the concrete curves are already captured in step 1.  Suites that
+       use DHE, FFDHE, or RSA *are* kept because they are distinct from the curves.
+
+    3. **TLS 1.3 symmetric wins priority** — TLS 1.3 cipher suites always use
+       AEAD (AES-256-GCM, ChaCha20-Poly1305, …).  They are placed before TLS 1.2
+       symmetric entries so the scorer rewards the best available encryption.
+
+    4. **Skip "Unknown" encryption** — cipher suites without a recognised
+       encryption mode (e.g. bare RSA or DSS suites) are omitted from the
+       symmetric list rather than dragging the average to zero.
+
+    5. **Certificate signatures unchanged** — cert chain is appended last.
+    """
+    algorithms: List[Dict] = []
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    # Map curve name → typical bit length for context enrichment.
+    _CURVE_BITS: Dict[str, int] = {
+        "X25519": 256, "X448": 448, "CURVE25519": 256, "CURVE448": 448,
+        "SECP224R1": 224, "SECP256R1": 256, "SECP256K1": 256,
+        "SECP384R1": 384, "SECP521R1": 521,
+        "PRIME256V1": 256, "P-256": 256, "P-384": 384, "P-521": 521,
+        "BRAINPOOLP256R1": 256, "BRAINPOOLP384R1": 384, "BRAINPOOLP512R1": 512,
+        "FFDHE2048": 2048, "FFDHE3072": 3072, "FFDHE4096": 4096,
+        "FFDHE6144": 6144, "FFDHE8192": 8192,
+        # PQ-hybrid groups — use classical component size here; the table score
+        # already reflects the elevated PQ security.
+        "X25519MLKEM768": 256, "X25519-MLKEM768": 256, "X25519MLKEM1024": 256,
+        "X25519KYBER768DRAFT00": 256, "X25519KYBER512DRAFT00": 256,
+        "P256KYBER512DRAFT00": 256, "P384KYBER768DRAFT00": 384,
+        "SECP256R1MLKEM768": 256, "SECP384R1MLKEM1024": 384,
+        "MLKEM768": 3168, "MLKEM1024": 6528, "KYBER768": 3168,
+    }
+
+    _GENERIC_ECDHE = {"ECDHE", "ECDH", "ECDH-RSA", "ECDH-ECDSA"}
+
+    def _enc_key_size(enc_name: str) -> int:
+        """Infer symmetric key length from encryption algorithm name."""
+        u = enc_name.upper()
+        if "256" in u or "CHACHA20" in u or "XCHACHA20" in u:
+            return 256
+        if "192" in u:
+            return 192
+        if "128" in u:
+            return 128
+        return 128  # safe fallback
+
+    # ------------------------------------------------------------------
+    # Step 1 — Supported named/elliptic groups (the real KEX algorithms)
+    # ------------------------------------------------------------------
+    tls_cfg = scan_data.get("tls_configuration", {})
+    supported_curves_data = (
+        tls_cfg.get("supported_elliptic_curves", {})
+    )
+    # Tolerate two common key names: "curves" and "groups"
+    curve_list: List[Dict] = (
+        supported_curves_data.get("curves")
+        or supported_curves_data.get("groups")
+        or []
+    )
+    # Deduplicate while preserving order (server preference order)
+    seen_curves: set = set()
+    for pos, curve_entry in enumerate(curve_list):
+        cname = (
+            curve_entry.get("name")
+            or curve_entry.get("group")
+            or curve_entry.get("id", "")
+        )
+        if not cname:
+            continue
+        cname_upper = cname.upper()
+        if cname_upper in seen_curves:
+            continue
+        seen_curves.add(cname_upper)
+        cbits = (
+            curve_entry.get("bits")
+            or curve_entry.get("key_size")
+            or _CURVE_BITS.get(cname_upper, 0)
+        )
+        algorithms.append({
+            "name": cname,
+            "algorithm_type": "kex",
+            "curve": cname,
+            "curve_bits": cbits,
+            "key_size": cbits,
+            "position": pos,
+            "context": {"source": "supported_groups", "prefer": True},
+        })
+
+    # ------------------------------------------------------------------
+    # Step 2 — TLS 1.3 symmetric (AEAD only — always strong)
+    # ------------------------------------------------------------------
+    tls13_suites = tls_cfg.get("tls_1.3_cipher_suites", {}).get("suites", [])
+    tls13_sym_offset = 0
     for idx, suite in enumerate(tls13_suites):
-        if suite.get("key_exchange"):
-            algorithms.append({
-                "name": suite["key_exchange"],
-                "algorithm_type": "kex",
-                "curve": suite.get("key_exchange"),
-                "curve_bits": suite.get("curve_bits"),
-                "position": idx,
-                "context": {"protocol": "TLS 1.3", "cipher_suite": suite["name"]}
-            })
-        
-        if suite.get("encryption"):
-            enc = suite["encryption"]
-            if "ChaCha20" in enc:
-                key_size = 256
-            else:
-                key_size = 256 if "256" in enc else 128
-            algorithms.append({
-                "name": suite["encryption"],
-                "algorithm_type": "symmetric",
-                "key_size": key_size,
-                "position": idx,
-                "context": {"protocol": "TLS 1.3"}
-            })
+        enc = suite.get("encryption", "")
+        if not enc or enc.upper() in ("UNKNOWN", "NONE", "NULL", ""):
+            continue
+        algorithms.append({
+            "name": enc,
+            "algorithm_type": "symmetric",
+            "key_size": _enc_key_size(enc),
+            "position": tls13_sym_offset + idx,
+            "context": {"protocol": "TLS 1.3", "cipher_suite": suite.get("name", "")},
+        })
+        tls13_sym_offset += 1  # each accepted entry occupies a slot
 
-    # Certificate signatures
+    # ------------------------------------------------------------------
+    # Step 3 — TLS 1.2 symmetric (skip "Unknown" / NULL entries)
+    # ------------------------------------------------------------------
+    tls12_suites = tls_cfg.get("tls_1.2_cipher_suites", {}).get("suites", [])
+    tls12_sym_base = tls13_sym_offset  # continue after TLS 1.3 entries
+    seen_enc: set = set()
+    for idx, suite in enumerate(tls12_suites):
+        enc = suite.get("encryption", "")
+        if not enc or enc.upper() in ("UNKNOWN", "NONE", "NULL", ""):
+            continue
+        enc_upper = enc.upper()
+        if enc_upper in seen_enc:
+            continue  # avoid scoring identical encryption modes many times
+        seen_enc.add(enc_upper)
+        algorithms.append({
+            "name": enc,
+            "algorithm_type": "symmetric",
+            "key_size": _enc_key_size(enc),
+            "position": tls12_sym_base + idx,
+            "context": {"protocol": "TLS 1.2", "cipher_suite": suite.get("name", "")},
+        })
+
+    # ------------------------------------------------------------------
+    # Step 4 — TLS 1.2 KEX for *non-ECDHE* types (DHE, FFDHE, RSA, PSK)
+    #          ECDHE kex is already covered fully by supported_groups above.
+    # ------------------------------------------------------------------
+    kex_base = len(seen_curves)  # cursor after the curve entries
+    for idx, suite in enumerate(tls12_suites):
+        kex_raw = suite.get("key_exchange", "")
+        if not kex_raw:
+            continue
+        kex_upper = kex_raw.upper()
+        # Skip generic ECDHE labels — already represented by named groups
+        if kex_upper in _GENERIC_ECDHE:
+            continue
+        # Skip "Unknown" or empty
+        if kex_upper in ("UNKNOWN", "NONE", "NULL", ""):
+            continue
+        # Enrich DHE with bits from cipher name where available
+        cbits = suite.get("curve_bits", 0)
+        if cbits == 0 and "DHE" in kex_upper:
+            # Try to infer from cipher suite name (e.g. "DHE-RSA-AES256-SHA")
+            cname_upper = suite.get("name", "").upper()
+            for fbits_str in ("8192", "6144", "4096", "3072", "2048"):
+                if fbits_str in cname_upper:
+                    cbits = int(fbits_str)
+                    break
+        algorithms.append({
+            "name": kex_raw,
+            "algorithm_type": "kex",
+            "curve": suite.get("curve"),
+            "curve_bits": cbits,
+            "key_size": cbits,
+            "position": kex_base + idx,
+            "context": {"protocol": "TLS 1.2", "cipher_suite": suite.get("name", "")},
+        })
+
+    # ------------------------------------------------------------------
+    # Step 5 — Certificate signatures
+    # ------------------------------------------------------------------
     cert_sigs = scan_data.get("signature_algorithms", {}).get("certificate_signatures", [])
     for cert in cert_sigs:
         algorithms.append({
@@ -110,8 +232,35 @@ def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:
             "algorithm_type": "signature",
             "key_size": cert.get("public_key_size"),
             "position": cert.get("position", 0),
-            "context": {"source": "certificate"}
+            "context": {"source": "certificate"},
         })
+
+    # ------------------------------------------------------------------
+    # Step 6 — Protocol version entries (fills B-grade range; enables
+    #           TLS 1.0/1.1 penalty + TLS 1.3 quality bonus in scorer)
+    #
+    # Protocol scores (from scorer.PROTOCOL_SCORES):
+    #   TLS 1.3 → 90, TLS 1.2 → 75, TLS 1.1 → 40, TLS 1.0 → 20
+    # These contribute via the 0.10-weight "protocol" component and also
+    # power the protocol-aware bonus/penalty in _calculate_overall_score.
+    # ------------------------------------------------------------------
+    supported_protocols = (
+        tls_cfg.get("supported_protocols", [])
+        or scan_data.get("protocols", [])
+    )
+    # Map protocol name → numeric score (mirrors scorer.PROTOCOL_SCORES)
+    _PROTO_BASE: Dict[str, int] = {
+        "TLS 1.3": 90, "TLS 1.2": 75, "TLS 1.1": 40, "TLS 1.0": 20,
+        "SSL 3.0": 0,  "SSL 2.0": 0,
+    }
+    for pos, proto in enumerate(supported_protocols):
+        if proto in _PROTO_BASE:
+            algorithms.append({
+                "name": proto,
+                "algorithm_type": "protocol",
+                "position": pos,
+                "context": {"source": "protocol_detection"},
+            })
 
     return algorithms
 
@@ -356,41 +505,69 @@ def clear_cancellation(request_id: str):
 
 def extract_encryption_algorithm(cipher_name: str) -> str:
     """Extract encryption algorithm from cipher suite name.
-    
+
     Handles both formats produced by the scanner:
       TLS 1.2 (OpenSSL dash format): ECDHE-RSA-AES256-GCM-SHA384
       TLS 1.3 (underscore format):   TLS_AES_256_GCM_SHA384
     """
     upper = cipher_name.upper()
 
-    # AES-256 variants (match AES256 or AES_256)
-    if "AES256" in upper or "AES_256" in upper:
-        if "GCM" in upper:
-            return "AES-256-GCM"
-        if "CBC" in upper:
-            return "AES-256-CBC"
-
-    # AES-128 variants (match AES128 or AES_128)
-    if "AES128" in upper or "AES_128" in upper:
-        if "GCM" in upper:
-            return "AES-128-GCM"
-        if "CBC" in upper:
-            return "AES-128-CBC"
-
-    # ChaCha20 (match both CHACHA20_POLY1305 and CHACHA20-POLY1305)
+    # ChaCha20 (check first — no ambiguity with AES numbers)
     if "CHACHA20" in upper:
         return "ChaCha20-Poly1305"
+
+    # AES-256 variants
+    if "AES256" in upper or "AES_256" in upper or "AES-256" in upper:
+        if "GCM" in upper:
+            return "AES-256-GCM"
+        if "CCM" in upper:
+            return "AES-256-CCM"
+        if "CBC" in upper:
+            return "AES-256-CBC"
+        # AES256-SHA*, AES-256-SHA* (no explicit mode → CBC per OpenSSL convention)
+        if "SHA" in upper:
+            return "AES-256-CBC"
+        return "AES-256"
+
+    # AES-128 variants
+    if "AES128" in upper or "AES_128" in upper or "AES-128" in upper:
+        if "GCM" in upper:
+            return "AES-128-GCM"
+        if "CCM" in upper:
+            return "AES-128-CCM"
+        if "CBC" in upper:
+            return "AES-128-CBC"
+        if "SHA" in upper:
+            return "AES-128-CBC"
+        return "AES-128"
+
+    # 3DES / DES
+    if "3DES" in upper or "DES-CBC3" in upper:
+        return "3DES"
+    if "DES" in upper:
+        return "DES"
+
+    # RC4
+    if "RC4" in upper:
+        return "RC4"
 
     return "Unknown"
 
 def extract_key_exchange(cipher_name: str, kx_type: Optional[str] = None) -> str:
     """Extract key exchange algorithm from cipher suite name."""
-    if "ECDHE" in cipher_name:
+    upper = cipher_name.upper()
+    if "ECDHE" in upper:
         return "ECDHE"
-    elif kx_type == "ECDH":
+    if "ECDH" in upper or kx_type == "ECDH":
         return "ECDH"
-    elif "RSA" in cipher_name and "ECDHE" not in cipher_name:
+    if "DHE" in upper:
+        return "DHE"
+    if "DH" in upper and "ECDH" not in upper:
+        return "DH"
+    if "RSA" in upper:
         return "RSA"
+    if kx_type:
+        return kx_type
     return "Unknown"
 
 def extract_authentication(cipher_name: str) -> str:
@@ -661,24 +838,42 @@ def extract_signature_algorithms_from_certs(certs: List[Dict[str, Any]]) -> List
                     # Decode base64 certificate
                     der_cert = base64.b64decode(raw_cert)
                     x509_cert = x509.load_der_x509_certificate(der_cert, default_backend())
-                    
+
                     # Extract signature algorithm
                     sig_hash_alg = x509_cert.signature_hash_algorithm
                     pubkey = x509_cert.public_key()
-                    pubkey_type = type(pubkey).__name__.replace('PublicKey', '')
-                    
-                    if sig_hash_alg:
-                        hash_name = sig_hash_alg.name.upper()
-                        sig_algorithm = f"{hash_name}with{pubkey_type}"
+
+                    # Map cryptography library type names to standard scorer-friendly names.
+                    # The type names from .replace('PublicKey', '') would give "EllipticCurve",
+                    # "RSA", "Ed25519", etc., which cause fuzzy-lookup misses in the scorer.
+                    # Use known IANA/OpenSSL short names instead.
+                    raw_type = type(pubkey).__name__
+                    if "EllipticCurve" in raw_type or "EC" in raw_type:
+                        pubkey_std = "ECDSA"
+                    elif "RSA" in raw_type:
+                        pubkey_std = "RSA"
+                    elif "Ed25519" in raw_type:
+                        pubkey_std = "Ed25519"
+                    elif "Ed448" in raw_type:
+                        pubkey_std = "Ed448"
+                    elif "DSA" in raw_type:
+                        pubkey_std = "DSS"
                     else:
-                        sig_algorithm = f"UNKNOWNwith{pubkey_type}"
-                    
+                        pubkey_std = raw_type.replace("PublicKey", "")
+
+                    if sig_hash_alg:
+                        hash_name = sig_hash_alg.name.upper().replace("SHA2-", "SHA-").replace("SHA-256", "SHA256").replace("SHA-384", "SHA384").replace("SHA-512", "SHA512")
+                        # Produce "ECDSA-SHA256" style (scorer recognises this form)
+                        sig_algorithm = f"{pubkey_std}-{hash_name}"
+                    else:
+                        sig_algorithm = pubkey_std
+
                     results.append({
                         "position": i,
                         "certificate_subject": cert.get("subject", "Unknown"),
                         "signature_algorithm": sig_algorithm,
                         "hash_algorithm": sig_hash_alg.name.upper() if sig_hash_alg else "UNKNOWN",
-                        "public_key_type": pubkey_type,
+                        "public_key_type": pubkey_std,
                         "public_key_size": cert.get("keySize", 0),
                         "signature_algorithm_oid": x509_cert.signature_algorithm_oid.dotted_string if x509_cert.signature_algorithm_oid else None,
                     })

@@ -20,12 +20,14 @@ import {
   FileText,
   Package,
   Loader2,
-  Eye
+  Eye,
+  ChevronRight
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { UnifiedBackButton, UnifiedMetricCard } from "@/components/ui/unified";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import SuggestionsPanel from "./SuggestionsPanel";
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -234,33 +236,26 @@ const TechnicalInfoCard: React.FC<{
   itemCount?: number;
 }> = ({ title, description, icon, onViewDetails, itemCount }) => {
   return (
-    <div className="bg-card text-card-foreground border border-slate-200 dark:border-slate-700 rounded-xl shadow-md hover:shadow-lg transition-all duration-300">
-      <div className="p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            {icon}
-            <div>
-              <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">{title}</h4>
-              <p className="text-xs text-muted-foreground mt-1">{description}</p>
-            </div>
-          </div>
-          {itemCount !== undefined && (
-            <span className="px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-bold">
-              {itemCount} Items
-            </span>
-          )}
+    <button
+      onClick={onViewDetails}
+      className="w-full text-left group bg-card hover:bg-muted/40 border border-border hover:border-primary/30 rounded-xl p-4 transition-all duration-200 flex items-center justify-between gap-4 shadow-sm hover:shadow-md"
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+          {icon}
         </div>
-        
-        <Button 
-          variant="default"
-          className="w-full"
-          onClick={onViewDetails}
-        >
-          <Eye className="h-4 w-4 mr-2" />
-          View Details
-        </Button>
+        <div className="min-w-0">
+          <div className="font-semibold text-sm text-foreground truncate">{title}</div>
+          <div className="text-xs text-muted-foreground mt-0.5 truncate">{description}</div>
+        </div>
       </div>
-    </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {itemCount !== undefined && (
+          <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-bold">{itemCount}</span>
+        )}
+        <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+      </div>
+    </button>
   );
 };
 
@@ -310,42 +305,75 @@ const DetailRow: React.FC<{ label: string; value: string | React.ReactNode; clas
   </div>
 );
 
+const gradeAccent = (grade: string) => {
+  if (!grade) return { border: 'border-l-slate-300', bg: 'bg-slate-50/50 dark:bg-slate-900/20', ring: 'bg-slate-100 dark:bg-slate-800', icon: 'text-slate-500' };
+  const g = grade.toUpperCase();
+  if (g.startsWith('A')) return { border: 'border-l-emerald-500', bg: 'bg-emerald-50/40 dark:bg-emerald-950/20', ring: 'bg-emerald-100 dark:bg-emerald-900/40', icon: 'text-emerald-600 dark:text-emerald-400' };
+  if (g.startsWith('B')) return { border: 'border-l-blue-500', bg: 'bg-blue-50/40 dark:bg-blue-950/20', ring: 'bg-blue-100 dark:bg-blue-900/40', icon: 'text-blue-600 dark:text-blue-400' };
+  if (g.startsWith('C')) return { border: 'border-l-yellow-500', bg: 'bg-yellow-50/40 dark:bg-yellow-950/10', ring: 'bg-yellow-100 dark:bg-yellow-900/40', icon: 'text-yellow-600 dark:text-yellow-400' };
+  if (g.startsWith('D')) return { border: 'border-l-orange-500', bg: 'bg-orange-50/40 dark:bg-orange-950/10', ring: 'bg-orange-100 dark:bg-orange-900/40', icon: 'text-orange-600 dark:text-orange-400' };
+  return { border: 'border-l-rose-500', bg: 'bg-rose-50/40 dark:bg-rose-950/20', ring: 'bg-rose-100 dark:bg-rose-900/40', icon: 'text-rose-600 dark:text-rose-400' };
+};
+
 const ComponentScoreCard: React.FC<{ name: string; data: ComponentScore }> = ({ name, data }) => {
+  const accent = gradeAccent(data.grade);
+  const score = data.weighted_average;
+  const barColor = getScoreBarColor(score);
+  const barWidth = Math.min(100, Math.max(0, score));
+  const algCount = (data as any).algorithm_count;
+
   return (
-    <TooltipProvider>
-      <div className="bg-card/70 rounded-xl p-6 border shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:shadow-[0_10px_28px_rgba(0,0,0,0.12)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm group">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            {getSectionIcon(name)}
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest">
-              {getCategoryDisplayName(name)}
-            </div>
+    <div className={`relative rounded-xl border-l-4 border border-border ${accent.border} ${accent.bg} shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-0.5 overflow-hidden`}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 pt-5 pb-3">
+        <div className="flex items-center gap-3">
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${accent.ring}`}>
+            <span className={accent.icon}>{getSectionIcon(name)}</span>
           </div>
-          <div className={`text-2xl font-bold ${getGradeColor(data.grade)} group-hover:scale-110 transition-transform`}>
-            {data.grade}
-          </div>
+          <span className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-widest leading-tight">
+            {getCategoryDisplayName(name)}
+          </span>
         </div>
-        
-        <div className={`text-5xl font-bold tracking-tight mb-4 ${getGradeColor(data.grade)}`}>
+        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${accent.ring} ${getGradeColor(data.grade)}`}>
           {data.grade}
+        </span>
+      </div>
+
+      {/* Score number + bar */}
+      <div className="px-5 pb-4">
+        <div className="flex items-end gap-2 mb-2">
+          <span className={`text-4xl font-bold tracking-tight ${getGradeColor(data.grade)}`}>
+            {score.toFixed(1)}
+          </span>
+          <span className="text-sm text-slate-400 dark:text-slate-500 mb-1 font-medium">/100</span>
         </div>
-        
-        <div className="text-xs text-slate-600 dark:text-slate-400 space-y-2 font-medium">
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 dark:text-slate-500">PQC Percentage</span>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{data.pqc_percentage}%</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 dark:text-slate-500">Quantum-Safe Count</span>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{data.quantum_safe_count}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 dark:text-slate-500">Weighted Score</span>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{data.weighted_average.toFixed(1)}/100</span>
-          </div>
+        <div className="h-2 bg-slate-200/70 dark:bg-slate-700/50 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+            style={{ width: `${barWidth}%` }}
+          />
         </div>
       </div>
-    </TooltipProvider>
+
+      {/* Divider */}
+      <div className="border-t border-border/60 mx-5" />
+
+      {/* Stats row */}
+      <div className="px-5 py-3 grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 uppercase tracking-wide font-semibold mb-0.5">PQC %</div>
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">{data.pqc_percentage}%</div>
+        </div>
+        <div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 uppercase tracking-wide font-semibold mb-0.5">Quantum-Safe</div>
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">{data.quantum_safe_count}</div>
+        </div>
+        <div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 uppercase tracking-wide font-semibold mb-0.5">Algorithms</div>
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">{algCount ?? '—'}</div>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -376,6 +404,7 @@ const DomainDetailPage: React.FC<{
   const quantumReady = result.raw_response?.pqc_analysis?.quantum_ready ?? false;
   const securityLevel = result.raw_response?.pqc_analysis?.security_level ?? 'unknown';
   const hybridReady = result.raw_response?.pqc_analysis?.hybrid_ready ?? false;
+  const legacyProtocols: string[] = result.raw_response?.pqc_analysis?.quantum_readiness_detail?.legacy_protocols ?? [];
 
   const rawData = result.raw_response || {};
   const tlsConfig = rawData.tls_configuration || {};
@@ -393,18 +422,16 @@ const DomainDetailPage: React.FC<{
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="bg-card border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-6 py-6">
+      <header className="bg-card/95 border-b border-border/60 backdrop-blur-md sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-500/40">
-                <Shield className="w-6 h-6 text-white" />
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30">
+                <Shield className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  Domain Security Analysis
-                </h1>
-                <div className="text-sm text-slate-600 dark:text-slate-400 font-medium">{result.url}</div>
+                <h1 className="text-base font-bold text-foreground tracking-tight">Quantum Security Report</h1>
+                <div className="text-xs text-muted-foreground font-mono">{result.url}</div>
               </div>
             </div>
             <UnifiedBackButton onClick={onBack} label="Back to Results" />
@@ -413,161 +440,193 @@ const DomainDetailPage: React.FC<{
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-10">
+      <main className="max-w-7xl mx-auto px-6 py-8">
         {isSuccess ? (
           <div className="space-y-8">
-            {/* Domain Info Card */}
-            <div className="bg-card/70 text-card-foreground p-8 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.3)] border backdrop-blur-sm">
-              <div className="flex items-center gap-3 mb-4">
-                <Globe className="w-6 h-6 text-primary" />
-                <h2 className="text-xl font-bold">Domain Information</h2>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div>
-                  <strong>URL:</strong> <code className="bg-muted px-2 py-1 rounded text-xs ml-2">{result.url}</code>
-                </div>
-                <div>
-                  <strong>TLS Version:</strong> <span className="ml-2">{result.tls_version || 'N/A'}</span>
-                </div>
-                <div>
-                  <strong>Scan Status:</strong>{' '}
-                  <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-900 ml-2">
-                    ● Completed
+            {/* ═══ HERO ASSESSMENT BANNER ═══ */}
+            <div className="bg-card/80 border rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.07)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.4)] backdrop-blur-sm">
+              {/* Top accent stripe */}
+              <div className={`h-1.5 w-full ${getScoreBarColor(typeof pqcScore === 'number' ? pqcScore : 0)}`} />
+
+              <div className="p-8">
+                {/* Domain strip */}
+                <div className="flex flex-wrap items-center gap-3 mb-6">
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-slate-400" />
+                    <code className="text-sm font-semibold text-slate-700 dark:text-slate-300">{result.url}</code>
+                  </div>
+                  {result.tls_version && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-bold border border-primary/20">
+                      {result.tls_version}
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold border border-emerald-200 dark:border-emerald-800">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Scan Complete
                   </span>
                 </div>
-              </div>
-            </div>
 
-            {/* Overall Security Assessment */}
-            <div className="bg-card/80 border rounded-2xl p-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-              <div className="mb-8 pb-6 border-b">
-                <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                    <Shield className="w-5 h-5 text-primary" />
-                  </div>
-                  Overall Security Assessment
-                </h3>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                {/* PQC Score */}
-                <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                    PQC Score
-                  </div>
-                  <div className="flex items-end gap-3 mb-4">
-                    <div className="text-6xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                      {typeof pqcScore === 'number' ? pqcScore.toFixed(1) : pqcScore}
+                {/* Main score row */}
+                <div className="flex flex-col md:flex-row md:items-center gap-8">
+                  {/* Score block */}
+                  <div className="flex items-end gap-4 flex-shrink-0">
+                    <div>
+                      <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">PQC Score</div>
+                      <div className="flex items-end gap-3">
+                        <span className="text-7xl font-black text-slate-900 dark:text-slate-100 leading-none tracking-tight">
+                          {typeof pqcScore === 'number' ? pqcScore.toFixed(1) : pqcScore}
+                        </span>
+                        <div className="mb-2 flex flex-col items-start gap-1">
+                          <span className={`text-3xl font-black leading-none ${getGradeColor(pqcGrade as string)}`}>{pqcGrade}</span>
+                          <span className="text-xs text-slate-400 font-medium">out of 100</span>
+                        </div>
+                      </div>
+                      {/* Score bar */}
+                      <div className="mt-3 h-2.5 w-64 max-w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-1000 ease-out ${getScoreBarColor(typeof pqcScore === 'number' ? pqcScore : 0)}`}
+                          style={{ width: `${typeof pqcScore === 'number' ? pqcScore : 0}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className={`text-3xl font-bold mb-2 ${getGradeColor(pqcGrade as string)}`}>
-                      {pqcGrade}
-                    </div>
                   </div>
-                  <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner">
-                    <div 
-                      className={`h-full transition-all duration-700 ease-out shadow-sm ${getScoreBarColor(typeof pqcScore === 'number' ? pqcScore : 0)}`}
-                      style={{ 
-                        width: `${typeof pqcScore === 'number' ? pqcScore : 0}%`,
-                        boxShadow: '0 0 10px currentColor'
-                      }}
-                    />
-                  </div>
-                </div>
 
-                {/* Security Level */}
-                <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                    Security Level
-                  </div>
-                  <div className="text-3xl font-bold tracking-tight mb-4 capitalize text-slate-900 dark:text-slate-100">
-                    {securityLevel}
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-center gap-2">
-                      {quantumReady ? (
-                        <>
-                          <Check className="w-4 h-4 text-emerald-600" />
-                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Quantum Ready</span>
-                        </>
-                      ) : (
-                        <>
-                          <X className="w-4 h-4 text-rose-600" />
-                          <span className="text-rose-600 dark:text-rose-400 font-semibold">Not Quantum Ready</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {hybridReady ? (
-                        <>
-                          <Check className="w-4 h-4 text-blue-600" />
-                          <span className="text-blue-600 dark:text-blue-400 font-semibold">Hybrid Ready</span>
-                        </>
-                      ) : (
-                        <>
-                          <X className="w-4 h-4 text-slate-400" />
-                          <span className="text-slate-500 dark:text-slate-400">No Hybrid Support</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  {/* Vertical divider */}
+                  <div className="hidden md:block w-px self-stretch bg-border" />
 
-                {/* Risk Level */}
-                <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                    Risk Level
-                  </div>
-                  <div className={`text-3xl font-bold tracking-tight mb-4 ${getRiskLevelInfo(typeof pqcScore === 'number' ? pqcScore : 0).color}`}>
-                    {getRiskLevelInfo(typeof pqcScore === 'number' ? pqcScore : 0).label}
-                  </div>
-                  <div className={`inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border ${
-                    (typeof pqcScore === 'number' ? pqcScore : 0) >= 80 
-                      ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
-                      : (typeof pqcScore === 'number' ? pqcScore : 0) >= 60
-                      ? 'bg-warning/5 dark:bg-warning/30 border-warning/20 dark:border-warning/90 text-warning'
-                      : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
-                  }`}>
-                    {getRiskLevelInfo(typeof pqcScore === 'number' ? pqcScore : 0).description}
+                  {/* Status chips */}
+                  <div className="flex flex-wrap gap-3 flex-1">
+                    {/* Security level */}
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Security Level</span>
+                      <span className="text-base font-bold capitalize text-slate-800 dark:text-slate-200">{securityLevel}</span>
+                    </div>
+
+                    <div className="hidden md:block w-px self-stretch bg-border" />
+
+                    {/* Quantum Ready */}
+                    <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-semibold ${
+                      quantumReady
+                        ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'
+                    }`}>
+                      {quantumReady ? <CheckCircle className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                      Quantum Ready
+                    </div>
+
+                    {/* Hybrid Ready */}
+                    <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-semibold ${
+                      hybridReady
+                        ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
+                        : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'
+                    }`}>
+                      {hybridReady ? <CheckCircle className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                      Hybrid KEX
+                    </div>
+
+                    {/* Risk level chip */}
+                    <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-semibold ${
+                      (typeof pqcScore === 'number' ? pqcScore : 0) >= 80
+                        ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                        : (typeof pqcScore === 'number' ? pqcScore : 0) >= 60
+                        ? 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-300'
+                        : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+                    }`}>
+                      <AlertTriangle className="w-4 h-4" />
+                      {getRiskLevelInfo(typeof pqcScore === 'number' ? pqcScore : 0).label}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Component Analysis */}
+            {/* Legacy Protocol Warning — standalone alert when TLS 1.0/1.1 accepted */}
+            {legacyProtocols.length > 0 && (
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-300 dark:border-red-800 rounded-2xl p-6 shadow-[0_2px_10px_rgba(220,38,38,0.10)] flex items-start gap-5">
+                <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/50 flex items-center justify-center flex-shrink-0">
+                  <ShieldAlert className="w-5 h-5 text-red-600 dark:text-red-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <h4 className="font-bold text-red-700 dark:text-red-300 text-base">
+                      Deprecated TLS Protocols Detected
+                    </h4>
+                    {legacyProtocols.map((proto) => (
+                      <span key={proto} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700">
+                        {proto}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-sm text-red-700/80 dark:text-red-300/80 leading-relaxed">
+                    This server still accepts{" "}
+                    <strong>{legacyProtocols.join(" and ")}</strong>, which are deprecated by
+                    NIST SP 800-52r2 (2024), PCI DSS 4.0 §4.2.1, and RFC 8996.{" "}
+                    Legacy sessions bypass PQC hybrid key exchange entirely — even an A+ hybrid
+                    server is exposing some users to downgrade attacks (POODLE, BEAST) and
+                    historical traffic interception through these versions.{" "}
+                    <strong>Disable TLS 1.0/1.1 at your server and CDN/load-balancer layer immediately.</strong>
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Component Security Analysis */}
             {result.raw_response?.pqc_analysis?.components && (
-              <div className="bg-card/80 border rounded-2xl p-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-                <div className="mb-8 pb-6 border-b">
-                  <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                      <Package className="w-5 h-5 text-primary" />
-                    </div>
-                    Component Security Analysis
-                  </h3>
+              <div className="space-y-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
+                    <Package className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-foreground tracking-tight">Component Security Analysis</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Per-category PQC grade and quantum-readiness breakdown</p>
+                  </div>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                {/* Stacked wide on mobile, multi-col on desktop */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                   {Object.entries(result.raw_response.pqc_analysis.components).map(([key, value]: [string, any]) => (
                     <ComponentScoreCard key={key} name={key} data={value} />
+                  ))}
+                </div>
+
+                {/* Grade legend */}
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {[
+                    { grade: 'A', label: 'Quantum-safe', color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
+                    { grade: 'B', label: 'Mostly secure', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800' },
+                    { grade: 'C', label: 'Needs attention', color: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800' },
+                    { grade: 'D', label: 'At risk', color: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800' },
+                    { grade: 'F', label: 'Critical', color: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800' },
+                  ].map(({ grade, label, color }) => (
+                    <span key={grade} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${color}`}>
+                      <span className="font-black">{grade}</span>
+                      <span className="font-medium opacity-80">{label}</span>
+                    </span>
                   ))}
                 </div>
               </div>
             )}
 
+            {/* Quantum Readiness Suggestions */}
+            <SuggestionsPanel
+              pqcAnalysis={result.raw_response?.pqc_analysis}
+              domain={result.url}
+            />
+
             {/* Detailed Technical Information */}
-            <div className="bg-card/80 border rounded-2xl p-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-              <div className="mb-8 pb-6 border-b">
-                <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-primary" />
-                  </div>
-                  Detailed Technical Information
-                </h3>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Click "View Details" on any card to expand and see more information
-                </p>
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
+                  <FileText className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground tracking-tight">Detailed Technical Information</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">Click any row to inspect the full data</p>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {/* TLS/SSL Configuration Card */}
                 <TechnicalInfoCard
                   title="TLS/SSL Configuration"
@@ -645,8 +704,7 @@ const DomainDetailPage: React.FC<{
                   />
                 )}
               </div>
-
-              {/* MODALS */}
+            </div>
               <TechnicalDetailModal
                 isOpen={activeModal === 'tls-config'}
                 onClose={() => setActiveModal(null)}
@@ -975,7 +1033,6 @@ const DomainDetailPage: React.FC<{
                   </pre>
                 </div>
               </TechnicalDetailModal>
-            </div>
           </div>
         ) : (
           // Failed/HTTP Scan View

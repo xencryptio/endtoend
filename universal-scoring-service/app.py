@@ -4,7 +4,7 @@ Single service with one core scoring engine, multiple endpoints
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import scoring
+from routers import scoring, suggestions
 import logging
 from logging_config import setup_logging
 
@@ -31,6 +31,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(scoring.router)
+app.include_router(suggestions.router)
 
 @app.get("/")
 async def root():
@@ -43,6 +44,7 @@ async def root():
             "repository": "/api/v1/score/repository",
             "generic": "/api/v1/score/generic",
             "algorithms": "/api/v1/score/algorithms",
+            "suggestions": "/api/v1/suggestions/generate",
             "health": "/api/v1/score/health"
         }
     }

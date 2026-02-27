@@ -44,13 +44,49 @@ def normalize_endpoint_data(raw_data: dict, ip: str, port: int) -> dict:
     # Infer supported curves/groups
     supported_curves = infer_supported_groups(parsed_ciphers)
 
-    # THEN merge with subprocess results:
+    # Merge with subprocess results (classical + PQ-hybrid groups from openssl probes).
+    # CRITICAL ORDER: PQ-hybrid groups must come FIRST so the scoring engine's
+    # position-decay rewards them with the highest weight.  Classical curves that
+    # were already inferred from cipher-suite parsing are kept but de-duplicated.
     subprocess_curves = raw_data.get("named_groups", [])
-    for curve_name in subprocess_curves:
-        if not any(c["name"] == curve_name for c in supported_curves):
-            # Map curve name to bits
-            bits = {"X25519": 253, "secp256r1": 256, "secp384r1": 384, "X448": 448}.get(curve_name, 0)
-            supported_curves.append({"name": curve_name, "bits": bits})
+    _CURVE_BITS_MAP = {
+        "X25519": 253, "secp256r1": 256, "secp384r1": 384, "X448": 448,
+        "secp521r1": 521, "prime256v1": 256,
+        "brainpoolP256r1": 256, "brainpoolP384r1": 384, "brainpoolP512r1": 512,
+        "ffdhe2048": 2048, "ffdhe3072": 3072, "ffdhe4096": 4096,
+        "ffdhe6144": 6144, "ffdhe8192": 8192,
+        "X25519MLKEM768": 256, "X25519-MLKEM768": 256, "X25519MLKEM1024": 256,
+        "X25519Kyber768Draft00": 256, "X25519Kyber512Draft00": 256,
+        "P256Kyber512Draft00": 256, "P384Kyber768Draft00": 384,
+        "SecP256r1MLKEM768": 256, "SecP384r1MLKEM1024": 384,
+    }
+    # PQ-hybrid detection set (uppercase for case-insensitive check)
+    _PQ_HYBRID_TOKENS = {
+        "MLKEM", "KYBER", "MLKEM768", "MLKEM1024",
+        "KYBER768DRAFT", "KYBER512DRAFT",
+    }
+
+    def _is_pq_hybrid(name: str) -> bool:
+        u = name.upper()
+        return any(tok in u for tok in _PQ_HYBRID_TOKENS)
+
+    # Build two separate lists then recombine: PQ hybrids first, classical after.
+    existing_names_upper = {c["name"].upper() for c in supported_curves}
+    pq_prefix = []
+    classical_suffix = []
+    for cname in subprocess_curves:
+        if cname.upper() in existing_names_upper:
+            continue  # already in supported_curves from cipher parsing
+        bits = _CURVE_BITS_MAP.get(cname, 0)
+        entry = {"name": cname, "bits": bits}
+        if _is_pq_hybrid(cname):
+            pq_prefix.append(entry)
+        else:
+            classical_suffix.append(entry)
+
+    # Final order: [PQ hybrids] + [classicals from subprocess not yet seen]
+    # then existing supported_curves from cipher parsing
+    supported_curves = pq_prefix + classical_suffix + supported_curves
     
     # Build certificate structure with NEW fields
     certificates = {
@@ -62,10 +98,27 @@ def normalize_endpoint_data(raw_data: dict, ip: str, port: int) -> dict:
     # Extract certificate signatures
     cert_signatures = extract_certificate_signatures(parsed_certs)
     
+    # Merge in legacy protocols (TLS 1.0/1.1 detected via OpenSSL subprocess)
+    protocols = raw_data.get("protocols", [])
+    for lp in raw_data.get("legacy_protocols", []):
+        if lp not in protocols:
+            protocols.append(lp)
+
+    # If DHE key size was measured, inject a synthetic named-group entry so the
+    # scorer can award the correct KEX score (e.g. DHE-512 = extremely weak).
+    dh_bits = raw_data.get("dh_key_size")
+    if dh_bits and isinstance(dh_bits, int):
+        dh_name = f"DHE-{dh_bits}"
+        # Prepend so it is not overshadowed by FFDHE named groups
+        dh_entry = {"name": dh_name, "bits": dh_bits}
+        # Only add if not already represented by a named FFDHE group
+        existing_names_upper = {c["name"].upper() for c in supported_curves}
+        if dh_name.upper() not in existing_names_upper:
+            supported_curves = [dh_entry] + supported_curves
+
     # Infer handshake signatures for each protocol
     handshake_sigs = []
-    protocols = raw_data.get("protocols", [])
-    
+
     for protocol in protocols:
         protocol_ciphers = tls12_ciphers if protocol == "TLS 1.2" else tls13_ciphers
         sigs = infer_handshake_signatures(protocol_ciphers, parsed_certs, protocol)

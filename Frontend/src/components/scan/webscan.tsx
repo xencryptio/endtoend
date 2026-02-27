@@ -1265,29 +1265,29 @@ const clearLiveProgress = (batchId: string) => {
           try {
             const historicalScans = await loadHistoricalScans(apiBaseUrl);
             
-            setScanHistory(prev => prev.map(scan =>
-              scan.request_id === requestId || scan.request_id === tempRequestId
-                ? {
-                    ...scan,
-                    status: 'completed',
-                    scan_status: 'completed',
-                    progressPercentage: 100,
-                    completedUrls: scan.total_urls,
-                    successful_count: data.successful_count || scan.successful_count,
-                    failed_count: data.failed_count || scan.failed_count
-                  }
-                : scan
-            ));
-            
-            // Refresh history with latest data
             if (historicalScans && historicalScans.length > 0) {
+              // Replace entire history with DB data (source of truth)
               setScanHistory(historicalScans);
+              showMessage('✅ Scan completed successfully!', 'success');
+            } else {
+              // DB returned nothing — save failed on the backend.
+              // Remove the optimistic entry so the user isn't confused by a
+              // "completed" entry with no data that opens a blank detail page.
+              setScanHistory(prev => prev.filter(s =>
+                s.request_id !== requestId && s.request_id !== tempRequestId
+              ));
+              showMessage(
+                '⚠️ Scan finished but results were not saved. Check that db-service is running and migrations applied (docker compose down -v && docker compose up --build).',
+                'warning'
+              );
             }
-            
-            showMessage('✅ Scan completed successfully!', 'success');
           } catch (error) {
             console.error('Failed to load results:', error);
-            showMessage('Scan completed but failed to load results', 'warning');
+            // Don't leave a broken optimistic entry in the list
+            setScanHistory(prev => prev.filter(s =>
+              s.request_id !== requestId && s.request_id !== tempRequestId
+            ));
+            showMessage('Scan completed but failed to load results from database', 'warning');
           }
         },
         
@@ -1336,12 +1336,34 @@ const clearLiveProgress = (batchId: string) => {
       showMessage('Could not find scan to view.', 'error');
       return;
     }
-  
+
     try {
       console.log(`Loading scan details for ${requestId}...`);
-      
+
+      // If the scan entry has no raw_response, the DB save may have failed or
+      // we only have the optimistic entry. Attempt to fetch the real record by
+      // numeric id from the DB before opening the detail view.
+      if (!scan.raw_response && scan.id) {
+        console.log(`⚠️ scan.raw_response is missing for ${requestId}, fetching from DB by id ${scan.id}...`);
+        const fullScan = await loadScanDetails(apiBaseUrl, scan.id);
+        if (fullScan && fullScan.raw_response) {
+          // Merge the DB record into history and open detail page
+          setScanHistory(prev => prev.map(s =>
+            s.request_id === requestId ? { ...s, ...fullScan, request_id: requestId } : s
+          ));
+          setViewingResultsFor(requestId);
+          return;
+        }
+
+        // Still no data — the result was never saved to the DB
+        showMessage(
+          'Scan result was not saved to the database. Please rebuild and try again, or check service logs.',
+          'error'
+        );
+        return;
+      }
+
       // For single scan architecture, the scan itself has all the details
-      // Just navigate to the detail view
       setViewingResultsFor(requestId);
     } catch (error) {
       console.error('Error loading scan details:', error);

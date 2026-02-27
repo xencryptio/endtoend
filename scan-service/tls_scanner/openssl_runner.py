@@ -82,10 +82,31 @@ async def scan_with_openssl(ip: str, port: int, domain: str, timeout: int = 300)
         if tls13_data.get("alpn") and not result["alpn"]:
             result["alpn"] = tls13_data.get("alpn")
             
-    # Probe for supported groups
+    # Probe for supported groups (classical + PQ hybrid)
     supported_groups = await probe_supported_groups(ip, port, domain)
-    result["named_groups"] = supported_groups
+    pq_hybrid_groups = await probe_pq_hybrid_groups(ip, port, domain)
+    # Merge without duplicates; PQ hybrid groups come first so the scorer
+    # awards them the best (lowest) positions.
+    seen_grp: set = set()
+    merged_groups: List[str] = []
+    for g in pq_hybrid_groups + supported_groups:
+        gu = g.upper()
+        if gu not in seen_grp:
+            seen_grp.add(gu)
+            merged_groups.append(g)
+    result["named_groups"] = merged_groups
     
+    # Detect legacy protocol support (TLS 1.0/1.1) — Python ssl cannot probe these
+    legacy_protos = await probe_legacy_protocols(ip, port, domain)
+    for lp in legacy_protos:
+        if lp not in result["protocols"]:
+            result["protocols"].append(lp)
+    result["legacy_protocols"] = legacy_protos
+
+    # Detect actual DHE parameter size (catches weak-dh / Logjam)
+    dh_bits = await probe_dhe_key_size(ip, port, domain)
+    result["dh_key_size"] = dh_bits  # e.g. 512, 1024, 2048 or None
+
     # Check server cipher order preference
     result["server_cipher_order_preference"] = await get_server_cipher_preference(ip, port, domain)
     
@@ -189,26 +210,234 @@ async def scan_application_layer(ip: str, port: int, domain: str, timeout: int =
     return result
 
 
-async def probe_supported_groups(ip: str, port: int, domain: str) -> List[str]:
-    """Test each curve using openssl subprocess"""
-    curves = ["X25519", "secp256r1", "secp384r1", "X448"]
-    
-    supported = []
-    
-    for curve in curves:
-        cmd = f"openssl s_client -groups {curve} -connect {ip}:{port} -servername {domain}"
+async def probe_legacy_protocols(ip: str, port: int, domain: str) -> List[str]:
+    """Probe for deprecated TLS 1.0 and TLS 1.1 support using OpenSSL subprocess.
+
+    Python 3.10+ removed TLS 1.0/1.1 from the ssl module, so we must use the
+    OpenSSL CLI directly.  Each probe advertises ONLY the legacy version; a
+    successful handshake ("Cipher is" present) means the server accepts it.
+
+    OpenSSL 3.x builds compiled without legacy support will produce
+    "no protocols available" or "alert protocol version" — these are
+    treated as not-supported and never raise.
+    """
+    legacy: List[str] = []
+    for version_flag, version_name in [("-tls1", "TLS 1.0"), ("-tls1_1", "TLS 1.1")]:
+        try:
+            # SECLEVEL=0 is required on OpenSSL 3.x Debian builds where the
+            # default security policy disables TLS < 1.2 at the library level.
+            # Without it, openssl prints "no protocols available" even though
+            # TLS 1.0/1.1 support is compiled in.
+            cmd = (
+                f"echo Q | openssl s_client {version_flag} "
+                f"-cipher 'DEFAULT:@SECLEVEL=0' "
+                f"-connect {ip}:{port} -servername {domain} 2>&1"
+            )
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(b""), timeout=8)
+            output = (stdout + stderr).decode("utf-8", errors="ignore")
+
+            # Failure indicators: OpenSSL or server rejected legacy TLS
+            rejected = any(bad in output.lower() for bad in (
+                "handshake failure",
+                "unsupported protocol",
+                "no protocols available",
+                "wrong version number",
+                "alert protocol version",
+                "ssl alert number 70",
+                "tlsv1 alert protocol version",
+                "invalid option",
+                "illegal option",
+            ))
+            if not rejected and "cipher is" in output.lower():
+                legacy.append(version_name)
+        except asyncio.TimeoutError:
+            continue
+        except Exception:
+            continue
+    return legacy
+
+
+async def probe_dhe_key_size(ip: str, port: int, domain: str) -> Optional[int]:
+    """Detect the actual DHE parameter bit-size used by the server.
+
+    When a server uses finite-field DHE (not a named FFDHE group), OpenSSL
+    reports: ``Server Temp Key: DH, N bits``.  This catches classic Logjam
+    configurations (512-bit or 1024-bit DHE) that ``probe_supported_groups``
+    cannot detect because they do not use named FFDHE groups.
+
+    Returns the bit-size as an int (e.g. 512, 1024, 2048), or None if the
+    server does not accept DHE cipher suites.
+    """
+    try:
+        # @SECLEVEL=0 required to connect to servers with <2048-bit DHE params
+        # (exactly the configurations we're trying to detect, e.g. 512/1024-bit)
+        cmd = (
+            "echo Q | openssl s_client -tls1_2 "
+            "-cipher 'DHE-RSA-AES256-SHA256:DHE-RSA-AES128-SHA256:"
+            "DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:@SECLEVEL=0' "
+            f"-connect {ip}:{port} -servername {domain} 2>&1"
+        )
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate(b"")
-        
-        # Check if the handshake was successful (crude check)
-        if "handshake failure" not in stderr.decode('utf-8', errors='ignore'):
-            supported.append(curve)
-    
+        stdout, stderr = await asyncio.wait_for(proc.communicate(b""), timeout=8)
+        output = (stdout + stderr).decode("utf-8", errors="ignore")
+
+        # OpenSSL 3.x reports "Peer Temp Key: DH, 1024 bits"
+        # Older OpenSSL versions use "Server Temp Key: DH, 1024 bits"
+        m = re.search(r"(?:Server|Peer) Temp Key:\s*DH,\s*(\d+)\s+bits", output, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+        return None
+    except asyncio.TimeoutError:
+        return None
+    except Exception:
+        return None
+
+
+async def probe_supported_groups(ip: str, port: int, domain: str) -> List[str]:
+    """Test classical elliptic-curve / FFDHE groups using openssl subprocess.
+
+    Each group is probed independently: we send a TLS ClientHello advertising
+    ONLY that group; if the server negotiates the handshake we credit the group.
+
+    A per-probe timeout of 10 s is enforced to avoid blocking on unresponsive
+    servers.  Without a timeout, `proc.communicate()` would wait indefinitely
+    if a server accepts the TCP connection but never completes the TLS handshake.
+    """
+    curves = ["X25519", "secp256r1", "secp384r1", "X448", "secp521r1",
+              "ffdhe2048", "ffdhe3072", "ffdhe4096"]
+
+    supported = []
+
+    for curve in curves:
+        try:
+            cmd = (
+                f"echo Q | openssl s_client -groups {curve} "
+                f"-connect {ip}:{port} -servername {domain} 2>&1"
+            )
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(b""), timeout=10
+            )
+            combined = (stdout + stderr).decode("utf-8", errors="ignore")
+
+            # Handshake succeeded → curve is supported
+            # Check both stderr (classic location) and combined output
+            if "handshake failure" not in combined.lower():
+                supported.append(curve)
+        except asyncio.TimeoutError:
+            # Server accepted TCP but never finished TLS — mark as unsupported
+            continue
+        except Exception:
+            continue
+
+    return supported
+
+
+async def probe_pq_hybrid_groups(ip: str, port: int, domain: str) -> List[str]:
+    """Probe for PQ-hybrid key-exchange groups (requires OpenSSL 3.5+).
+
+    Tests the IANA-standardised ML-KEM hybrid groups as well as the
+    pre-standard Kyber draft names that servers like pq.cloudflareresearch.com
+    still advertise.  Gracefully returns an empty list if the local OpenSSL
+    build does not support any of these groups — no error is raised.
+
+    Hybrid groups that succeed here are appended to `named_groups` data and
+    subsequently scored by the scoring service (score >= 96/100).
+
+    CORRECTNESS REQUIREMENT — the server MUST have ACTUALLY negotiated the
+    hybrid group, not just completed a classical TLS handshake.
+
+    When an older or classical server receives a ClientHello containing an
+    unknown named group, it silently falls back to RSA/DHE/ECDHE key exchange
+    and the TLS handshake still succeeds.  Broad "success" signals like
+    "Cipher is" or "Server public key" appear in BOTH genuine hybrid AND
+    classical-fallback connections, causing false positives.
+
+    The definitive indicator is OpenSSL 3.5+:
+        "Negotiated TLS1.3 group: X25519MLKEM768"
+    This line appears ONLY when the server itself selected that specific hybrid
+    group for the TLS 1.3 key exchange.  Classical fallbacks produce
+    "Peer Temp Key: DH, ..." or "Peer Temp Key: X25519, ..." instead.
+    """
+    pq_hybrid_candidates = [
+        "X25519MLKEM768",          # IANA 0x11eb — standardised Nov 2024
+        "X25519MLKEM1024",         # IANA 0x11ec
+        "X25519Kyber768Draft00",   # pre-standard; still deployed by Cloudflare/Chrome
+        "X25519Kyber512Draft00",
+        "P256Kyber512Draft00",
+        "P384Kyber768Draft00",
+        "SecP256r1MLKEM768",
+        "SecP384r1MLKEM1024",
+    ]
+
+    supported: List[str] = []
+
+    for group in pq_hybrid_candidates:
+        try:
+            # Offer ONLY the candidate group — if the server can't use it,
+            # the output will NOT contain the "Negotiated TLS1.3 group" line
+            # for that group.
+            cmd = (
+                f"echo Q | openssl s_client -groups {group} "
+                f"-connect {ip}:{port} -servername {domain} 2>&1"
+            )
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(b""), timeout=8
+            )
+            output = (stdout + stderr).decode("utf-8", errors="ignore").lower()
+
+            # ── Fast-fail: local OpenSSL or server rejected the group ──
+            if any(bad in output for bad in (
+                "unknown group",
+                "invalid group",
+                "unsupported group",
+                "no groups configured",
+                "invalid option",
+                "illegal option",
+                "handshake failure",
+                "no certificate received",
+            )):
+                continue
+
+            # ── Definitive check: OpenSSL 3.5 reports the NEGOTIATED group ──
+            # "Negotiated TLS1.3 group: X25519MLKEM768" only appears when the
+            # server actually selected this hybrid group for the key exchange.
+            # Classical fallbacks (DHE / ECDHE) never produce this line.
+            negotiated_line = f"negotiated tls1.3 group: {group.lower()}"
+            if negotiated_line not in output:
+                # Server completed the handshake with a CLASSICAL fallback —
+                # do not credit this hybrid group.
+                continue
+
+            supported.append(group)
+
+        except asyncio.TimeoutError:
+            continue
+        except Exception:
+            continue
+
     return supported
 
 def extract_key_size(cipher_name: str) -> Optional[int]:

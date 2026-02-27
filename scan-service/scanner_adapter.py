@@ -51,13 +51,17 @@ def build_endpoint_details(endpoint: Dict[str, Any]) -> Dict[str, Any]:
     tls_config = endpoint.get("tls_configuration", {})
     protocols = endpoint.get("protocols", [])
     
-    # Convert protocol names to SSL Labs format
+    # Convert protocol names to SSL Labs format (including deprecated TLS 1.0/1.1)
     protocol_list = []
     for proto in protocols:
         if "TLS 1.3" in proto:
             protocol_list.append({"version": "1.3", "name": "TLS"})
         elif "TLS 1.2" in proto:
             protocol_list.append({"version": "1.2", "name": "TLS"})
+        elif "TLS 1.1" in proto:
+            protocol_list.append({"version": "1.1", "name": "TLS"})
+        elif "TLS 1.0" in proto:
+            protocol_list.append({"version": "1.0", "name": "TLS"})
     
     # Build cipher suites in SSL Labs format
     suites = build_cipher_suites(tls_config, endpoint)

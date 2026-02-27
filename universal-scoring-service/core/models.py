@@ -108,6 +108,7 @@ class UniversalScoringResponse(BaseModel):
     security_features: Optional[SecurityFeatures] = None
     quantum_ready: bool
     hybrid_ready: bool
+    quantum_readiness_detail: Optional[Dict] = None
     critical_vulnerabilities: List[str] = Field(default_factory=list)
     compliance_status: Dict[str, bool] = Field(default_factory=dict)
     metadata: Dict = Field(default_factory=dict, description="Original request metadata + processing info")

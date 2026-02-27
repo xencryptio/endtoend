@@ -44,15 +44,23 @@ async def scan_domain(url: str, timeout: int = 5, progress_tracker=None) -> dict
 
 async def resolve_ips(domain: str) -> List[str]:
     """
-    Resolve domain to all IP addresses.
-    Returns list of unique IPs.
+    Resolve domain to IPv4 addresses (preferred for Docker environments).
+    Falls back to IPv6 only if no IPv4 addresses are found.
+    Returns list of unique IPs, IPv4 first.
     """
     loop = asyncio.get_event_loop()
     try:
-        # Get address info for both IPv4 and IPv6
-        infos = await loop.getaddrinfo(domain, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
-        ips = list(set([info[4][0] for info in infos]))
-        return ips
+        # Prefer IPv4 — Docker bridge networks typically lack IPv6 routing
+        infos_v4 = await loop.getaddrinfo(domain, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
+        ipv4_ips = list(set([info[4][0] for info in infos_v4]))
+        if ipv4_ips:
+            return ipv4_ips  # Return IPv4 only — avoids failed IPv6 scans ending up as endpoints[0]
+    except Exception:
+        pass
+    try:
+        # Fallback to IPv6 if no IPv4 addresses
+        infos_v6 = await loop.getaddrinfo(domain, None, family=socket.AF_INET6, type=socket.SOCK_STREAM)
+        return list(set([info[4][0] for info in infos_v6]))
     except Exception:
         return []
 
