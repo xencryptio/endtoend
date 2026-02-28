@@ -691,6 +691,12 @@ def transform_certificate(cert: Dict[str, Any], role: str, position: int = 0) ->
         
         return {
             "certificate": f"{cn}_{sig_alg.replace('with', '_').replace('RSA', 'RSA')}_{key_size}",
+            "subject": cert.get("subject", ""),
+            "issuer": cert.get("issuerSubject", ""),
+            "valid_from": cert.get("notBefore"),
+            "valid_until": cert.get("notAfter"),
+            "public_key_algorithm": key_alg or "N/A",
+            "public_key_size": key_size or None,
             "subject_alternative_names": cert.get("altNames", []),
             "certificate_transparency": cert.get("sct", False),
         }

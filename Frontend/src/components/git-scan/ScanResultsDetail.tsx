@@ -6,6 +6,17 @@ import { ScanDetail, Algorithm } from './types';
 
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
 
+// Clean repo URL for display: https://github.com/user/repo.git → user/repo
+const formatRepoName = (url: string): string => {
+  try {
+    return url
+      .replace(/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//, '')
+      .replace(/\.git$/, '');
+  } catch {
+    return url;
+  }
+};
+
 // Helper function to get color for letter grades
 const getGradeColor = (grade: string): string => {
   if (!grade) return 'text-zinc-500';
@@ -197,13 +208,19 @@ const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description,
             {/* Usage Statistics */}
             <div className="flex gap-6 pt-4 border-t mb-4">
               <div className="bg-muted/30 rounded-lg px-3 py-2 flex-1">
-                <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">Occurrences</span>
+                <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">Active Usages</span>
                 <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.occurrences}</span>
               </div>
               <div className="bg-muted/30 rounded-lg px-3 py-2 flex-1">
                 <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">Files</span>
                 <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.files_affected || 0}</span>
               </div>
+              {(algo.commented_occurrences ?? 0) > 0 && (
+                <div className="bg-muted/30 rounded-lg px-3 py-2 flex-1" title="Mentions found inside comments or docstrings (excluded from scoring)">
+                  <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">In Comments</span>
+                  <span className="text-slate-400 dark:text-slate-500 font-bold text-lg">{algo.commented_occurrences}</span>
+                </div>
+              )}
             </div>
             
             {/* Quantum Safety Section */}
@@ -495,13 +512,22 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
                     <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest">
                       {getCategoryDisplayName(category)}
                     </div>
-                    <div className={`text-2xl font-bold ${getGradeColor(score.grade)} group-hover:scale-110 transition-transform`}>
+                    <div className={`text-xl font-bold px-2 py-0.5 rounded ${getGradeColor(score.grade)} group-hover:scale-110 transition-transform`}>
                       {score.grade}
                     </div>
                   </div>
-                  
-                  <div className={`text-5xl font-bold tracking-tight mb-4 ${getGradeColor(score.grade)}`}>
-                    {score.grade}
+
+                  <div className="flex items-end gap-2 mb-3">
+                    <div className={`text-5xl font-bold tracking-tight ${getGradeColor(score.grade)}`}>
+                      {score.score.toFixed(1)}
+                    </div>
+                    <div className="text-xl text-slate-400 dark:text-slate-500 mb-1">/100</div>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden mb-4">
+                    <div
+                      className={`h-full transition-all duration-700 ease-out ${getScoreBarColor(score.score)}`}
+                      style={{ width: `${score.score}%` }}
+                    />
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-400 space-y-2 font-medium">
                     <div className="flex items-center justify-between">
@@ -611,7 +637,7 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  Scan Results for {scanDetail?.repo_url || '...'}
+                  {scanDetail?.repo_url ? formatRepoName(scanDetail.repo_url) : '...'}
                 </h1>
                 <div className="text-sm text-slate-600 dark:text-slate-400 font-medium">Post-Quantum Cryptography Security Analysis</div>
               </div>

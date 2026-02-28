@@ -1,27 +1,20 @@
-/**
- * SuggestionsPanel
- *
- * Renders a quantum readiness migration guide derived entirely from the
- * pqc_analysis object that is already embedded in each scan result.
- * No additional API calls are made.
+﻿/**
+ * SuggestionsPanel — Enterprise-grade quantum readiness action plan.
+ * Derived entirely from pqc_analysis. No additional API calls.
  */
 import React, { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle,
   AlertTriangle,
   XCircle,
   ChevronDown,
-  ChevronRight,
+  ChevronUp,
   Shield,
   Zap,
-  Cpu,
   Lock,
-  Info,
-  AlertCircle,
-  ArrowRight,
   Clock,
   Layers,
+  Terminal,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -75,23 +68,27 @@ interface PqcAnalysis {
 }
 
 interface SuggestionsPanelProps {
-  /** The pqc_analysis object from the scan result */
   pqcAnalysis: PqcAnalysis | null | undefined;
   domain?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Derived suggestion logic (mirrors suggestions.py in TypeScript)
+// Derived data (same logic, cleaner output shape)
 // ---------------------------------------------------------------------------
 
-interface RoadmapStep {
+interface ActionStep {
   step: number;
   priority: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "ONGOING";
   title: string;
-  description: string;
-  nistRef: string;
+  /** One-sentence imperative summary shown always */
+  summary: string;
+  /** Config snippet — shown inline when present */
+  snippet?: string;
+  /** Full explanation — hidden behind "Details" toggle */
+  detail: string;
   effort: string;
   impact: string;
+  nistRef: string;
 }
 
 function deriveData(p: PqcAnalysis, domain: string) {
@@ -110,261 +107,298 @@ function deriveData(p: PqcAnalysis, domain: string) {
   const weakSym = qr.weak_symmetric ?? [];
   const legacyProtocols = (qr.legacy_protocols as string[] | undefined) ?? [];
   const compliance = p.compliance_status ?? {};
-  const score = p.overall_score;
-  const grade = p.overall_grade;
 
-  // ---- Overall assessment ---
-  let assessment: string;
-  if (quantum_ready) {
-    assessment =
-      `${domain} has achieved Quantum Readiness Tier 1. ` +
-      `PQC hybrid key exchange is active and symmetric encryption is Grover-safe, ` +
-      `eliminating HNDL risk for active sessions. Grade: ${grade} (${score.toFixed(1)}/100).`;
-  } else if (hybrid_ready) {
-    assessment =
-      `${domain} is on the quantum migration path (grade ${grade}, ${score.toFixed(1)}/100). ` +
-      "PQC hybrid key exchange is deployed, substantially reducing HNDL exposure. " +
-      "Complete the transition by hardening symmetric algorithms.";
-  } else {
-    assessment =
-      `${domain} uses classical TLS (grade ${grade}, ${score.toFixed(1)}/100). ` +
-      "No PQC hybrid key exchange detected. Data encrypted today is vulnerable to retroactive " +
-      "decryption once cryptographically-relevant quantum computers (CRQCs) are available. " +
-      "Deploying X25519MLKEM768 is the single highest-impact change you can make.";
-  }
-
-  // ---- Positives ---
-  const positives: string[] = [];
-  if (quantum_ready) positives.push("Quantum Readiness ACHIEVED — hybrid KEX + Grover-safe symmetric active.");
-  if (hybrid_ready) {
-    positives.push(
-      `PQC Hybrid Key Exchange deployed (${hybridGroups.length} hybrid group(s)). Modern clients use post-quantum-secure key agreement.`
-    );
-  }
-  if (nistStandards.length > 0) {
-    positives.push(`NIST-standardised ML-KEM groups active: ${nistStandards.slice(0, 4).join(", ")} (FIPS 203).`);
-  }
-  if (draftStandards.length > 0) {
-    positives.push(`Kyber draft groups also supported: ${draftStandards.slice(0, 4).join(", ")} — backward-compatible with older clients.`);
-  }
-  if (symScore >= 80) {
-    positives.push(`Symmetric encryption is Grover-safe (${symScore.toFixed(0)}/100). AES-256 provides ~128-bit post-quantum security.`);
-  } else if (symScore >= 60) {
-    positives.push(`Symmetric encryption is adequate (${symScore.toFixed(0)}/100) with modern TLS 1.3 cipher suites.`);
-  }
-  if (compliance["PCI DSS 4.0"]) positives.push("PCI DSS 4.0 cryptographic requirements met.");
-  if (compliance["NIST 800-52r2"]) positives.push("NIST SP 800-52r2 compliance met.");
-
-  // ---- Gaps ---
-  const gaps: string[] = [];
-  if (!hybrid_ready) {
-    gaps.push(
-      "No PQC hybrid key exchange detected — CRITICAL gap. " +
-        "Without hybrid KEX, recorded TLS sessions can be decrypted once CRQCs arrive. " +
-        "Solution: add X25519MLKEM768 as the first named group in your TLS configuration."
-    );
-  } else if (kexScore < 70) {
-    gaps.push(
-      `Hybrid KEX score moderate (${kexScore.toFixed(0)}/100). Ensure ML-KEM-768/1024 groups are listed BEFORE classical groups on the server so they are negotiated preferentially.`
-    );
-  }
-  if (symScore < 60) {
-    gaps.push(
-      `Symmetric encryption score low (${symScore.toFixed(0)}/100). Disable 3DES/RC4 and TLS 1.0/1.1 ciphers. Prioritise AES-256-GCM and ChaCha20-Poly1305.`
-    );
-  }
-  if (sigScore < 20) {
-    gaps.push(
-      `Certificate signature score very low (${sigScore.toFixed(0)}/100). Consider ECDSA P-256/P-384 as an interim upgrade. Monitor CA support for ML-DSA (FIPS 204) certificates, expected ~2026-2028.`
-    );
-  }
-  if (weakSym.length > 0) {
-    gaps.push(`Weak symmetric suites still accepted: ${weakSym.slice(0, 3).join(", ")}. Disable these to raise the symmetric component score.`);
-  }
-  if (legacyProtocols.length > 0) {
-    gaps.push(
-      `Deprecated TLS protocols accepted: ${legacyProtocols.join(", ")}. ` +
-      "TLS 1.0 and TLS 1.1 are deprecated by NIST SP 800-52r2, PCI DSS 4.0, and RFC 8996. " +
-      "Legacy sessions bypass PQC hybrid key exchange, exposing traffic to downgrade attacks (POODLE, BEAST) and record-and-decrypt interception. " +
-      "Disable these protocol versions at your server and CDN/load balancer layer immediately."
-    );
-  }
-  if (!compliance["CNSA 2.0 (Quantum-Ready)"]) {
-    gaps.push("Not yet CNSA 2.0 compliant. Full compliance requires ML-KEM hybrid KEX + AES-256. Certificate migration awaits PQC CA availability.");
-  }
-
-  // ---- Roadmap ---
-  const roadmap: RoadmapStep[] = [];
+  // Action steps
+  const steps: ActionStep[] = [];
   let n = 1;
+
   if (legacyProtocols.length > 0) {
-    roadmap.push({
+    steps.push({
       step: n++,
       priority: "CRITICAL",
       title: "Disable Deprecated TLS Protocols",
-      description:
-        `This server accepts ${legacyProtocols.join(" and ")}, deprecated by NIST SP 800-52r2, PCI DSS 4.0 (§4.2.1), and RFC 8996. ` +
-        "Even when PQC hybrid KEX is deployed on TLS 1.3, sessions that negotiate legacy protocol versions receive none of that protection. " +
-        "Attackers can force a downgrade to these versions (POODLE, BEAST, SWEET32) and intercept traffic. " +
-        "Set MinProtocol = TLSv1.2 in OpenSSL, ssl_protocols TLSv1.2 TLSv1.3 in nginx, " +
-        "or SSLProtocol -all +TLSv1.2 +TLSv1.3 in Apache. Verify at your CDN/load balancer layer as well.",
-      nistRef: "NIST SP 800-52r2 §3.1, PCI DSS 4.0 §4.2.1, RFC 8996",
-      effort: "Low — one configuration line per server/CDN",
-      impact: "Closes downgrade attack vector; required for PCI DSS 4.0 and CNSA 2.0 compliance",
+      summary: `Remove ${legacyProtocols.join(" and ")} — legacy sessions bypass PQC hybrid key exchange entirely.`,
+      snippet: "ssl_protocols TLSv1.2 TLSv1.3;  # nginx\nSSLProtocol -all +TLSv1.2 +TLSv1.3  # apache\n# OpenSSL: MinProtocol = TLSv1.2",
+      detail:
+        `This server accepts ${legacyProtocols.join(" and ")}, deprecated by NIST SP 800-52r2 (2024), PCI DSS 4.0 §4.2.1, and RFC 8996. ` +
+        "Even with PQC hybrid KEX deployed on TLS 1.3, clients negotiating these legacy versions receive zero quantum protection " +
+        "and remain exposed to POODLE, BEAST, SWEET32, and record-and-decrypt interception. " +
+        "Apply the change at every layer: origin server, CDN, and load balancer.",
+      effort: "Low — one config line per layer",
+      impact: "Closes downgrade attack vector; required for PCI DSS 4.0 compliance",
+      nistRef: "NIST SP 800-52r2 §3.1  PCI DSS 4.0 §4.2.1  RFC 8996",
     });
   }
+
   if (!hybrid_ready) {
-    roadmap.push({
+    steps.push({
       step: n++,
       priority: "CRITICAL",
       title: "Deploy PQC Hybrid Key Exchange",
-      description:
-        "Configure X25519MLKEM768 (FIPS 203 / IANA group 4588) as the first TLS named group. " +
-        "Add X25519MLKEM1024 (group 4589) as secondary. This single change eliminates HNDL " +
-        "exposure for all future TLS sessions.",
-      nistRef: "NIST FIPS 203 (ML-KEM), CISA PQC Migration Guidance 2024 §3.2",
-      effort: "Low-Medium — OpenSSL 3.2+ / BoringSSL / Go 1.23+ with one config line",
-      impact: "Eliminates Harvest-Now-Decrypt-Later risk immediately",
+      summary: "Add X25519MLKEM768 as the first TLS named group — this single change eliminates HNDL exposure.",
+      snippet: "# OpenSSL 3.2+ / nginx 1.25+\nssl_ecdh_curve X25519MLKEM768:X25519MLKEM1024:X25519:prime256v1;\n\n# Go 1.23+ (server)\ntls.Config{CurvePreferences: []tls.CurveID{tls.X25519MLKEM768}}",
+      detail:
+        "Configure X25519MLKEM768 (FIPS 203 / IANA group 4588) as the first named group so it is negotiated " +
+        "against all compliant clients. Add X25519MLKEM1024 (group 4589) as secondary. " +
+        "Classical groups (X25519, P-256) remain in the list for backward compatibility — hybrid mode means " +
+        "both algorithms must be broken to compromise the session. " +
+        "Requires OpenSSL 3.2+, BoringSSL (trunk), or Go 1.23+.",
+      effort: "Low–Medium — library upgrade may be needed",
+      impact: "Eliminates Harvest-Now-Decrypt-Later risk for all future TLS sessions",
+      nistRef: "NIST FIPS 203 (ML-KEM)  CISA PQC Migration Guidance 2024 §3.2",
+    });
+  } else if (kexScore < 70) {
+    steps.push({
+      step: n++,
+      priority: "HIGH",
+      title: "Promote ML-KEM Groups to Top of Preference List",
+      summary: "Ensure ML-KEM-768/1024 groups are listed first so they are actually negotiated, not just available.",
+      snippet: "# Verify group negotiation in production:\nopenssl s_client -connect " + domain + ":443 -groups X25519MLKEM768 2>&1 | grep 'Server Temp Key'",
+      detail:
+        `Hybrid KEX score is moderate (${kexScore.toFixed(0)}/100). Having the groups available is insufficient ` +
+        "if classical groups appear earlier in the preference list — the server will negotiate X25519 with modern clients " +
+        "rather than X25519MLKEM768. Audit your TLS configuration and move ML-KEM groups to the top.",
+      effort: "Low — config reorder only",
+      impact: "Ensures hybrid KEX is actually used, not just configured",
+      nistRef: "NIST FIPS 203 (ML-KEM)  IETF RFC 8446 §4.2.7",
     });
   }
+
   if (symScore < 70) {
-    roadmap.push({
+    steps.push({
       step: n++,
       priority: "HIGH",
       title: "Harden Symmetric Cipher Suite",
-      description:
-        "Enable only AES-256-GCM-SHA384 and TLS_CHACHA20_POLY1305_SHA256. " +
-        "Remove CBC-mode suites and any suite using RC4, 3DES, or DES. " +
-        "Disable TLS 1.0 and TLS 1.1 entirely.",
-      nistRef: "NIST SP 800-52r2 §3.3.1.1, CNSA 2.0",
-      effort: "Low — server configuration change only",
-      impact: "Achieves 128-bit post-quantum security for symmetric layer (Grover-safe)",
+      summary: "Enable only AES-256-GCM and ChaCha20-Poly1305; remove all CBC, 3DES, and RC4 cipher suites.",
+      snippet: "# nginx — TLS 1.3 only (symmetric is already AES-256)\nssl_ciphers TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256;\n\n# TLS 1.2 fallback (if needed)\nssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;",
+      detail:
+        `Symmetric score is ${symScore.toFixed(0)}/100. AES-256 provides ~128-bit post-quantum security (Grover-halved from 256). ` +
+        "AES-128 provides only ~64-bit post-quantum security — insufficient. " +
+        "Ensure TLS 1.3 (where AES-256-GCM is the default) is used for all sessions. " +
+        (weakSym.length > 0 ? `Weak suites currently accepted: ${weakSym.slice(0, 4).join(", ")}.` : ""),
+      effort: "Low — cipher list configuration",
+      impact: "Achieves Grover-safe symmetric layer per CNSA 2.0",
+      nistRef: "NIST SP 800-52r2 §3.3.1.1  CNSA 2.0",
     });
   }
+
   if (!hybrid_ready || kexScore < 75) {
-    roadmap.push({
+    steps.push({
       step: n++,
       priority: "HIGH",
-      title: "Enable TLS 1.3 Exclusively",
-      description:
-        "TLS 1.3 mandates forward secrecy and eliminates negotiation of weak cipher suites. " +
-        "Disable TLS 1.0 and TLS 1.1. Restrict TLS 1.2 to strong AEAD-only cipher suites if legacy client support is needed.",
-      nistRef: "NIST SP 800-52r2, PCI DSS 4.0 requirement 4.2.1",
-      effort: "Low — server configuration change",
-      impact: "Eliminates downgrade attacks and enforces AEAD-only ciphers",
+      title: "Enforce TLS 1.3 as Minimum Protocol",
+      summary: "Disable TLS 1.2 or restrict it to AEAD-only suites; TLS 1.3 mandates forward secrecy by design.",
+      snippet: "# Test: confirm TLS 1.3 is negotiated\nopenssl s_client -connect " + domain + ":443 -tls1_3 -brief",
+      detail:
+        "TLS 1.3 eliminates negotiation of weak cipher suites and removes RSA key exchange. " +
+        "If legacy client support requires TLS 1.2, restrict its cipher list to ECDHE+AEAD only " +
+        "(ECDHE-ECDSA-AES256-GCM-SHA384, ECDHE-RSA-AES256-GCM-SHA384). " +
+        "Remove any suite containing CBC, RC4, or 3DES.",
+      effort: "Low — server configuration",
+      impact: "Eliminates downgrade attacks and AEAD enforcement",
+      nistRef: "NIST SP 800-52r2  PCI DSS 4.0 req. 4.2.1",
     });
   }
-  roadmap.push({
+
+  if (sigScore < 20) {
+    steps.push({
+      step: n++,
+      priority: "MEDIUM",
+      title: "Upgrade Certificate to ECDSA (Interim Step)",
+      summary: "Replace RSA-2048 certificates with ECDSA P-256/P-384 now; plan ML-DSA migration when CAs support it (~2026-2028).",
+      detail:
+        `Certificate signature score is ${sigScore.toFixed(0)}/100. No public CA currently issues ML-DSA (FIPS 204) or SLH-DSA (FIPS 205) certificates. ` +
+        "ECDSA P-384 is the best available option today. Subscribe to CA/Browser Forum announcements for PQC certificate availability. " +
+        "Hybrid X.509 certificates (classical + ML-DSA) may be available as an intermediate step.",
+      effort: "Low — certificate reissuance",
+      impact: "Improves current security posture; prepares for PQC certificate migration",
+      nistRef: "NIST FIPS 204 (ML-DSA)  FIPS 205 (SLH-DSA)",
+    });
+  }
+
+  steps.push({
     step: n++,
     priority: "MEDIUM",
     title: "Monitor CA Support for PQC Certificates",
-    description:
-      "No public CA currently issues ML-DSA (FIPS 204) or SLH-DSA (FIPS 205) certificates. " +
-      "Subscribe to CA/Browser Forum announcements. Plan a certificate rotation when CAs start issuing PQC certs (~2026-2028). " +
-      "Hybrid X.509 certificates (classical + ML-DSA) may be available as an intermediate step.",
-    nistRef: "NIST FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA)",
+    summary: "No public CA issues ML-DSA certs today — subscribe to CA/Browser Forum updates and plan rotation for ~2026–2028.",
+    detail:
+      "NIST finalised ML-DSA (FIPS 204) and SLH-DSA (FIPS 205) in August 2024. Public CAs are expected to begin issuing PQC certificates " +
+      "between 2026 and 2028. Plan a certificate rotation workflow now so you can execute it quickly when CAs go live. " +
+      "Hybrid X.509 certificates (traditional + ML-DSA in a single cert) may allow a graceful transition.",
     effort: "Monitor only — no action required today",
     impact: "Completes quantum readiness once PQC certs are available",
+    nistRef: "NIST FIPS 204 (ML-DSA)  FIPS 205 (SLH-DSA)",
   });
+
   if (nistStandards.length > 0) {
-    roadmap.push({
+    steps.push({
       step: n++,
       priority: "LOW",
-      title: "Retire Kyber Draft Groups After Broad ML-KEM Adoption",
-      description:
-        "Once client adoption of FIPS 203 ML-KEM groups exceeds ~95%, remove draft Kyber groups " +
-        "(X25519Kyber768Draft00, etc.) to reduce configuration complexity.",
-      nistRef: "IETF Hybrid TLS Key Exchange (draft)",
+      title: "Retire Kyber Draft Groups After Broad Adoption",
+      summary: "Once 95%+ of clients support FIPS 203 ML-KEM, remove draft Kyber groups to simplify your TLS config.",
+      detail:
+        "Kyber draft groups (X25519Kyber768Draft00, etc.) provided early hybrid KEX before IETF standardisation. " +
+        "With ML-KEM now finalised (FIPS 203), these draft groups are redundant for clients that support the final standard. " +
+        "Remove them once client adoption of final ML-KEM groups exceeds ~95% in your traffic.",
       effort: "Low — remove from named-groups list",
-      impact: "Simplification — no security regression",
+      impact: "Configuration hygiene — no security change",
+      nistRef: "IETF Hybrid TLS Key Exchange (draft)",
     });
   }
-  roadmap.push({
+
+  steps.push({
     step: n++,
     priority: "ONGOING",
     title: "Automate Cryptographic Inventory (Crypto-Agility)",
-    description:
-      "Integrate PQC scanning into your CI/CD pipeline. Re-scan on every server configuration change " +
-      "and after TLS library upgrades. Maintain a Cryptographic Bill of Materials (CBOM) as recommended by CISA.",
-    nistRef: "CISA Quantum-Readiness Roadmap 2023, NISTIR 8547",
+    summary: "Add PQC scanning to your CI/CD pipeline and maintain a Cryptographic Bill of Materials (CBOM).",
+    snippet: "# Re-scan after every TLS config change or library update\n# Integrate this tool via its REST API into your pipeline",
+    detail:
+      "Re-scan on every server configuration change and after TLS library upgrades. " +
+      "Maintain a Cryptographic Bill of Materials (CBOM) as recommended by CISA to track every cryptographic asset. " +
+      "Crypto-agility — the ability to swap algorithms quickly — is the meta-goal of PQC migration.",
     effort: "Medium — pipeline integration",
     impact: "Continuous visibility into cryptographic posture",
+    nistRef: "CISA Quantum-Readiness Roadmap 2023  NISTIR 8547",
   });
 
-  // ---- NIST timeline ---
-  const timelines: Record<number, string> = {
-    1: "You are at CNSA 2.0 Tier 1 — hybrid KEX deployed and symmetric is Grover-safe. CISA recommends completing certificate migration by 2030.",
-    2: "You are at CNSA 2.0 Tier 2 — hybrid KEX deployed but symmetric needs hardening. CISA recommends completing symmetric hardening in 2025.",
-    3: "You are at CNSA 2.0 Tier 3 — KEX migration not yet started. CISA and NSA CNSA 2.0 mark KEX migration as the highest priority for 2024/2025. Commercial deadline: 2026-2028.",
-  };
-  const nistTimeline = timelines[migrationTier] ?? timelines[3];
+  // Positives
+  const positives: string[] = [];
+  if (quantum_ready) positives.push("Quantum Readiness achieved — hybrid KEX and Grover-safe symmetric are both active.");
+  if (hybrid_ready) positives.push(`PQC hybrid key exchange deployed (${hybridGroups.length} group${hybridGroups.length !== 1 ? "s" : ""}). Modern clients negotiate post-quantum-secure sessions.`);
+  if (nistStandards.length > 0) positives.push(`NIST FIPS 203 ML-KEM groups active: ${nistStandards.slice(0, 4).join(", ")}.`);
+  if (draftStandards.length > 0) positives.push(`Kyber draft groups also supported: ${draftStandards.slice(0, 4).join(", ")} — backward-compatible with older clients.`);
+  if (symScore >= 80) positives.push(`Symmetric encryption is Grover-safe (${symScore.toFixed(0)}/100). AES-256 provides ~128-bit post-quantum security.`);
+  else if (symScore >= 60) positives.push(`Symmetric encryption adequate (${symScore.toFixed(0)}/100) with modern TLS 1.3 suites.`);
+  if (compliance["PCI DSS 4.0"]) positives.push("PCI DSS 4.0 cryptographic requirements met.");
+  if (compliance["NIST 800-52r2"]) positives.push("NIST SP 800-52r2 compliance met.");
 
-  return { assessment, positives, gaps, roadmap, nistTimeline, migrationTier, hndlRisk, hybridGroups, legacyProtocols };
+  const tierLabels: Record<number, string> = {
+    1: "Tier 1 — Migration Complete",
+    2: "Tier 2 — KEX Done, Symmetric Pending",
+    3: "Tier 3 — Not Started",
+  };
+  const tierLabel = tierLabels[migrationTier] ?? "Tier 3 — Not Started";
+
+  return { steps, positives, migrationTier, tierLabel, hndlRisk, hybridGroups, legacyProtocols };
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Priority config
 // ---------------------------------------------------------------------------
 
-const priorityConfig = {
-  CRITICAL: { color: "text-red-600 dark:text-red-400", bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900", dot: "bg-red-500" },
-  HIGH:     { color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-900", dot: "bg-orange-500" },
-  MEDIUM:   { color: "text-yellow-600 dark:text-yellow-400", bg: "bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-900", dot: "bg-yellow-500" },
-  LOW:      { color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900", dot: "bg-blue-500" },
-  ONGOING:  { color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700", dot: "bg-slate-400" },
-};
+const PRIORITY = {
+  CRITICAL: {
+    label: "Critical",
+    dot: "bg-rose-500",
+    outline: "border-rose-600/40 dark:border-rose-500/30",
+    bg: "bg-rose-50/60 dark:bg-rose-950/20",
+    text: "text-rose-700 dark:text-rose-400",
+    badge: "bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300",
+    order: 0,
+  },
+  HIGH: {
+    label: "High",
+    dot: "bg-orange-500",
+    outline: "border-orange-500/30 dark:border-orange-500/20",
+    bg: "bg-orange-50/40 dark:bg-orange-950/10",
+    text: "text-orange-700 dark:text-orange-400",
+    badge: "bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300",
+    order: 1,
+  },
+  MEDIUM: {
+    label: "Medium",
+    dot: "bg-amber-400",
+    outline: "border-amber-400/30 dark:border-amber-500/20",
+    bg: "bg-amber-50/40 dark:bg-amber-950/10",
+    text: "text-amber-700 dark:text-amber-500",
+    badge: "bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300",
+    order: 2,
+  },
+  LOW: {
+    label: "Low",
+    dot: "bg-blue-400",
+    outline: "border-blue-400/30 dark:border-blue-500/20",
+    bg: "bg-blue-50/30 dark:bg-blue-950/10",
+    text: "text-blue-700 dark:text-blue-400",
+    badge: "bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300",
+    order: 3,
+  },
+  ONGOING: {
+    label: "Ongoing",
+    dot: "bg-slate-400",
+    outline: "border-border",
+    bg: "bg-muted/20",
+    text: "text-muted-foreground",
+    badge: "bg-muted text-muted-foreground",
+    order: 4,
+  },
+} as const;
 
-const hndlConfig = {
-  low:    { label: "Low HNDL Risk",    color: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900", icon: CheckCircle },
-  medium: { label: "Medium HNDL Risk", color: "text-yellow-700 dark:text-yellow-300",  bg: "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-200 dark:border-yellow-900",   icon: AlertTriangle },
-  high:   { label: "High HNDL Risk",   color: "text-red-700 dark:text-red-300",         bg: "bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900",               icon: XCircle },
-};
+// ---------------------------------------------------------------------------
+// ActionCard — the core building block
+// ---------------------------------------------------------------------------
 
-interface AccordionProps {
-  title: string;
-  icon: React.ReactNode;
-  badgeCount?: number;
-  badgeVariant?: "success" | "warning" | "danger";
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}
+const ActionCard: React.FC<{ step: ActionStep; index: number }> = ({ step, index }) => {
+  const [open, setOpen] = useState(false);
+  const p = PRIORITY[step.priority];
 
-const Accordion: React.FC<AccordionProps> = ({ title, icon, badgeCount, badgeVariant = "success", defaultOpen = false, children }) => {
-  const [open, setOpen] = useState(defaultOpen);
-  const badgeColors = {
-    success: "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300",
-    warning: "bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300",
-    danger:  "bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300",
-  };
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-5 bg-card hover:bg-muted/40 transition-colors text-left"
-      >
-        <div className="flex items-center gap-3">
-          {icon}
-          <span className="font-semibold text-foreground">{title}</span>
-          {badgeCount !== undefined && (
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${badgeColors[badgeVariant]}`}>
-              {badgeCount}
-            </span>
-          )}
+    <div className={`rounded-xl border ${p.outline} ${p.bg} overflow-hidden`}>
+      {/* Always-visible header row */}
+      <div className="flex items-start gap-3 px-4 py-3.5">
+        {/* Step number */}
+        <div className={`w-6 h-6 rounded-full ${p.dot} flex items-center justify-center text-white text-[11px] font-black flex-shrink-0 mt-0.5`}>
+          {step.step}
         </div>
-        {open ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="px-5 pb-5 pt-2 bg-card/60 space-y-3">{children}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+        {/* Title + summary + chips */}
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${p.badge}`}>
+              {p.label}
+            </span>
+            <span className="text-sm font-bold text-foreground">{step.title}</span>
+          </div>
+          <p className="text-sm text-muted-foreground leading-relaxed">{step.summary}</p>
+
+          {/* Snippet preview */}
+          {step.snippet && (
+            <div className="mt-2.5 bg-slate-900 dark:bg-slate-950 rounded-lg px-3 py-2.5 flex items-start gap-2">
+              <Terminal className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+              <pre className="text-xs font-mono text-slate-200 whitespace-pre overflow-x-auto leading-relaxed">
+                {step.snippet}
+              </pre>
+            </div>
+          )}
+
+          {/* Effort / Impact chips */}
+          <div className="flex flex-wrap items-center gap-3 mt-2.5 text-xs text-muted-foreground">
+            <span><span className="font-semibold text-foreground">Effort:</span> {step.effort}</span>
+            <span className="text-border"></span>
+            <span><span className="font-semibold text-foreground">Impact:</span> {step.impact}</span>
+          </div>
+        </div>
+
+        {/* Expand toggle */}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex-shrink-0 mt-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={open ? "Collapse details" : "Expand details"}
+        >
+          {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {/* Expandable details */}
+      {open && (
+        <div className="border-t border-border/50 px-4 py-3.5 bg-card/60 space-y-2">
+          <p className="text-sm text-foreground/80 leading-relaxed">{step.detail}</p>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/70 pt-1">
+            <Shield className="w-3 h-3 flex-shrink-0" />
+            <span>{step.nistRef}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -373,233 +407,171 @@ const Accordion: React.FC<AccordionProps> = ({ title, icon, badgeCount, badgeVar
 // Main component
 // ---------------------------------------------------------------------------
 
-const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({ pqcAnalysis, domain = "This server" }) => {
+const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
+  pqcAnalysis,
+  domain = "This server",
+}) => {
+  const [showPositives, setShowPositives] = useState(false);
+
   if (!pqcAnalysis) {
     return (
-      <div className="bg-card/80 border rounded-2xl p-8 text-center text-muted-foreground text-sm">
-        No PQC analysis data available to generate suggestions.
+      <div className="border border-border rounded-xl p-6 text-center text-sm text-muted-foreground">
+        No PQC analysis data available.
       </div>
     );
   }
 
-  const { assessment, positives, gaps, roadmap, nistTimeline, migrationTier, hndlRisk, hybridGroups, legacyProtocols } =
-    deriveData(pqcAnalysis, domain);
+  const { steps, positives, migrationTier, tierLabel, hndlRisk, hybridGroups } = deriveData(
+    pqcAnalysis,
+    domain
+  );
 
-  const hndl = hndlConfig[hndlRisk as keyof typeof hndlConfig] ?? hndlConfig.high;
-  const HndlIcon = hndl.icon;
+  // Sort by priority order so CRITICAL always leads
+  const sortedSteps = [...steps].sort(
+    (a, b) => PRIORITY[a.priority].order - PRIORITY[b.priority].order
+  );
 
-  const tierLabels = ["", "Tier 1 — Migration Complete", "Tier 2 — KEX Done, Sym Pending", "Tier 3 — Migration Not Started"];
-  const tierColors = ["", "text-emerald-600", "text-yellow-600", "text-red-600"];
+  const criticalCount = steps.filter((s) => s.priority === "CRITICAL").length;
+  const highCount     = steps.filter((s) => s.priority === "HIGH").length;
+  const actionCount   = criticalCount + highCount;
+
+  const hndlColor =
+    hndlRisk === "low"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : hndlRisk === "medium"
+      ? "text-amber-600 dark:text-amber-400"
+      : "text-rose-600 dark:text-rose-400";
+
+  const tierColor =
+    migrationTier === 1
+      ? "text-emerald-600 dark:text-emerald-400"
+      : migrationTier === 2
+      ? "text-amber-600 dark:text-amber-400"
+      : "text-rose-600 dark:text-rose-400";
+
+  const cnsa = [
+    {
+      label: "ML-KEM Hybrid KEX",
+      ok: pqcAnalysis.hybrid_ready,
+      detail: pqcAnalysis.hybrid_ready
+        ? `${hybridGroups.length} group(s) active`
+        : "Deploy X25519MLKEM768",
+    },
+    {
+      label: "AES-256 Symmetric",
+      ok: (pqcAnalysis.components?.symmetric?.weighted_average ?? 0) >= 70,
+      detail:
+        (pqcAnalysis.components?.symmetric?.weighted_average ?? 0) >= 70
+          ? "Grover-safe ciphers in use"
+          : "Upgrade to AES-256-GCM",
+    },
+    {
+      label: "PQC Certificates",
+      ok: false,
+      pending: true,
+      detail: "Awaiting CA support (~2026–2028)",
+    },
+  ];
 
   return (
-    <div className="bg-card/80 border rounded-2xl p-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm space-y-6">
-      {/* Header */}
-      <div className="pb-6 border-b">
-        <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-            <Zap className="w-5 h-5 text-primary" />
-          </div>
-          Quantum Readiness Suggestions
-        </h3>
-        <p className="text-sm text-muted-foreground mt-2">
-          Actionable migration guidance based on NIST FIPS 203/204/205 and CISA PQC Migration Guidance 2024.
-        </p>
-      </div>
-
-      {/* Summary strip: HNDL risk + Migration tier */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* HNDL risk badge */}
-        <div className={`flex items-start gap-4 p-5 rounded-xl border ${hndl.bg}`}>
-          <HndlIcon className={`w-6 h-6 mt-0.5 flex-shrink-0 ${hndl.color}`} />
-          <div>
-            <div className={`font-bold text-sm ${hndl.color}`}>{hndl.label}</div>
-            <div className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              {pqcAnalysis.quantum_readiness_detail?.hndl_reason ??
-                (hndlRisk === "low"
-                  ? "Hybrid PQC/classical key exchange is deployed. HNDL attacks are mitigated for active sessions."
-                  : "No PQC hybrid KEX detected. Data encrypted today may be decryptable by future quantum computers.")}
-            </div>
-          </div>
+    <div className="border border-border rounded-xl overflow-hidden">
+      {/*  Panel header  */}
+      <div className="flex items-center justify-between px-5 py-4 bg-muted/30 border-b border-border">
+        <div className="flex items-center gap-2.5">
+          <Zap className="w-4 h-4 text-primary" />
+          <span className="font-bold text-sm text-foreground">Quantum Migration Action Plan</span>
+          {actionCount > 0 && (
+            <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300">
+              {actionCount} urgent
+            </span>
+          )}
         </div>
-
-        {/* Migration tier */}
-        <div className="flex items-start gap-4 p-5 rounded-xl border bg-card/60">
-          <Layers className="w-6 h-6 mt-0.5 flex-shrink-0 text-primary" />
-          <div>
-            <div className={`font-bold text-sm ${tierColors[migrationTier]}`}>
-              CNSA 2.0 {tierLabels[migrationTier]}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1 leading-relaxed">{nistTimeline}</div>
-          </div>
+        {/* Status strip */}
+        <div className="flex items-center gap-3 text-xs">
+          <span>
+            HNDL:{" "}
+            <span className={`font-bold capitalize ${hndlColor}`}>{hndlRisk}</span>
+          </span>
+          <span className="text-border"></span>
+          <span className={`font-bold ${tierColor}`}>{tierLabel}</span>
         </div>
       </div>
 
-      {/* Legacy Protocol Alert — shown prominently when TLS 1.0/1.1 are accepted */}
-      {legacyProtocols.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-start gap-4 p-5 rounded-xl border bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800"
-        >
-          <XCircle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <div className="font-bold text-sm text-red-700 dark:text-red-300 mb-2 flex flex-wrap items-center gap-2">
-              Deprecated TLS Protocols Detected
-              {legacyProtocols.map((proto) => (
-                <span key={proto} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700">
-                  {proto}
-                </span>
-              ))}
-            </div>
-            <p className="text-xs text-red-700/80 dark:text-red-300/80 leading-relaxed">
-              This server accepts <strong>{legacyProtocols.join(" and ")}</strong>, which are
-              deprecated by NIST SP 800-52r2 (2024), PCI DSS 4.0 §4.2.1, and RFC 8996.{" "}
-              Even if PQC hybrid key exchange is deployed on TLS 1.3, clients that negotiate
-              these legacy versions receive <em>no</em> quantum protection and remain exposed to
-              downgrade attacks (POODLE, BEAST, SWEET32) and historical traffic interception.{" "}
-              This is especially significant for servers testing cutting-edge PQC: legacy protocol
-              acceptance at the CDN or load-balancer layer completely undermines the PQC migration
-              effort for affected sessions.{" "}
-              <strong>Disable TLS 1.0/1.1 in your server and CDN configuration immediately.</strong>
-            </p>
-          </div>
-        </motion.div>
-      )}
-
-      {/* Overall assessment */}
-      <div className="p-5 rounded-xl bg-muted/30 border flex items-start gap-3">
-        <Info className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
-        <p className="text-sm text-foreground leading-relaxed">{assessment}</p>
+      {/*  Action steps  */}
+      <div className="p-4 space-y-2 bg-card">
+        {sortedSteps.map((step, i) => (
+          <ActionCard key={step.step} step={step} index={i} />
+        ))}
       </div>
-      {/* Positive findings */}
-      {positives.length > 0 && (
-        <Accordion
-          title="What's Working Well"
-          icon={<CheckCircle className="w-5 h-5 text-emerald-600" />}
-          badgeCount={positives.length}
-          badgeVariant="success"
-          defaultOpen={true}
-        >
-          {positives.map((p, i) => (
-            <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/50">
-              <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-              <span className="text-sm text-foreground leading-relaxed">{p}</span>
-            </div>
-          ))}
-        </Accordion>
-      )}
 
-      {/* Gaps */}
-      {gaps.length > 0 && (
-        <Accordion
-          title="Gaps & Risks"
-          icon={<AlertCircle className="w-5 h-5 text-yellow-600" />}
-          badgeCount={gaps.length}
-          badgeVariant="warning"
-          defaultOpen={true}
-        >
-          {gaps.map((g, i) => (
-            <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-yellow-50/50 dark:bg-yellow-950/20 border border-yellow-100 dark:border-yellow-900/50">
-              <AlertTriangle className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
-              <span className="text-sm text-foreground leading-relaxed">{g}</span>
-            </div>
-          ))}
-        </Accordion>
-      )}
-
-      {/* Migration roadmap */}
-      <Accordion
-        title="Migration Roadmap"
-        icon={<ArrowRight className="w-5 h-5 text-primary" />}
-        badgeCount={roadmap.length}
-        badgeVariant="success"
-        defaultOpen={false}
-      >
-        <div className="space-y-4 pt-2">
-          {roadmap.map((step) => {
-            const pc = priorityConfig[step.priority];
-            return (
-              <div key={step.step} className={`p-4 rounded-xl border ${pc.bg}`}>
-                <div className="flex items-start gap-3">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${pc.dot} flex-shrink-0`}>
-                    {step.step}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <span className={`text-xs font-bold uppercase tracking-wider ${pc.color}`}>{step.priority}</span>
-                      <span className="font-semibold text-sm text-foreground">{step.title}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed mb-2">{step.description}</p>
-                    <div className="flex flex-wrap gap-4 text-xs">
-                      <span className="text-muted-foreground">
-                        <span className="font-semibold text-foreground">Effort:</span> {step.effort}
-                      </span>
-                      <span className="text-muted-foreground">
-                        <span className="font-semibold text-foreground">Impact:</span> {step.impact}
-                      </span>
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground/70 flex items-center gap-1">
-                      <Shield className="w-3 h-3" />
-                      {step.nistRef}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Accordion>
-
-      {/* CNSA 2.0 Summary */}
-      <div className="pt-2 border-t">
+      {/*  CNSA 2.0 Checklist  */}
+      <div className="border-t border-border px-5 py-4 bg-muted/20">
         <div className="flex items-center gap-2 mb-3">
-          <Lock className="w-4 h-4 text-primary" />
-          <span className="font-semibold text-sm text-foreground">CNSA 2.0 Compliance Snapshot</span>
+          <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+            CNSA 2.0 Compliance Checklist
+          </span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          {[
-            {
-              label: "ML-KEM Hybrid KEX",
-              ok: pqcAnalysis.hybrid_ready,
-              detail: pqcAnalysis.hybrid_ready
-                ? `${hybridGroups.length} group(s) detected`
-                : "Add X25519MLKEM768",
-            },
-            {
-              label: "AES-256 Symmetric",
-              ok: (pqcAnalysis.components?.symmetric?.weighted_average ?? 0) >= 70,
-              detail:
-                (pqcAnalysis.components?.symmetric?.weighted_average ?? 0) >= 70
-                  ? "Grover-safe ciphers in use"
-                  : "Upgrade to AES-256-GCM",
-            },
-            {
-              label: "PQC Certificates",
-              ok: false,
-              detail: "Awaiting CA support (~2026-2028)",
-            },
-          ].map(({ label, ok, detail }) => (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {cnsa.map(({ label, ok, pending, detail }) => (
             <div
               key={label}
-              className={`p-3 rounded-lg border flex items-start gap-2 ${
+              className={`flex items-start gap-2.5 px-3.5 py-3 rounded-lg border text-sm ${
                 ok
                   ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900"
-                  : "bg-muted/30 border-border"
+                  : "bg-card border-border"
               }`}
             >
               {ok ? (
-                <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-              ) : (
+                <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+              ) : pending ? (
                 <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+              ) : (
+                <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
               )}
-              <div>
-                <div className="font-semibold text-foreground">{label}</div>
-                <div className="text-muted-foreground mt-0.5">{detail}</div>
+              <div className="min-w-0">
+                <div className="font-semibold text-foreground text-xs">{label}</div>
+                <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{detail}</div>
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      {/*  What's working (collapsed by default)  */}
+      {positives.length > 0 && (
+        <div className="border-t border-border">
+          <button
+            onClick={() => setShowPositives((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-xs font-semibold text-foreground">
+                What's already working
+              </span>
+              <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-bold">
+                {positives.length}
+              </span>
+            </div>
+            {showPositives ? (
+              <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+            )}
+          </button>
+          {showPositives && (
+            <div className="px-5 py-3 bg-card space-y-2 border-t border-border">
+              {positives.map((item, i) => (
+                <div key={i} className="flex items-start gap-2 text-sm text-foreground/80">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

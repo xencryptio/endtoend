@@ -3,7 +3,8 @@ export interface Algorithm {
     category: string;
     algorithm_type: string; // kex, signature, symmetric, hash
     is_pqc: boolean; // True ONLY for actual PQC algorithms
-    occurrences: number;
+    occurrences: number;          // real (non-commented) occurrences
+    commented_occurrences?: number; // occurrences found inside comments / docstrings
     files_affected: number;
     base_score: number;
     final_score: number;
@@ -45,6 +46,7 @@ export interface Algorithm {
   export interface Scan {
     id: number;
     repo_url: string;
+    repo_name?: string;  // Optional display name (derived from repo_url if not set)
     repo_hash: string;
     branch_name: string;
     platform: string;
