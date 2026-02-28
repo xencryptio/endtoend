@@ -1,5 +1,4 @@
 ﻿import React, { useState, useMemo, useEffect } from "react";
-import { motion } from "framer-motion";
 import {
   Search,
   X,
@@ -109,14 +108,15 @@ const getScoreBarColor = (score: number): string => {
   return "bg-rose-500";
 };
 
+/** Minimal enterprise badge: colored text + border only, no background fill */
 const getGradeBg = (grade: string): string => {
-  if (!grade) return "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400";
+  if (!grade) return "border-slate-300 dark:border-slate-600 text-slate-500";
   const g = grade.toUpperCase();
-  if (g.startsWith("A")) return "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800";
-  if (g.startsWith("B")) return "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800";
-  if (g.startsWith("C")) return "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800";
-  if (g.startsWith("D")) return "bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800";
-  return "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800";
+  if (g.startsWith("A")) return "border-emerald-500 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400";
+  if (g.startsWith("B")) return "border-blue-500 dark:border-blue-700 text-blue-700 dark:text-blue-400";
+  if (g.startsWith("C")) return "border-amber-500 dark:border-amber-600 text-amber-700 dark:text-amber-400";
+  if (g.startsWith("D")) return "border-orange-500 dark:border-orange-600 text-orange-700 dark:text-orange-400";
+  return "border-red-500 dark:border-red-700 text-red-700 dark:text-red-400";
 };
 
 const getCategoryDisplayName = (category: string): string => {
@@ -152,11 +152,9 @@ const Row: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> =
   value,
   mono = false,
 }) => (
-  <div className="flex items-start justify-between py-2 border-b border-border/50 last:border-0 gap-4">
-    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap flex-shrink-0">
-      {label}
-    </span>
-    <span className={`text-sm text-right text-foreground break-all ${mono ? "font-mono" : ""}`}>
+  <div className="flex items-start justify-between py-2 border-b border-border/40 last:border-0 gap-6">
+    <span className="text-sm text-muted-foreground whitespace-nowrap flex-shrink-0 w-32">{label}</span>
+    <span className={`text-sm text-right text-foreground break-all leading-relaxed ${mono ? "font-mono" : ""}`}>
       {value}
     </span>
   </div>
@@ -168,16 +166,36 @@ const PassBadge: React.FC<{ pass: boolean; yes?: string; no?: string }> = ({
   no = "No",
 }) =>
   pass ? (
-    <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-sm">
-      <Check className="w-3.5 h-3.5" />
+    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
+      <Check className="w-3 h-3" />
       {yes}
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 font-semibold text-sm">
-      <X className="w-3.5 h-3.5" />
+    <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 text-xs font-medium">
+      <X className="w-3 h-3" />
       {no}
     </span>
   );
+
+/** Minimal inline status tag — border only, no fill */
+const Tag: React.FC<{ children: React.ReactNode; variant?: "default" | "ok" | "warn" | "bad" }> = ({
+  children,
+  variant = "default",
+}) => {
+  const cls =
+    variant === "ok"
+      ? "border-emerald-500 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400"
+      : variant === "warn"
+      ? "border-amber-500 dark:border-amber-700 text-amber-700 dark:text-amber-400"
+      : variant === "bad"
+      ? "border-red-500 dark:border-red-700 text-red-700 dark:text-red-400"
+      : "border-border text-muted-foreground";
+  return (
+    <span className={`inline-block border text-xs font-medium px-1.5 py-0.5 rounded-sm leading-none ${cls}`}>
+      {children}
+    </span>
+  );
+};
 
 const Accordion: React.FC<{
   title: string;
@@ -188,27 +206,27 @@ const Accordion: React.FC<{
 }> = ({ title, icon, badge, children, defaultOpen = false }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
+    <div className="border border-border rounded overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-5 py-3.5 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+        className="w-full flex items-center justify-between px-4 py-3.5 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
       >
-        <div className="flex items-center gap-2.5">
-          <span className="text-muted-foreground">{icon}</span>
-          <span className="font-semibold text-sm text-foreground">{title}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground/70">{icon}</span>
+          <span className="text-sm font-semibold text-foreground">{title}</span>
           {badge !== undefined && (
-            <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-bold">
+            <span className="px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground text-xs font-medium tabular-nums">
               {badge}
             </span>
           )}
         </div>
         {open ? (
-          <ChevronUp className="w-4 h-4 text-muted-foreground" />
+          <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
         ) : (
-          <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
         )}
       </button>
-      {open && <div className="px-5 py-4 space-y-1 bg-card">{children}</div>}
+      {open && <div className="px-4 py-4 space-y-1.5 bg-card">{children}</div>}
     </div>
   );
 };
@@ -217,43 +235,113 @@ const Accordion: React.FC<{
 // COMPONENT SCORE TABLE
 // ============================================================================
 
+const COL_HEADERS: { label: string; tooltip: string; align?: string }[] = [
+  {
+    label: "Component",
+    tooltip: "Algorithm category being evaluated (Key Exchange, Digital Signatures, Symmetric Encryption, Protocol Security)",
+  },
+  {
+    label: "Score Bar",
+    tooltip: "Visual representation of the weighted composite score (0–100). Red = critical risk, orange = degraded, blue = acceptable, green = strong.",
+  },
+  {
+    label: "Score",
+    tooltip: "Weighted composite score (0–100) for this category. Accounts for algorithm strength, key size, deprecation status, and quantum resistance.",
+    align: "text-right",
+  },
+  {
+    label: "Grade",
+    tooltip: "Letter grade derived from score. A+ ≥ 95 · A ≥ 80 · B ≥ 65 · C ≥ 50 · D ≥ 35 · F < 35",
+    align: "text-right",
+  },
+  {
+    label: "NIST PQC",
+    tooltip: "% of algorithms in this category that are formal NIST PQC standards (ML-KEM, ML-DSA, SLH-DSA). AES-256 and TLS 1.3 are quantum-safe but are not NIST PQC algorithms — shown as N/A where no PQC standard applies.",
+    align: "text-right",
+  },
+  {
+    label: "Q-Safe #",
+    tooltip: "Count of algorithms in this category that resist quantum attacks. For symmetric: 256-bit keys are Grover-resistant. For KEX/Sig: requires ML-KEM or ML-DSA.",
+    align: "text-right",
+  },
+];
+
 const ComponentTable: React.FC<{ components: Record<string, ComponentScore> }> = ({
   components,
 }) => (
-  <div className="border border-border rounded-xl overflow-hidden">
-    <div className="grid grid-cols-[1fr_3fr_3rem_4rem_4rem] gap-3 items-center px-5 py-2.5 bg-muted/40 border-b border-border">
-      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Component</span>
-      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Score</span>
-      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground text-right">Grade</span>
-      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground text-right">PQC %</span>
-      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground text-right">Q-Safe</span>
+  <div className="border border-border rounded overflow-hidden">
+    {/* 6-column grid: name | bar | score-number | grade | nist-pqc | q-safe */}
+    <div className="grid grid-cols-[1.2fr_2fr_3.5rem_3rem_4.5rem_4rem] gap-3 items-center px-4 py-3 bg-muted/30 border-b border-border">
+      {COL_HEADERS.map((h) => (
+        <span
+          key={h.label}
+          className={`text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-help ${h.align ?? ""}`}
+          title={h.tooltip}
+        >
+          {h.label}
+        </span>
+      ))}
     </div>
     {Object.entries(components).map(([key, data], i) => {
       const score = data.weighted_average;
+      const pqcCell =
+        data.pqc_percentage > 0
+          ? `${data.pqc_percentage}%`
+          : key === "symmetric" || key === "protocol"
+          ? null   // render N/A span below
+          : "0%";
+      const pqcTitle =
+        key === "symmetric"
+          ? "AES-256 & ChaCha20 are Grover-resistant (quantum-safe) but are not NIST PQC algorithms — no PQC standard for symmetric ciphers exists yet"
+          : key === "protocol"
+          ? "TLS 1.3 is quantum-safe with PQC key exchange but is not itself a NIST PQC protocol standard"
+          : data.pqc_percentage === 0
+          ? "No NIST PQC algorithms (ML-KEM, ML-DSA) detected in this category. Deploy PQC algorithms to increase this value."
+          : undefined;
       return (
         <div
           key={key}
-          className={`grid grid-cols-[1fr_3fr_3rem_4rem_4rem] gap-3 items-center px-5 py-3 ${
-            i < Object.keys(components).length - 1 ? "border-b border-border/60" : ""
+          className={`grid grid-cols-[1.2fr_2fr_3.5rem_3rem_4.5rem_4rem] gap-3 items-center px-4 py-3.5 ${
+            i < Object.keys(components).length - 1 ? "border-b border-border/50" : ""
           }`}
         >
+          {/* Component name */}
           <span className="text-sm font-medium text-foreground">{getCategoryDisplayName(key)}</span>
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full ${getScoreBarColor(score)} transition-all duration-700`}
-                style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
-              />
-            </div>
-            <span className={`text-sm font-bold tabular-nums w-10 text-right ${getGradeColor(data.grade)}`}>
-              {score.toFixed(1)}
-            </span>
+
+          {/* Score bar */}
+          <div className="h-2 bg-muted rounded-sm overflow-hidden">
+            <div
+              className={`h-full ${getScoreBarColor(score)} transition-all duration-700`}
+              style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
+            />
           </div>
-          <span className={`text-xs font-bold px-2 py-0.5 rounded text-right justify-self-end ${getGradeBg(data.grade)}`}>
+
+          {/* Score number */}
+          <span className={`text-sm font-bold tabular-nums text-right ${getGradeColor(data.grade)}`}>
+            {score.toFixed(1)}
+          </span>
+
+          {/* Grade badge — border-only */}
+          <span
+            className={`text-xs font-bold px-1.5 py-0.5 rounded-sm border text-right justify-self-end font-mono ${getGradeBg(
+              data.grade
+            )}`}
+          >
             {data.grade}
           </span>
-          <span className="text-sm text-right tabular-nums text-muted-foreground">{data.pqc_percentage}%</span>
-          <span className="text-sm text-right tabular-nums text-muted-foreground">{data.quantum_safe_count}</span>
+
+          {/* NIST PQC % */}
+          <span
+            className="text-sm text-right tabular-nums text-muted-foreground"
+            title={pqcTitle}
+          >
+            {pqcCell ?? <span className="text-xs text-muted-foreground/50 italic">N/A</span>}
+          </span>
+
+          {/* Q-Safe count */}
+          <span className="text-sm text-right tabular-nums text-muted-foreground">
+            {data.quantum_safe_count}
+          </span>
         </div>
       );
     })}
@@ -306,14 +394,16 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Sticky header */}
-      <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b border-border">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+      {/* Sticky header — minimal bar */}
+      <header className="sticky top-0 z-30 bg-card border-b border-border">
+        <div className="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <Shield className="w-4 h-4 text-primary flex-shrink-0" />
-            <span className="font-semibold text-sm text-foreground">Quantum Security Report</span>
-            <span className="text-muted-foreground/40 hidden sm:block"></span>
-            <code className="text-xs font-mono text-muted-foreground hidden sm:block truncate max-w-sm">
+            <Shield className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Quantum Security Report
+            </span>
+            <span className="text-muted-foreground/30 hidden sm:block">|</span>
+            <code className="text-xs font-mono text-foreground hidden sm:block truncate max-w-sm">
               {result.url}
             </code>
           </div>
@@ -321,7 +411,7 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-5xl mx-auto px-6 py-6 space-y-5">
         {isSuccess ? (
           <>
             {/* Score card */}
@@ -397,54 +487,54 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
               </div>
             </div>
 
-            {/* Legacy protocol warning */}
+            {/* ── Legacy protocol alert ─────────────────────────────────── */}
             {legacyProtocols.length > 0 && (
-              <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-800 rounded-xl p-5 flex gap-4">
-                <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
+              <div className="border border-red-300 dark:border-red-800 rounded p-4 flex gap-3 bg-red-50/40 dark:bg-red-950/10">
+                <ShieldAlert className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                    <span className="font-bold text-rose-800 dark:text-rose-200 text-sm">
-                      Deprecated TLS Protocols Accepted
+                  <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                    <span className="text-xs font-bold text-red-700 dark:text-red-300">
+                      Deprecated TLS Protocols Accepted:
                     </span>
                     {legacyProtocols.map((proto) => (
-                      <span
+                      <code
                         key={proto}
-                        className="px-2 py-0.5 rounded text-xs font-bold font-mono bg-rose-200 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-700"
+                        className="text-xs font-mono bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 px-1.5 py-0.5 rounded-sm border border-red-200 dark:border-red-700"
                       >
                         {proto}
-                      </span>
+                      </code>
                     ))}
                   </div>
-                  <p className="text-sm text-rose-700/90 dark:text-rose-300/90 leading-relaxed">
+                  <p className="text-xs text-red-700/90 dark:text-red-300/90 leading-relaxed">
                     Deprecated by NIST SP 800-52r2, PCI DSS 4.0 §4.2.1, and RFC 8996. Legacy
-                    sessions bypass PQC hybrid key exchange entirely, exposing traffic to POODLE,
-                    BEAST, and historical interception.{" "}
+                    sessions bypass PQC hybrid key exchange, exposing traffic to POODLE, BEAST,
+                    and historical interception.{" "}
                     <strong>Disable TLS 1.0/1.1 at the server and CDN layer.</strong>
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Component breakdown */}
+            {/* ── Component breakdown ─────────────────────────────────── */}
             {components && (
               <div>
-                <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                   Component Breakdown
-                </h2>
+                </div>
                 <ComponentTable components={components} />
                 <p className="text-xs text-muted-foreground mt-2">
-                  Grade A = quantum-safe  B = mostly secure  C = needs attention  D/F = at risk
+                  A ≥ 80 — B ≥ 65 — C ≥ 50 — D ≥ 35 — F &lt; 35 &nbsp;|  Hover column headers for definitions
                 </p>
               </div>
             )}
 
-            {/* Key technical facts — inline, no click required */}
+            {/* ── TLS + Certificate panels ────────────────────────────── */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* TLS summary */}
-              <div className="bg-card border border-border rounded-xl p-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <Lock className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-bold text-foreground">TLS Configuration</span>
+              <div className="bg-card border border-border rounded p-4">
+                <div className="flex items-center gap-1.5 mb-3 pb-2 border-b border-border">
+                  <Lock className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-xs font-semibold text-foreground">TLS Configuration</span>
                 </div>
                 <Row label="Domain" value={<code className="font-mono text-xs">{rawData.domain || result.url || "N/A"}</code>} />
                 {serverIp && <Row label="Server IP" value={<code className="font-mono text-xs">{serverIp}</code>} />}
@@ -482,10 +572,10 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
               </div>
 
               {/* Certificate summary */}
-              <div className="bg-card border border-border rounded-xl p-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <Shield className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-bold text-foreground">Leaf Certificate</span>
+              <div className="bg-card border border-border rounded p-4">
+                <div className="flex items-center gap-1.5 mb-3 pb-2 border-b border-border">
+                  <Shield className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-xs font-semibold text-foreground">Leaf Certificate</span>
                 </div>
                 <Row label="Subject" value={leafCert.subject || result.cert_subject || "N/A"} mono />
                 <Row label="Issuer" value={leafCert.issuer || result.cert_issuer || "N/A"} mono />
@@ -505,14 +595,17 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
               </div>
             </div>
 
-            {/* Recommendations */}
-            <SuggestionsPanel pqcAnalysis={result.raw_response?.pqc_analysis} domain={result.url} />
+            {/* ── Migration action plan ────────────────────────────────── */}
+            <SuggestionsPanel
+              pqcAnalysis={result.raw_response?.pqc_analysis}
+              domain={result.url}
+            />
 
-            {/* Deep-dive accordion sections */}
+            {/* ── Deep-dive accordions ────────────────────────────────── */}
             <div>
-              <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">
-                Deep-Dive Technical Details
-              </h2>
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                Technical Details
+              </div>
               <div className="space-y-2">
 
                 {/* Cipher Suites */}
@@ -520,7 +613,7 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                   (tlsConfig["tls_1.2_cipher_suites"]?.suites?.length ?? 0)) > 0 && (
                   <Accordion
                     title="Cipher Suites"
-                    icon={<Lock className="w-4 h-4" />}
+                    icon={<Lock className="w-3.5 h-3.5" />}
                     badge={
                       (tlsConfig["tls_1.3_cipher_suites"]?.suites?.length || 0) +
                       (tlsConfig["tls_1.2_cipher_suites"]?.suites?.length || 0)
@@ -528,12 +621,12 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                   >
                     {(tlsConfig["tls_1.3_cipher_suites"]?.suites?.length ?? 0) > 0 && (
                       <div className="mb-4">
-                        <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">TLS 1.3</div>
-                        <div className="rounded-lg border border-border overflow-hidden">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">TLS 1.3</div>
+                        <div className="rounded border border-border overflow-hidden">
                           {tlsConfig["tls_1.3_cipher_suites"].suites.map((cipher: any, idx: number) => (
                             <div key={idx} className="flex items-center justify-between px-4 py-2.5 border-b border-border/50 last:border-0 bg-card">
-                              <code className="text-xs font-mono text-foreground">{cipher.name}</code>
-                              <div className="flex items-center gap-3 text-xs text-muted-foreground ml-4 flex-shrink-0">
+                              <code className="text-sm font-mono text-foreground">{cipher.name}</code>
+                              <div className="flex items-center gap-3 text-sm text-muted-foreground ml-4 flex-shrink-0">
                                 <span>{cipher.encryption}</span>
                                 {cipher.kex_pqc_grade && (
                                   <span className={`font-bold ${getGradeColor(cipher.kex_pqc_grade)}`}>
@@ -548,17 +641,17 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                     )}
                     {(tlsConfig["tls_1.2_cipher_suites"]?.suites?.length ?? 0) > 0 && (
                       <div>
-                        <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">TLS 1.2</div>
-                        <div className="rounded-lg border border-border overflow-hidden">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">TLS 1.2</div>
+                        <div className="rounded border border-border overflow-hidden">
                           {tlsConfig["tls_1.2_cipher_suites"].suites.map((cipher: any, idx: number) => (
                             <div key={idx} className="flex items-center justify-between px-4 py-2.5 border-b border-border/50 last:border-0 bg-card">
-                              <code className="text-xs font-mono text-foreground">{cipher.name}</code>
-                              <div className="flex items-center gap-3 text-xs ml-4 flex-shrink-0">
+                              <code className="text-sm font-mono text-foreground">{cipher.name}</code>
+                              <div className="flex items-center gap-3 text-sm ml-4 flex-shrink-0">
                                 {cipher.kex_pqc_grade && (
-                                  <span className={`font-semibold ${getGradeColor(cipher.kex_pqc_grade)}`}>KEX {cipher.kex_pqc_grade}</span>
+                                  <span className={`font-medium ${getGradeColor(cipher.kex_pqc_grade)}`}>KEX {cipher.kex_pqc_grade}</span>
                                 )}
                                 {cipher.encryption_pqc_grade && (
-                                  <span className={`font-semibold ${getGradeColor(cipher.encryption_pqc_grade)}`}>ENC {cipher.encryption_pqc_grade}</span>
+                                  <span className={`font-medium ${getGradeColor(cipher.encryption_pqc_grade)}`}>ENC {cipher.encryption_pqc_grade}</span>
                                 )}
                               </div>
                             </div>
@@ -573,18 +666,18 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 {(tlsConfig.supported_elliptic_curves?.curves?.length ?? 0) > 0 && (
                   <Accordion
                     title="Elliptic Curves"
-                    icon={<Key className="w-4 h-4" />}
+                    icon={<Key className="w-3.5 h-3.5" />}
                     badge={tlsConfig.supported_elliptic_curves.curves.length}
                   >
-                    <div className="rounded-lg border border-border overflow-hidden">
+                    <div className="rounded border border-border overflow-hidden">
                       {tlsConfig.supported_elliptic_curves.curves.map((curve: any, idx: number) => (
                         <div key={idx} className="flex items-center justify-between px-4 py-2.5 border-b border-border/50 last:border-0 bg-card">
                           <div>
-                            <code className="text-xs font-mono font-semibold text-foreground">{curve.name}</code>
-                            <span className="text-xs text-muted-foreground ml-2">{curve.type}  {curve.bits} bits</span>
+                            <code className="text-sm font-mono font-semibold text-foreground">{curve.name}</code>
+                            <span className="text-sm text-muted-foreground ml-2">{curve.type} · {curve.bits} bits</span>
                           </div>
                           {curve.curve_pqc_grade && (
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded ml-4 flex-shrink-0 ${getGradeBg(curve.curve_pqc_grade)}`}>
+                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded-sm border ml-4 flex-shrink-0 font-mono ${getGradeBg(curve.curve_pqc_grade)}`}>
                               {curve.curve_pqc_grade}
                             </span>
                           )}
@@ -597,12 +690,12 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 {/* Certificate Chain */}
                 <Accordion
                   title="Certificate Chain"
-                  icon={<Shield className="w-4 h-4" />}
+                  icon={<Shield className="w-3.5 h-3.5" />}
                   badge={(certChain.intermediate_certificates || []).length + 1}
                 >
                   <div className="mb-3">
-                    <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1.5">Leaf Certificate</div>
-                    <div className="bg-muted/30 rounded-lg px-4 py-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Leaf Certificate</div>
+                    <div className="bg-muted/20 rounded px-3 py-2.5">
                       <Row label="Subject" value={leafCert.subject || result.cert_subject || "N/A"} mono />
                       <Row label="Issuer" value={leafCert.issuer || result.cert_issuer || "N/A"} mono />
                       <Row label="Valid From" value={formatDate(leafCert.valid_from || result.cert_not_before)} />
@@ -620,12 +713,12 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
 
                   {(certChain.intermediate_certificates || []).map((cert: any, index: number) => (
                     <div key={`inter-${index}`} className="mb-3">
-                      <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1.5">Intermediate {index + 1}</div>
-                      <div className="bg-muted/30 rounded-lg px-4 py-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Intermediate {index + 1}</div>
+                      <div className="bg-muted/20 rounded px-3 py-2.5">
                         <Row label="Key Algorithm" value={cert.public_key_algorithm || "N/A"} />
                         <Row label="Key Size" value={cert.public_key_size ? `${cert.public_key_size} bits` : "N/A"} />
                         {cert.cert_pqc_grade && (
-                          <Row label="PQC Grade" value={<span className={`font-bold ${getGradeColor(cert.cert_pqc_grade)}`}>{cert.cert_pqc_grade} ({cert.cert_pqc_score})</span>} />
+                          <Row label="PQC Grade" value={<span className={`font-bold font-mono ${getGradeColor(cert.cert_pqc_grade)}`}>{cert.cert_pqc_grade} ({cert.cert_pqc_score})</span>} />
                         )}
                       </div>
                     </div>
@@ -633,20 +726,20 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
 
                   {(signatureAlgorithms.certificate_signatures?.length ?? 0) > 0 && (
                     <div className="mt-2">
-                      <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1.5">Signature Algorithms</div>
-                      <div className="rounded-lg border border-border overflow-hidden">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Signature Algorithms</div>
+                      <div className="rounded border border-border overflow-hidden">
                         {signatureAlgorithms.certificate_signatures.map((sig: any, idx: number) => (
                           <div key={idx} className="px-4 py-2.5 border-b border-border/50 last:border-0 bg-card">
                             <div className="flex items-center justify-between">
-                              <code className="text-xs font-mono text-foreground">{sig.signature_algorithm}</code>
+                              <code className="text-sm font-mono text-foreground">{sig.signature_algorithm}</code>
                               {sig.sig_pqc_grade && (
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded ml-3 flex-shrink-0 ${getGradeBg(sig.sig_pqc_grade)}`}>
+                                <span className={`text-xs font-bold px-1.5 py-0.5 rounded-sm border ml-3 flex-shrink-0 font-mono ${getGradeBg(sig.sig_pqc_grade)}`}>
                                   {sig.sig_pqc_grade}
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              {sig.public_key_type}  {sig.public_key_size} bits  Hash: {sig.hash_algorithm}
+                            <div className="text-sm text-muted-foreground mt-0.5">
+                              {sig.public_key_type} · {sig.public_key_size} bits · Hash: {sig.hash_algorithm}
                             </div>
                           </div>
                         ))}
@@ -659,18 +752,18 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 {(signatureAlgorithms.handshake_signatures?.length ?? 0) > 0 && (
                   <Accordion
                     title="Handshake Signature Algorithms"
-                    icon={<Zap className="w-4 h-4" />}
+                    icon={<Zap className="w-3.5 h-3.5" />}
                     badge={signatureAlgorithms.handshake_signatures.length}
                   >
-                    <div className="rounded-lg border border-border overflow-hidden">
+                    <div className="rounded border border-border overflow-hidden">
                       {signatureAlgorithms.handshake_signatures.map((sig: any, idx: number) => (
-                        <div key={idx} className="flex items-center justify-between px-4 py-2.5 border-b border-border/50 last:border-0 bg-card">
+                        <div key={idx} className="flex items-center justify-between px-3 py-2 border-b border-border/50 last:border-0 bg-card">
                           <div>
-                            <code className="text-xs font-mono font-semibold text-foreground">{sig.algorithm}</code>
-                            <span className="text-xs text-muted-foreground ml-2">{sig.protocol}</span>
+                            <code className="text-[11px] font-mono font-semibold text-foreground">{sig.algorithm}</code>
+                            <span className="text-[11px] text-muted-foreground ml-2">{sig.protocol}</span>
                           </div>
                           {sig.sig_pqc_grade && (
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded ml-3 flex-shrink-0 ${getGradeBg(sig.sig_pqc_grade)}`}>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm border ml-3 flex-shrink-0 font-mono ${getGradeBg(sig.sig_pqc_grade)}`}>
                               {sig.sig_pqc_grade}
                             </span>
                           )}
@@ -684,23 +777,23 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 {Object.keys(complianceStatus).length > 0 && (
                   <Accordion
                     title="Compliance Status"
-                    icon={<CheckCircle className="w-4 h-4" />}
+                    icon={<CheckCircle className="w-3.5 h-3.5" />}
                     badge={Object.keys(complianceStatus).length}
                   >
-                    <div className="rounded-lg border border-border overflow-hidden mb-3">
+                    <div className="rounded border border-border overflow-hidden mb-3">
                       {Object.entries(complianceStatus).map(([standard, passed]) => (
-                        <div key={standard} className="flex items-center justify-between px-4 py-3 border-b border-border/50 last:border-0 bg-card">
-                          <span className="text-sm font-semibold text-foreground">{standard}</span>
+                        <div key={standard} className="flex items-center justify-between px-3 py-2 border-b border-border/50 last:border-0 bg-card">
+                          <span className="text-xs font-medium text-foreground">{standard}</span>
                           <PassBadge pass={passed} yes="Compliant" no="Non-Compliant" />
                         </div>
                       ))}
                     </div>
                     {criticalVulns.length > 0 && (
                       <div>
-                        <div className="text-xs font-bold uppercase tracking-widest text-rose-600 dark:text-rose-400 mb-2">Critical Findings</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400 mb-1.5">Critical Findings</div>
                         {criticalVulns.map((v, i) => (
-                          <div key={i} className="flex items-start gap-2 px-4 py-2.5 bg-rose-50 dark:bg-rose-950/30 rounded-lg border border-rose-200 dark:border-rose-800 mb-1.5 text-sm text-rose-800 dark:text-rose-200">
-                            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-rose-500" />
+                          <div key={i} className="flex items-start gap-2 px-3 py-2 border border-red-200 dark:border-red-800 rounded mb-1 text-xs text-red-700 dark:text-red-200 bg-red-50/40 dark:bg-red-950/10">
+                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-red-500" />
                             {v}
                           </div>
                         ))}
@@ -712,40 +805,36 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
             </div>
           </>
         ) : (
-          /* Failed / HTTP */
-          <div className="max-w-2xl mx-auto pt-8">
-            <div className={`p-8 rounded-2xl border-2 ${
+          /* ── Failed / HTTP ───────────────────────────────────── */
+          <div className="max-w-xl mx-auto pt-6">
+            <div className={`p-5 rounded border ${
               result.scan_status === "http_skipped"
-                ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900"
-                : "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900"
+                ? "border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10"
+                : "border-red-300 dark:border-red-800 bg-red-50/40 dark:bg-red-950/10"
             }`}>
               {result.scan_status === "http_skipped" ? (
                 <>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/40 rounded-xl flex items-center justify-center">
-                      <AlertTriangle className="w-7 h-7 text-amber-600" />
-                    </div>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                     <div>
-                      <h2 className="text-xl font-bold text-amber-900 dark:text-amber-100">HTTP Domain — Cannot Scan</h2>
-                      <p className="text-sm text-amber-700 dark:text-amber-300">No TLS/SSL encryption present</p>
+                      <div className="text-sm font-bold text-amber-800 dark:text-amber-100">HTTP Domain — Cannot Scan</div>
+                      <div className="text-xs text-amber-600 dark:text-amber-300">No TLS/SSL encryption present</div>
                     </div>
                   </div>
-                  <p className="text-amber-800 dark:text-amber-200 text-sm leading-relaxed">
+                  <p className="text-xs text-amber-700 dark:text-amber-200 leading-relaxed">
                     {result.error_message || "PQC analysis requires an encrypted HTTPS connection."}
                   </p>
                 </>
               ) : (
                 <>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-14 h-14 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center">
-                      <ShieldAlert className="w-7 h-7 text-rose-600" />
-                    </div>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <ShieldAlert className="w-4 h-4 text-red-600 flex-shrink-0" />
                     <div>
-                      <h2 className="text-xl font-bold text-rose-900 dark:text-rose-100">Scan Failed</h2>
-                      <p className="text-sm text-rose-700 dark:text-rose-300">Unable to complete security analysis</p>
+                      <div className="text-sm font-bold text-red-800 dark:text-red-100">Scan Failed</div>
+                      <div className="text-xs text-red-600 dark:text-red-300">Unable to complete security analysis</div>
                     </div>
                   </div>
-                  <p className="text-rose-800 dark:text-rose-200 text-sm leading-relaxed">
+                  <p className="text-xs text-red-700 dark:text-red-200 leading-relaxed">
                     {result.error_message || "An unknown error occurred. Please retry."}
                   </p>
                 </>
@@ -864,55 +953,52 @@ const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack, tar
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="mb-6">
         <UnifiedBackButton onClick={onBack} label="Back to Scan History" className="mb-4" />
-        <h2 className="text-2xl font-bold text-foreground">Scan Results</h2>
-        <p className="text-sm text-muted-foreground mt-0.5 font-mono">{scan.request_id}</p>
+        <h2 className="text-sm font-bold text-foreground">Scan Results</h2>
+        <p className="text-xs text-muted-foreground mt-0.5 font-mono">{scan.request_id}</p>
       </div>
 
-      {/* Stats strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      {/* Stats strip — compact bar */}
+      <div className="grid grid-cols-4 gap-2 mb-5">
         {[
-          { label: "Completed", value: stats.successful, color: "text-emerald-600 dark:text-emerald-400" },
-          { label: "Failed", value: stats.failed, color: "text-rose-600 dark:text-rose-400" },
-          { label: "Total", value: stats.total, color: "text-foreground" },
-          { label: "Duration", value: scan.execution_time_seconds ? `${scan.execution_time_seconds.toFixed(1)}s` : "—", color: "text-muted-foreground" },
+          { label: "Completed", value: stats.successful, color: "text-emerald-700 dark:text-emerald-400" },
+          { label: "Failed",    value: stats.failed,     color: "text-red-600 dark:text-red-400" },
+          { label: "Total",     value: stats.total,      color: "text-foreground" },
+          { label: "Duration",  value: scan.execution_time_seconds ? `${scan.execution_time_seconds.toFixed(1)}s` : "—", color: "text-muted-foreground" },
         ].map(({ label, value, color }) => (
-          <div key={label} className="bg-card border border-border rounded-xl px-4 py-3">
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{label}</div>
-            <div className={`text-2xl font-bold tabular-nums ${color}`}>{value}</div>
+          <div key={label} className="bg-card border border-border rounded px-3 py-3">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">{label}</div>
+            <div className={`text-xl font-bold tabular-nums ${color}`}>{value}</div>
           </div>
         ))}
       </div>
 
       {/* Search */}
-      <div className="relative mb-5">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Search domains..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <Input placeholder="Filter domains..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 h-8 text-xs" />
         {searchQuery && (
-          <p className="text-xs text-muted-foreground mt-1.5">{filteredResults.length} of {stats.total} domains</p>
+          <p className="text-xs text-muted-foreground mt-1">{filteredResults.length} of {stats.total} domains</p>
         )}
       </div>
 
       {filteredResults.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           {filteredResults.map((result, index) => (
-            <motion.div
+            <DomainCard
               key={result.id || `${result.url}-${index}`}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.04, duration: 0.3 }}
-            >
-              <DomainCard result={result} onViewDetails={() => setSelectedDomain(result)} />
-            </motion.div>
+              result={result}
+              onViewDetails={() => setSelectedDomain(result)}
+            />
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Search className="w-8 h-8 text-muted-foreground/40 mb-3" />
-          <p className="text-base font-semibold text-muted-foreground">
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Globe className="w-7 h-7 text-muted-foreground/30 mb-2" />
+          <p className="text-sm font-medium text-muted-foreground">
             {searchQuery ? "No matching domains" : "No results available"}
           </p>
-          <p className="text-sm text-muted-foreground/60 mt-1">
-            {searchQuery ? "Try a different search term" : "Run a scan to see results here"}
+          <p className="text-xs text-muted-foreground/60 mt-0.5">
+            {searchQuery ? "Try a different filter" : "Run a scan to see results here"}
           </p>
         </div>
       )}

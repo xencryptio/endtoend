@@ -5,16 +5,11 @@
 import React, { useState } from "react";
 import {
   CheckCircle,
-  AlertTriangle,
   XCircle,
   ChevronDown,
   ChevronUp,
   Shield,
-  Zap,
-  Lock,
   Clock,
-  Layers,
-  Terminal,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -289,47 +284,37 @@ function deriveData(p: PqcAnalysis, domain: string) {
 const PRIORITY = {
   CRITICAL: {
     label: "Critical",
-    dot: "bg-rose-500",
-    outline: "border-rose-600/40 dark:border-rose-500/30",
-    bg: "bg-rose-50/60 dark:bg-rose-950/20",
-    text: "text-rose-700 dark:text-rose-400",
-    badge: "bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300",
+    leftBorder: "border-l-2 border-l-red-600 dark:border-l-red-500",
+    text: "text-red-600 dark:text-red-400",
+    badge: "text-red-600 dark:text-red-400",
     order: 0,
   },
   HIGH: {
     label: "High",
-    dot: "bg-orange-500",
-    outline: "border-orange-500/30 dark:border-orange-500/20",
-    bg: "bg-orange-50/40 dark:bg-orange-950/10",
-    text: "text-orange-700 dark:text-orange-400",
-    badge: "bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300",
+    leftBorder: "border-l-2 border-l-orange-500 dark:border-l-orange-400",
+    text: "text-orange-600 dark:text-orange-400",
+    badge: "text-orange-600 dark:text-orange-400",
     order: 1,
   },
   MEDIUM: {
     label: "Medium",
-    dot: "bg-amber-400",
-    outline: "border-amber-400/30 dark:border-amber-500/20",
-    bg: "bg-amber-50/40 dark:bg-amber-950/10",
-    text: "text-amber-700 dark:text-amber-500",
-    badge: "bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300",
+    leftBorder: "border-l-2 border-l-amber-500 dark:border-l-amber-400",
+    text: "text-amber-600 dark:text-amber-500",
+    badge: "text-amber-700 dark:text-amber-400",
     order: 2,
   },
   LOW: {
     label: "Low",
-    dot: "bg-blue-400",
-    outline: "border-blue-400/30 dark:border-blue-500/20",
-    bg: "bg-blue-50/30 dark:bg-blue-950/10",
-    text: "text-blue-700 dark:text-blue-400",
-    badge: "bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300",
+    leftBorder: "border-l-2 border-l-blue-400 dark:border-l-blue-500",
+    text: "text-blue-600 dark:text-blue-400",
+    badge: "text-blue-600 dark:text-blue-400",
     order: 3,
   },
   ONGOING: {
     label: "Ongoing",
-    dot: "bg-slate-400",
-    outline: "border-border",
-    bg: "bg-muted/20",
+    leftBorder: "border-l-2 border-l-slate-300 dark:border-l-slate-600",
     text: "text-muted-foreground",
-    badge: "bg-muted text-muted-foreground",
+    badge: "text-muted-foreground",
     order: 4,
   },
 } as const;
@@ -343,39 +328,31 @@ const ActionCard: React.FC<{ step: ActionStep; index: number }> = ({ step, index
   const p = PRIORITY[step.priority];
 
   return (
-    <div className={`rounded-xl border ${p.outline} ${p.bg} overflow-hidden`}>
-      {/* Always-visible header row */}
-      <div className="flex items-start gap-3 px-4 py-3.5">
-        {/* Step number */}
-        <div className={`w-6 h-6 rounded-full ${p.dot} flex items-center justify-center text-white text-[11px] font-black flex-shrink-0 mt-0.5`}>
-          {step.step}
+    <div className={`border border-border ${p.leftBorder} rounded-r bg-card overflow-hidden`}>
+      {/* Always-visible row */}
+      <div className="flex items-start gap-3 px-4 py-3">
+        {/* Priority label + step number — compact left column */}
+        <div className="flex-shrink-0 w-16 pt-0.5">
+          <div className={`text-xs font-bold uppercase ${p.text}`}>{p.label}</div>
+          <div className="text-xs text-muted-foreground/60 tabular-nums">Step {step.step}</div>
         </div>
 
-        {/* Title + summary + chips */}
+        {/* Title + summary + snippet + chips */}
         <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2 mb-1">
-            <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${p.badge}`}>
-              {p.label}
-            </span>
-            <span className="text-sm font-bold text-foreground">{step.title}</span>
-          </div>
+          <div className="text-sm font-semibold text-foreground mb-0.5">{step.title}</div>
           <p className="text-sm text-muted-foreground leading-relaxed">{step.summary}</p>
 
-          {/* Snippet preview */}
           {step.snippet && (
-            <div className="mt-2.5 bg-slate-900 dark:bg-slate-950 rounded-lg px-3 py-2.5 flex items-start gap-2">
-              <Terminal className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
-              <pre className="text-xs font-mono text-slate-200 whitespace-pre overflow-x-auto leading-relaxed">
+            <div className="mt-2 bg-slate-900 dark:bg-black rounded-sm px-3 py-2">
+              <pre className="text-[11px] font-mono text-slate-200 whitespace-pre overflow-x-auto leading-relaxed">
                 {step.snippet}
               </pre>
             </div>
           )}
 
-          {/* Effort / Impact chips */}
-          <div className="flex flex-wrap items-center gap-3 mt-2.5 text-xs text-muted-foreground">
-            <span><span className="font-semibold text-foreground">Effort:</span> {step.effort}</span>
-            <span className="text-border"></span>
-            <span><span className="font-semibold text-foreground">Impact:</span> {step.impact}</span>
+          <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <span><span className="font-medium text-foreground/70">Effort:</span> {step.effort}</span>
+            <span><span className="font-medium text-foreground/70">Impact:</span> {step.impact}</span>
           </div>
         </div>
 
@@ -383,18 +360,18 @@ const ActionCard: React.FC<{ step: ActionStep; index: number }> = ({ step, index
         <button
           onClick={() => setOpen((v) => !v)}
           className="flex-shrink-0 mt-0.5 text-muted-foreground hover:text-foreground transition-colors"
-          aria-label={open ? "Collapse details" : "Expand details"}
+          aria-label={open ? "Collapse" : "Expand"}
         >
-          {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
       </div>
 
       {/* Expandable details */}
       {open && (
-        <div className="border-t border-border/50 px-4 py-3.5 bg-card/60 space-y-2">
+        <div className="border-t border-border/50 px-4 py-3 bg-muted/10">
           <p className="text-sm text-foreground/80 leading-relaxed">{step.detail}</p>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/70 pt-1">
-            <Shield className="w-3 h-3 flex-shrink-0" />
+          <div className="flex items-center gap-1 text-xs text-muted-foreground/60 pt-1.5">
+            <Shield className="w-2.5 h-2.5 flex-shrink-0" />
             <span>{step.nistRef}</span>
           </div>
         </div>
@@ -474,65 +451,54 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   ];
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
+    <div className="border border-border rounded overflow-hidden">
       {/*  Panel header  */}
-      <div className="flex items-center justify-between px-5 py-4 bg-muted/30 border-b border-border">
-        <div className="flex items-center gap-2.5">
-          <Zap className="w-4 h-4 text-primary" />
-          <span className="font-bold text-sm text-foreground">Quantum Migration Action Plan</span>
+      <div className="flex items-center justify-between px-5 py-3 bg-muted/20 border-b border-border">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-foreground">Quantum Migration Action Plan</span>
           {actionCount > 0 && (
-            <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300">
+            <span className="text-xs font-semibold border border-red-400 dark:border-red-700 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-sm">
               {actionCount} urgent
             </span>
           )}
         </div>
         {/* Status strip */}
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span>
-            HNDL:{" "}
-            <span className={`font-bold capitalize ${hndlColor}`}>{hndlRisk}</span>
+            HNDL Risk:{" "}
+            <span className={`font-semibold capitalize ${hndlColor}`}>{hndlRisk}</span>
           </span>
-          <span className="text-border"></span>
-          <span className={`font-bold ${tierColor}`}>{tierLabel}</span>
+          <span>·</span>
+          <span className={`font-semibold ${tierColor}`}>{tierLabel}</span>
         </div>
       </div>
 
       {/*  Action steps  */}
-      <div className="p-4 space-y-2 bg-card">
+      <div className="p-4 space-y-1.5 bg-card">
         {sortedSteps.map((step, i) => (
           <ActionCard key={step.step} step={step} index={i} />
         ))}
       </div>
 
-      {/*  CNSA 2.0 Checklist  */}
-      <div className="border-t border-border px-5 py-4 bg-muted/20">
-        <div className="flex items-center gap-2 mb-3">
-          <Layers className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            CNSA 2.0 Compliance Checklist
-          </span>
+      {/*  CNSA 2.0 Checklist — compact 3-column  */}
+      <div className="border-t border-border px-5 py-3.5 bg-muted/10">
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+          CNSA 2.0 Compliance
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 divide-x divide-border">
           {cnsa.map(({ label, ok, pending, detail }) => (
-            <div
-              key={label}
-              className={`flex items-start gap-2.5 px-3.5 py-3 rounded-lg border text-sm ${
-                ok
-                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900"
-                  : "bg-card border-border"
-              }`}
-            >
-              {ok ? (
-                <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
-              ) : pending ? (
-                <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-              ) : (
-                <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
-              )}
-              <div className="min-w-0">
-                <div className="font-semibold text-foreground text-xs">{label}</div>
-                <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{detail}</div>
+            <div key={label} className="px-3 first:pl-0 last:pr-0">
+              <div className="flex items-center gap-1 mb-0.5">
+                {ok ? (
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                ) : pending ? (
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                )}
+                <span className="text-xs font-semibold text-foreground">{label}</span>
               </div>
+              <div className="text-xs text-muted-foreground leading-relaxed pl-4">{detail}</div>
             </div>
           ))}
         </div>
@@ -543,28 +509,26 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
         <div className="border-t border-border">
           <button
             onClick={() => setShowPositives((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-3 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+            className="w-full flex items-center justify-between px-5 py-2.5 bg-muted/10 hover:bg-muted/20 transition-colors text-left"
           >
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span className="text-xs font-semibold text-foreground">
-                What's already working
-              </span>
-              <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-bold">
+            <div className="flex items-center gap-1.5">
+              <CheckCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-xs font-semibold text-foreground">What's already working</span>
+              <span className="text-xs px-1 py-0.5 rounded-sm bg-muted text-muted-foreground font-medium">
                 {positives.length}
               </span>
             </div>
             {showPositives ? (
-              <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
+              <ChevronUp className="w-3 h-3 text-muted-foreground" />
             ) : (
-              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+              <ChevronDown className="w-3 h-3 text-muted-foreground" />
             )}
           </button>
           {showPositives && (
-            <div className="px-5 py-3 bg-card space-y-2 border-t border-border">
+            <div className="px-5 py-3 bg-card space-y-1.5 border-t border-border">
               {positives.map((item, i) => (
-                <div key={i} className="flex items-start gap-2 text-sm text-foreground/80">
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                <div key={i} className="flex items-start gap-1.5 text-sm text-foreground/80">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
                   <span className="leading-relaxed">{item}</span>
                 </div>
               ))}
