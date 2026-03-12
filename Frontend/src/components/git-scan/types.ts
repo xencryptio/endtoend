@@ -25,6 +25,44 @@ export interface Algorithm {
     worst_algorithm: string; // Name of worst performing algorithm
   }
   
+  export interface MigrationStep {
+    step: number;
+    priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'ONGOING';
+    title: string;
+    summary: string;
+    detail: string;
+    affected_files: number;
+    occurrences: number;
+    replacement: string;
+    effort: string;
+    impact: string;
+    nist_ref: string;
+    code_example?: string;
+  }
+  
+  export interface MigrationPlan {
+    steps: MigrationStep[];
+    total_steps: number;
+    critical_count: number;
+    high_count: number;
+    urgent_count: number;
+    estimated_effort: string;
+  }
+  
+  export interface QuantumReadinessDetail {
+    quantum_readiness_percentage: number;
+    risk_level: 'critical' | 'high' | 'medium' | 'low';
+    risk_reason: string;
+    migration_status: 'complete' | 'in_progress' | 'not_started' | 'not_applicable';
+    migration_note: string;
+    pqc_algorithms: string[];
+    vulnerable_algorithms: string[];
+    deprecated_algorithms: string[];
+    grover_safe_algorithms: string[];
+    total_crypto_operations: number;
+    quantum_safe_operations: number;
+  }
+
   export interface ScanDetail {
     repo_id: number;
     repo_url: string;
@@ -34,13 +72,16 @@ export interface Algorithm {
     last_scanned: string;
     total_files: number;
     algorithms: Record<string, Algorithm>;
-    quantum_safe_count: number; // ✅ RENAMED: Actually quantum-safe
-    quantum_vulnerable_count: number; // ✅ RENAMED: Actually vulnerable
-    true_pqc_count: number; // Count of actual PQC algorithms
+    quantum_safe_count: number;
+    quantum_vulnerable_count: number;
+    true_pqc_count: number;
     overall_security_score: number;
     overall_grade: string;
-    quantum_readiness_percentage: number; // Based on occurrences, not types
+    quantum_readiness_percentage: number;
     category_scores: Record<string, CategoryScore>;
+    migration_plan?: MigrationPlan;
+    quantum_readiness_detail?: QuantumReadinessDetail;
+    critical_vulnerabilities?: string[];
   }
   
   export interface Scan {
