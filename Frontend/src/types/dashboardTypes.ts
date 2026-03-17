@@ -56,6 +56,14 @@ export interface ApplicationSummary {
   vulnerabilities: number;
   risk_level: "Low" | "Medium" | "High" | "Very High";
   status?: string;
+  scan_coverage?: {
+    domains_total: number;
+    domains_scanned: number;
+    repos_total: number;
+    repos_scanned: number;
+    assets_total: number;
+    assets_online: number;
+  };
 }
 
 export interface ApplicationDetail {

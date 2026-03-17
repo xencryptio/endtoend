@@ -100,12 +100,15 @@ def fetch_dashboard_raw_data(db: Session) -> List[Dict[str, Any]]:
             FROM domains d
                         LEFT JOIN scan_results sr ON (
                             sr.url LIKE '%' || d.domain || '%'
+                            OR d.domain LIKE '%' || sr.url || '%'
                             OR REPLACE(sr.url, 'https://', '') LIKE d.domain || '%'
                             OR REPLACE(sr.url, 'http://', '') LIKE d.domain || '%'
                             OR REPLACE(REPLACE(sr.url, 'https://www.', ''), 'http://www.', '') LIKE d.domain || '%'
+                            OR sr.url LIKE '%' || REPLACE(d.domain, 'www.', '') || '%'
+                            OR REPLACE(d.domain, 'www.', '') LIKE '%' || sr.url || '%'
                         )                WHERE d.application_id IS NOT NULL 
               AND sr.pqc_overall_score IS NOT NULL
-              AND sr.scan_status = 'COMPLETED'
+              AND LOWER(sr.scan_status) = 'completed'
             GROUP BY d.application_id
         ),
         
@@ -136,7 +139,8 @@ def fetch_dashboard_raw_data(db: Session) -> List[Dict[str, Any]]:
                 application_id,
                 COUNT(*) AS server_count,
                 COUNT(CASE WHEN agent_status = 'active' THEN 1 END) AS active_agents,
-                ARRAY_AGG(hostname ORDER BY hostname) AS server_hostnames
+                ARRAY_AGG(hostname ORDER BY hostname) AS server_hostnames,
+                ARRAY_AGG(ip_address ORDER BY hostname) AS server_ips
             FROM servers
             WHERE application_id IS NOT NULL
             GROUP BY application_id
@@ -225,7 +229,14 @@ def fetch_dashboard_raw_data(db: Session) -> List[Dict[str, Any]]:
             COALESCE(ru.repo_count, 0) AS "repo_count",
             sd.server_hostnames,
             COALESCE(sd.server_count, 0) AS "server_count",
-            COALESCE(sd.active_agents, 0) AS "active_agent_count"
+            COALESCE(sd.active_agents, 0) AS "active_agent_count",
+            
+            -- Domain scan coverage
+            (SELECT COUNT(*) FROM domains dom WHERE dom.application_id = a.id) AS "domain_count",
+            COALESCE(pm.total_scans, 0) AS "domains_scanned",
+            
+            -- Server IP addresses for agent matching
+            sd.server_ips
             
         FROM applications a
         INNER JOIN suborganizations s ON a.suborganization_id = s.id

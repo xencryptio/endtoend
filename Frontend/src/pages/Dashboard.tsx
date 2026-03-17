@@ -11,7 +11,7 @@ import {
 import {
   Activity, Shield, AlertTriangle, CheckCircle, TrendingUp,
   Building2, ArrowRight, Zap, Lock, Server, Code2,
-  AlertOctagon, Globe, GitBranch, Cpu, ChevronRight
+  AlertOctagon, Globe, GitBranch, Cpu, ChevronRight, Wifi, WifiOff
 } from "lucide-react";
 import type { OrganizationDashboard, ApplicationSummary } from "@/types/dashboardTypes";
 import { getRiskBadgeClass, getScoreTextClass } from "@/utils/dashboardUtils";
@@ -31,14 +31,14 @@ const tooltipStyle = {
 };
 
 function ScoreArc({ value }: { value: number }) {
-  const size = 120;
-  const stroke = 10;
+  const size = 160;
+  const stroke = 12;
   const r = (size - stroke) / 2;
   const circ = Math.PI * r; // half-circle
   const offset = circ - (value / 100) * circ;
   const color = value >= 80 ? "#10b981" : value >= 60 ? "#f59e0b" : value >= 40 ? "#f97316" : "#ef4444";
   return (
-    <svg width={size} height={size / 2 + stroke / 2} viewBox={`0 0 ${size} ${size / 2 + stroke}`}>
+    <svg width={size} height={size / 2 + stroke} viewBox={`0 0 ${size} ${size / 2 + stroke}`}>
       <path d={`M${stroke / 2},${size / 2} A${r},${r} 0 0 1 ${size - stroke / 2},${size / 2}`}
         fill="none" stroke="hsl(var(--muted))" strokeWidth={stroke} strokeLinecap="round" />
       <path d={`M${stroke / 2},${size / 2} A${r},${r} 0 0 1 ${size - stroke / 2},${size / 2}`}
@@ -115,16 +115,6 @@ export default function Dashboard() {
     queryFn: getPQCTrend,
   });
 
-  // build trend data — show short month labels, null pqc for future months
-  const trendData = useMemo(() => {
-    if (!trendRaw) return [];
-    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    return trendRaw.map((t: { month: string; pqc: number | null }) => {
-      const [, m] = t.month.split("-");
-      return { name: monthNames[parseInt(m, 10) - 1], pqc: t.pqc };
-    });
-  }, [trendRaw]);
-
   useEffect(() => {
     if (dashboards && dashboards.length > 0 && !selectedOrg) setSelectedOrg(dashboards[0]);
   }, [dashboards, selectedOrg]);
@@ -134,6 +124,22 @@ export default function Dashboard() {
   const dist = useMemo(() => selectedOrg?.risk_distribution ?? { Low: 0, Medium: 0, High: 0, "Very High": 0 }, [selectedOrg]);
   const summary = useMemo(() => selectedOrg?.summary ?? { total_applications: 0, total_vulnerabilities: 0, secure_applications: 0, pqc_readiness_percent: 0 }, [selectedOrg]);
   const orgName = selectedOrg?.organization_name ?? "Organization";
+
+  // build trend data — use combined PQC readiness for current month (not raw domain-only score)
+  const trendData = useMemo(() => {
+    if (!trendRaw) return [];
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const now = new Date();
+    const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    return trendRaw.map((t: { month: string; pqc: number | null }) => {
+      const [, m] = t.month.split("-");
+      // Override current month with the actual combined PQC readiness from dashboard
+      const pqcValue = t.month === currentKey && summary.pqc_readiness_percent > 0
+        ? summary.pqc_readiness_percent
+        : t.pqc;
+      return { name: monthNames[parseInt(m, 10) - 1], pqc: pqcValue };
+    });
+  }, [trendRaw, summary.pqc_readiness_percent]);
 
   // sub-org aggregation
   const subOrgData = useMemo(() => {
@@ -184,6 +190,19 @@ export default function Dashboard() {
       pqc: Math.round(a.pqc_ready * 10) / 10,
       vulns: a.vulnerabilities,
     })), [apps]);
+
+  // overall scan coverage for the banner
+  const overallCoverage = useMemo(() => {
+    let dt = 0, ds = 0, rt = 0, rs = 0, at = 0, ao = 0;
+    apps.forEach(a => {
+      const c = a.scan_coverage;
+      if (!c) return;
+      dt += c.domains_total; ds += c.domains_scanned;
+      rt += c.repos_total; rs += c.repos_scanned;
+      at += c.assets_total; ao += c.assets_online;
+    });
+    return { dt, ds, rt, rs, at, ao, total: dt + rt + at, scanned: ds + rs + ao };
+  }, [apps]);
 
   // ── loading / error ───────────────────────────────────────────────────────
   if (isLoading) {
@@ -240,6 +259,37 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* ── scan coverage banner ── */}
+      {overallCoverage.total > 0 && overallCoverage.scanned < overallCoverage.total && (
+        <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl px-5 py-3 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Partial Scan Coverage</p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+              Scores reflect only completed scans. {overallCoverage.at > 0 && overallCoverage.ao < overallCoverage.at && (
+                <span className="font-semibold">{overallCoverage.at - overallCoverage.ao} of {overallCoverage.at} asset{overallCoverage.at > 1 ? 's' : ''} offline — agent not installed or unreachable. </span>
+              )}{overallCoverage.dt > 0 && overallCoverage.ds < overallCoverage.dt && (
+                <span>{overallCoverage.dt - overallCoverage.ds} domain{overallCoverage.dt - overallCoverage.ds > 1 ? 's' : ''} not yet scanned. </span>
+              )}{overallCoverage.rt > 0 && overallCoverage.rs < overallCoverage.rt && (
+                <span>{overallCoverage.rt - overallCoverage.rs} repo{overallCoverage.rt - overallCoverage.rs > 1 ? 's' : ''} not yet scanned. </span>
+              )}
+            </p>
+          </div>
+          <div className="flex gap-3 flex-shrink-0">
+            {[{ label: "Domains", done: overallCoverage.ds, total: overallCoverage.dt, icon: Globe },
+              { label: "Repos", done: overallCoverage.rs, total: overallCoverage.rt, icon: GitBranch },
+              { label: "Assets", done: overallCoverage.ao, total: overallCoverage.at, icon: overallCoverage.ao === overallCoverage.at ? Wifi : WifiOff },
+            ].filter(s => s.total > 0).map(s => (
+              <div key={s.label} className="text-center">
+                <s.icon className={`w-3.5 h-3.5 mx-auto mb-0.5 ${s.done === s.total ? 'text-emerald-500' : 'text-amber-500'}`} />
+                <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300">{s.done}/{s.total}</p>
+                <p className="text-[9px] text-amber-600 dark:text-amber-500">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── 4 stat cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Activity} label="Total Applications" value={summary.total_applications}
@@ -260,8 +310,8 @@ export default function Dashboard() {
           <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Quantum Readiness</p>
           <div className="relative">
             <ScoreArc value={summary.pqc_readiness_percent} />
-            <div className="absolute inset-0 flex flex-col items-center justify-end pb-0">
-              <span className={`text-4xl font-black ${getScoreTextClass(summary.pqc_readiness_percent)}`}>
+            <div className="absolute inset-x-0 bottom-1 flex flex-col items-center">
+              <span className={`text-3xl font-black ${getScoreTextClass(summary.pqc_readiness_percent)}`}>
                 {summary.pqc_readiness_percent}%
               </span>
             </div>
@@ -477,7 +527,7 @@ export default function Dashboard() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40">
               <tr>
-                {["Application", "Sub-Org", "PQC Score", "Vulns", "Risk", "Status", ""].map(h => (
+                {["Application", "Sub-Org", "PQC Score", "Vulns", "Risk", "Scan Coverage", "Status", ""].map(h => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -508,6 +558,30 @@ export default function Dashboard() {
                   </td>
                   <td className="px-5 py-3.5">
                     <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${getRiskBadgeClass(app.risk_level)}`}>{app.risk_level}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {app.scan_coverage ? (
+                      <div className="flex items-center gap-1.5">
+                        {[{ label: "D", done: app.scan_coverage.domains_scanned, total: app.scan_coverage.domains_total },
+                          { label: "R", done: app.scan_coverage.repos_scanned, total: app.scan_coverage.repos_total },
+                          { label: "A", done: app.scan_coverage.assets_online, total: app.scan_coverage.assets_total },
+                        ].filter(s => s.total > 0).map(s => (
+                          <span key={s.label}
+                            title={`${s.label === "D" ? "Domains" : s.label === "R" ? "Repos" : "Assets"}: ${s.done}/${s.total}`}
+                            className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold border ${
+                              s.done >= s.total
+                                ? "bg-emerald-100 dark:bg-emerald-950/30 text-emerald-600 border-emerald-200 dark:border-emerald-800"
+                                : s.done > 0
+                                  ? "bg-amber-100 dark:bg-amber-950/30 text-amber-600 border-amber-200 dark:border-amber-800"
+                                  : "bg-red-100 dark:bg-red-950/30 text-red-500 border-red-200 dark:border-red-800"
+                            }`}>
+                            {s.label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5" onClick={e => e.stopPropagation()}>
                     <select

@@ -5,7 +5,7 @@ from datetime import datetime
 
 from dashboard.data_access.scandb import fetch_dashboard_raw_data
 from dashboard.data_access.repo_scanner_db import fetch_repo_metrics
-from dashboard.data_access.system_scanner_db import fetch_system_metrics
+from dashboard.data_access.system_scanner_db import fetch_system_metrics, fetch_agent_status_by_ip
 from dashboard.data_access._utils import normalize_repo_url
 from dashboard.risk_engine.scoring import (
     calculate_combined_pqc_score, 
@@ -17,6 +17,32 @@ from dashboard.risk_engine.scoring import (
 
 log = logging.getLogger(__name__)
 
+
+def _sync_agent_status(db: Session, agent_status_by_ip: Dict[str, Any]):
+    """Sync live agent status from system-scanner into scandb.servers by IP match."""
+    from sqlalchemy import text
+    if not agent_status_by_ip:
+        return
+    try:
+        servers = db.execute(text("SELECT id, ip_address FROM servers WHERE ip_address IS NOT NULL")).fetchall()
+        for srv in servers:
+            agent_info = agent_status_by_ip.get(srv.ip_address)
+            if agent_info:
+                db.execute(
+                    text("UPDATE servers SET agent_status = :status, last_heartbeat = :hb WHERE id = :sid"),
+                    {
+                        "status": agent_info["status"],
+                        "hb": agent_info["last_seen"],
+                        "sid": srv.id,
+                    }
+                )
+        db.commit()
+        log.info(f"Synced agent status for {len(servers)} servers by IP")
+    except Exception as e:
+        log.error(f"Error syncing agent status: {e}")
+        db.rollback()
+
+
 def build_full_dashboard_view(db: Session) -> List[Dict[str, Any]]:
     """
     Builds a full dashboard view for all organizations.
@@ -24,7 +50,11 @@ def build_full_dashboard_view(db: Session) -> List[Dict[str, Any]]:
     """
     log.info("Building full dashboard view for all organizations")
 
-    # 1. Fetch all necessary raw data
+    # 0. Sync agent status from system-scanner BEFORE querying dashboard data
+    agent_status_by_ip = fetch_agent_status_by_ip()
+    _sync_agent_status(db, agent_status_by_ip)
+
+    # 1. Fetch all necessary raw data (now with up-to-date agent_status)
     all_raw_app_data = fetch_dashboard_raw_data(db)
     repo_metrics = fetch_repo_metrics()
     system_metrics = fetch_system_metrics()
@@ -179,7 +209,15 @@ def build_full_dashboard_view(db: Session) -> List[Dict[str, Any]]:
                 "time_complexity": time_complexity,
                 "current_date": row.get("current_date", datetime.now().strftime('%m-%d-%Y')),
                 "App Category": app_category,
-                "algorithms_used": combined_algorithms
+                "algorithms_used": combined_algorithms,
+                "scan_coverage": {
+                    "domains_total": int(row.get("domain_count", 0)),
+                    "domains_scanned": min(int(row.get("domains_scanned", 0)), int(row.get("domain_count", 0))),
+                    "repos_total": int(row.get("repo_count", 0)),
+                    "repos_scanned": min(len(repo_security_scores), int(row.get("repo_count", 0))),
+                    "assets_total": int(row.get("server_count", 0)),
+                    "assets_online": int(row.get("active_agent_count", 0)),
+                },
             }
             processed_applications.append(app_record)
 
