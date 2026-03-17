@@ -54,6 +54,7 @@ interface AuditResult {
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { UnifiedResultCard, UnifiedMetricCard, UnifiedBackButton } from "@/components/ui/unified";
 import { PQCExpandedResultModal } from './PQCExpandedResultModal';
+import { AgentDetailedResultsPage } from './AgentDetailedResultsPage';
 
 // ... (other imports)
 
@@ -195,6 +196,17 @@ export const AgentResultsPage: React.FC<{
     };
   }, [results]);
 
+  // If a result is selected, show the detailed results page
+  if (selectedResult) {
+    return (
+      <AgentDetailedResultsPage
+        result={selectedResult}
+        hostname={agent.hostname}
+        onBack={() => setSelectedResult(null)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -309,9 +321,6 @@ export const AgentResultsPage: React.FC<{
           </div>
         )}
       </div>
-
-      {/* Detailed Results Modal */}
-      {selectedResult && <PQCExpandedResultModal result={selectedResult} onClose={() => setSelectedResult(null)} />}
     </div>
   );
 };

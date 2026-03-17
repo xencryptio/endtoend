@@ -221,6 +221,10 @@ PQ_RESISTANCE_TABLE = {
         "DTLS 1.2": 75,
         "DTLS 1.3": 90,
         "QUIC": 85,
+        # Windows-specific protocol markers
+        "FIPS-140-2": 85,
+        "FIPS-140-3": 90,
+        "SCHANNEL": 70,
     },
 }
 

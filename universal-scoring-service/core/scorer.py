@@ -190,7 +190,9 @@ class UniversalPQCScorer:
             security_level=self._determine_security_level(final_score),
             quantum_safe=quantum_safe,
             quantum_safety_reason=safety_reason,
-            deprecated=deprecated
+            deprecated=deprecated,
+            context=context or {},
+            category=algo_type
         )
 
     def _group_by_component(self, scores: List[AlgorithmScoreOutput]) -> Dict[str, List[AlgorithmScoreOutput]]:
@@ -237,6 +239,9 @@ class UniversalPQCScorer:
         pfs_algos = ["DHE", "ECDHE", "X25519", "X448"] + list(self.pqc_algorithms)
         pfs_enabled = any(any(pfs in s.algorithm.upper() for pfs in pfs_algos) for s in scores) if comp_type == "kex" else False
 
+        best_algo = max(scores, key=lambda x: x.final_score)
+        worst_algo = min(scores, key=lambda x: x.final_score)
+        
         return ComponentScore(
             component_type=comp_type,
             algorithms=scores,
@@ -245,8 +250,10 @@ class UniversalPQCScorer:
             weighted_average=round(weighted_avg, 2),
             grade=self._score_to_grade(weighted_avg),
             weight_in_final=self.component_weights.get(comp_type, 0.1),
-            best_algorithm=max(scores, key=lambda x: x.final_score).algorithm,
-            worst_algorithm=min(scores, key=lambda x: x.final_score).algorithm,
+            best_algorithm=best_algo.algorithm,
+            worst_algorithm=worst_algo.algorithm,
+            best_algorithm_context=best_algo.context or {},
+            worst_algorithm_context=worst_algo.context or {},
             pqc_percentage=round(pqc_percentage, 2),
             hybrid_percentage=round(hybrid_percentage, 2),
             deprecated_count=deprecated_count,
