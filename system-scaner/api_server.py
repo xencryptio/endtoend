@@ -205,217 +205,208 @@ def _extract_linux_algorithms(audit: Dict) -> List[Dict]:
 def _extract_windows_algorithms(audit: Dict) -> List[Dict]:
     """
     Extract algorithms from Windows audit results.
-    
-    Properly parses TLS cipher suite names to extract:
-    - Key Exchange (KEX) algorithm
-    - Symmetric encryption algorithm
-    - Hash/MAC algorithm
-    
-    Also normalizes certificate signature algorithms.
+
+    Every cipher suite and every certificate is scored individually —
+    no deduplication — so the scoring reflects the real distribution
+    of strong vs. weak algorithms across the full configuration.
+
+    Per cipher suite:
+      - KEX (from key_exchange field, or derived from cipher name)
+      - Symmetric cipher
+      - Hash / MAC algorithm
+
+    Per certificate (all stores):
+      - Signature algorithm (RSA, ECDSA, …)
+      - Hash extracted from the signature algorithm name
     """
     algorithms = []
     position = 0
-    
-    # Track what we've seen to avoid duplicates
-    seen_kex = set()
-    seen_symmetric = set()
-    seen_hash = set()
-    seen_signatures = set()
-    
+
+    STORE_INFO = {
+        "current_user_root_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\Root",
+            "Trusted Root Certificates (User)",
+            "CurrentUser\\Root",
+        ),
+        "local_machine_root_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\Root",
+            "Trusted Root Certificates (Machine)",
+            "LocalMachine\\Root",
+        ),
+        "current_user_ca_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\CA",
+            "Intermediate CA (User)",
+            "CurrentUser\\CA",
+        ),
+        "local_machine_ca_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\CA",
+            "Intermediate CA (Machine)",
+            "LocalMachine\\CA",
+        ),
+        "current_user_authroot_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot",
+            "Third-Party Root (User)",
+            "CurrentUser\\AuthRoot",
+        ),
+        "local_machine_authroot_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot",
+            "Third-Party Root (Machine)",
+            "LocalMachine\\AuthRoot",
+        ),
+        "current_user_my_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\My",
+            "Personal Certificates (User)",
+            "CurrentUser\\My",
+        ),
+        "local_machine_my_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\My",
+            "Personal Certificates (Machine)",
+            "LocalMachine\\My",
+        ),
+    }
+
+    CIPHER_LOCATION = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\Configuration\\Local\\SSL\\00010002"
+
     # =========================================================================
-    # 1. Parse TLS Cipher Suites into Components
+    # 1. Parse every TLS cipher suite — one scored entry per component per suite
     # =========================================================================
     tls = audit.get("tls_ssl_configuration", {})
     cipher_suites = tls.get("cipher_suites", {})
-    
+
     for cipher in cipher_suites.get("cipher_details", []):
         cipher_name = cipher.get("name", "")
-        kex = cipher.get("key_exchange", "")
-        hash_algo = cipher.get("hash_algorithm", "")
-        cipher_hex = cipher.get("cipher_suite_hex", "")
+        kex_raw     = cipher.get("key_exchange", "")
+        hash_algo   = cipher.get("hash_algorithm", "")
+        cipher_hex  = cipher.get("cipher_suite_hex", "")
         cipher_type = cipher.get("type", "")
-        
-        # --- Extract and normalize KEX ---
-        if kex and kex not in seen_kex:
-            # Normalize KEX names
-            normalized_kex = _normalize_kex_algorithm(kex, cipher_name)
-            if normalized_kex:
-                algorithms.append({
-                    "name": normalized_kex,
-                    "algorithm_type": "kex",
-                    "position": position,
-                    "context": {
-                        "source": "tls_cipher_suite",
-                        "source_type": "TLS Cipher Suite",
-                        "cipher_suite": cipher_name,
-                        "cipher_hex": cipher_hex,
-                        "location": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\Configuration\\Local\\SSL\\00010002"
-                    }
-                })
-                position += 1
-                seen_kex.add(kex)
-        
-        # --- Extract and normalize Symmetric Cipher ---
+
+        base_ctx = {
+            "cipher_suite": cipher_name,
+            "cipher_hex": cipher_hex,
+            "location": CIPHER_LOCATION,
+        }
+
+        # --- KEX: prefer explicit field, fall back to name-derived value ---
+        normalized_kex = None
+        if kex_raw:
+            normalized_kex = _normalize_kex_algorithm(kex_raw, cipher_name)
+        if not normalized_kex:
+            normalized_kex = _extract_kex_from_cipher_name(cipher_name)
+        if normalized_kex:
+            algorithms.append({
+                "name": normalized_kex,
+                "algorithm_type": "kex",
+                "position": position,
+                "context": {**base_ctx, "source": "tls_cipher_suite", "source_type": "TLS Cipher Suite"},
+            })
+            position += 1
+
+        # --- Symmetric cipher ---
         symmetric_algo = _extract_symmetric_from_cipher(cipher_name)
-        if symmetric_algo and symmetric_algo not in seen_symmetric:
+        if symmetric_algo:
             algorithms.append({
                 "name": symmetric_algo,
                 "algorithm_type": "symmetric",
                 "position": position,
                 "key_size": _extract_key_size_from_cipher(cipher_name),
-                "context": {
-                    "source": "tls_cipher_suite",
-                    "source_type": "TLS Cipher Suite",
-                    "cipher_suite": cipher_name,
-                    "cipher_hex": cipher_hex,
-                    "cipher_type": cipher_type,
-                    "location": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\Configuration\\Local\\SSL\\00010002"
-                }
+                "context": {**base_ctx, "source": "tls_cipher_suite", "source_type": "TLS Cipher Suite",
+                            "cipher_type": cipher_type},
             })
             position += 1
-            seen_symmetric.add(symmetric_algo)
-        
-        # --- Extract Hash Algorithm ---
-        if hash_algo and hash_algo not in seen_hash:
+
+        # --- Hash / MAC ---
+        if hash_algo:
             normalized_hash = _normalize_hash_algorithm(hash_algo)
             if normalized_hash:
                 algorithms.append({
                     "name": normalized_hash,
                     "algorithm_type": "hash",
                     "position": position,
-                    "context": {
-                        "source": "tls_cipher_suite",
-                        "source_type": "TLS Cipher Suite (MAC)",
-                        "cipher_suite": cipher_name,
-                        "cipher_hex": cipher_hex,
-                        "location": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\Configuration\\Local\\SSL\\00010002"
-                    }
+                    "context": {**base_ctx, "source": "tls_cipher_suite", "source_type": "TLS Cipher Suite (MAC)"},
                 })
                 position += 1
-                seen_hash.add(hash_algo)
-    
-    # --- Also extract KEX from cipher name if not in kex field ---
-    for cipher in cipher_suites.get("cipher_details", []):
-        cipher_name = cipher.get("name", "")
-        cipher_hex = cipher.get("cipher_suite_hex", "")
-        embedded_kex = _extract_kex_from_cipher_name(cipher_name)
-        if embedded_kex and embedded_kex not in seen_kex:
-            algorithms.append({
-                "name": embedded_kex,
-                "algorithm_type": "kex",
-                "position": position,
-                "context": {
-                    "source": "tls_cipher_name_parse",
-                    "source_type": "TLS Cipher Suite (Derived)",
-                    "cipher_suite": cipher_name,
-                    "cipher_hex": cipher_hex,
-                    "location": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\Configuration\\Local\\SSL\\00010002"
-                }
-            })
-            position += 1
-            seen_kex.add(embedded_kex)
-    
+
     # =========================================================================
-    # 2. Certificate Signatures (from all stores with detailed location info)
+    # 2. Every certificate — signature + hash, one entry each
     # =========================================================================
     cert_stores = audit.get("certificate_stores", {})
-    
-    # Store name mappings for proper Windows paths
-    # Windows Registry paths (actual storage locations)
-    store_display_names = {
-        "current_user_root_store": (
-            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\Root",
-            "Trusted Root Certificates (User)",
-            "CurrentUser\\Root"
-        ),
-        "local_machine_root_store": (
-            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\Root",
-            "Trusted Root Certificates (Machine)",
-            "LocalMachine\\Root"
-        ),
-        "current_user_ca_store": (
-            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\CA",
-            "Intermediate CA (User)",
-            "CurrentUser\\CA"
-        ),
-        "local_machine_ca_store": (
-            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\CA",
-            "Intermediate CA (Machine)",
-            "LocalMachine\\CA"
-        ),
-        "current_user_authroot_store": (
-            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot",
-            "Third-Party Root (User)",
-            "CurrentUser\\AuthRoot"
-        ),
-        "local_machine_authroot_store": (
-            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot",
-            "Third-Party Root (Machine)",
-            "LocalMachine\\AuthRoot"
-        ),
-        "current_user_my_store": (
-            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\My",
-            "Personal Certificates (User)",
-            "CurrentUser\\My"
-        ),
-        "local_machine_my_store": (
-            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\My",
-            "Personal Certificates (Machine)",
-            "LocalMachine\\My"
-        ),
-    }
-    
-    # Process all certificate stores
+
     for store_key, store_data in cert_stores.items():
         if not isinstance(store_data, dict):
             continue
-            
-        store_info = store_display_names.get(store_key)
-        if store_info:
-            registry_path, store_friendly, logical_path = store_info
+
+        info = STORE_INFO.get(store_key)
+        if info:
+            registry_path, store_friendly, logical_path = info
         else:
-            registry_path = store_key
+            registry_path  = store_key
             store_friendly = store_data.get("store_name", store_key)
-            logical_path = store_key
-        
+            logical_path   = store_key
+
+        store_base_ctx = {
+            "store_path": logical_path,
+            "registry_path": registry_path,
+            "store_friendly_name": store_friendly,
+            "location": registry_path,
+        }
+
         for cert in store_data.get("certificates", []):
-            sig_algo = cert.get("signature_algorithm")
+            sig_algo   = cert.get("signature_algorithm") or ""
+            subject    = cert.get("subject", "")
+            thumbprint = cert.get("thumbprint", "")
+
+            cert_ctx = {
+                **store_base_ctx,
+                "source": f"certificate_{store_key}",
+                "certificate_subject": subject[:80] if subject else "Unknown",
+                "certificate_thumbprint": thumbprint[:16] + "..." if thumbprint else "",
+                "original_algorithm": sig_algo,
+                "public_key_algorithm": cert.get("public_key_algorithm", ""),
+            }
+
+            # Signature algorithm entry
             if sig_algo:
                 normalized_sig = _normalize_signature_algorithm(sig_algo)
-                sig_key = f"{normalized_sig}_{store_key}"  # Allow same algo from different stores
-                
-                if normalized_sig and sig_key not in seen_signatures:
-                    key_size = cert.get("public_key_size", 0)
-                    subject = cert.get("subject", "")
-                    thumbprint = cert.get("thumbprint", "")
-                    
+                if normalized_sig:
                     algorithms.append({
                         "name": normalized_sig,
                         "algorithm_type": "signature",
-                        "key_size": key_size,
+                        "key_size": cert.get("public_key_size", 0),
                         "position": position,
-                        "context": {
-                            "source": f"certificate_{store_key}",
-                            "source_type": "Windows Certificate Store",
-                            "store_path": logical_path,
-                            "registry_path": registry_path,
-                            "store_friendly_name": store_friendly,
-                            "certificate_subject": subject[:80] if subject else "Unknown",
-                            "certificate_thumbprint": thumbprint[:16] + "..." if thumbprint else "",
-                            "original_algorithm": sig_algo,
-                            "public_key_algorithm": cert.get("public_key_algorithm", ""),
-                            "location": registry_path
-                        }
+                        "context": {**cert_ctx, "source_type": "Windows Certificate Store"},
                     })
                     position += 1
-                    seen_signatures.add(sig_key)
-    
+
+            # Hash algorithm extracted from signature name
+            sig_upper = sig_algo.upper()
+            if "SHA384" in sig_upper:
+                cert_hash = "SHA-384"
+            elif "SHA512" in sig_upper:
+                cert_hash = "SHA-512"
+            elif "SHA256" in sig_upper:
+                cert_hash = "SHA-256"
+            elif "SHA1" in sig_upper:
+                cert_hash = "SHA-1"
+            elif "MD5" in sig_upper:
+                cert_hash = "MD5"
+            else:
+                cert_hash = None
+
+            if cert_hash:
+                algorithms.append({
+                    "name": cert_hash,
+                    "algorithm_type": "hash",
+                    "position": position,
+                    "context": {**cert_ctx, "source_type": "Certificate Signature Hash",
+                                "source": "certificate_signature"},
+                })
+                position += 1
+
     # =========================================================================
-    # 3. CryptoAPI Provider Info (Windows FIPS mode bonus)
+    # 3. CryptoAPI — FIPS mode bonus
     # =========================================================================
     crypto_api = audit.get("cryptoapi_info", {})
     if crypto_api.get("fips_mode_enabled"):
-        # FIPS mode indicates enterprise security posture
         algorithms.append({
             "name": "FIPS-140-2",
             "algorithm_type": "protocol",
@@ -423,63 +414,11 @@ def _extract_windows_algorithms(audit: Dict) -> List[Dict]:
             "context": {
                 "source": "cryptoapi_fips_mode",
                 "source_type": "CryptoAPI Configuration",
-                "location": "HKLM\\System\\CurrentControlSet\\Control\\Lsa\\FIPSAlgorithmPolicy"
-            }
+                "location": "HKLM\\System\\CurrentControlSet\\Control\\Lsa\\FIPSAlgorithmPolicy",
+            },
         })
         position += 1
-    
-    # =========================================================================
-    # 4. Extract hash algorithms from certificate signatures for completeness
-    # =========================================================================
-    for store_key, store_data in cert_stores.items():
-        if not isinstance(store_data, dict):
-            continue
-            
-        store_info = store_display_names.get(store_key)
-        if store_info:
-            registry_path, store_friendly, logical_path = store_info
-        else:
-            registry_path = store_key
-            store_friendly = store_data.get("store_name", store_key)
-            logical_path = store_key
-        
-        for cert in store_data.get("certificates", []):
-            sig_algo = cert.get("signature_algorithm", "").upper()
-            cert_hash = None
-            
-            # Extract hash from signature algorithm name
-            if "SHA384" in sig_algo:
-                cert_hash = "SHA-384"
-            elif "SHA512" in sig_algo:
-                cert_hash = "SHA-512"
-            elif "SHA256" in sig_algo:
-                cert_hash = "SHA-256"
-            elif "SHA1" in sig_algo:
-                cert_hash = "SHA-1"
-            elif "MD5" in sig_algo:
-                cert_hash = "MD5"
-            
-            if cert_hash:
-                hash_key = f"{cert_hash}_cert_{store_key}"
-                if hash_key not in seen_hash:
-                    algorithms.append({
-                        "name": cert_hash,
-                        "algorithm_type": "hash",
-                        "position": position,
-                        "context": {
-                            "source": "certificate_signature",
-                            "source_type": "Certificate Signature Hash",
-                            "store_path": logical_path,
-                            "registry_path": registry_path,
-                            "store_friendly_name": store_friendly,
-                            "certificate_subject": cert.get("subject", "")[:60],
-                            "original_algorithm": cert.get("signature_algorithm", ""),
-                            "location": registry_path
-                        }
-                    })
-                    position += 1
-                    seen_hash.add(hash_key)
-    
+
     return algorithms
 
 
