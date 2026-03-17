@@ -177,15 +177,17 @@ def fetch_dashboard_raw_data(db: Session) -> List[Dict[str, Any]]:
                 ELSE 'Unknown'
             END AS "risk_level",
             
-            -- Migration Status
-            CASE
-                WHEN pm.quantum_ready_count > 0 AND pm.quantum_ready_count = pm.total_scans THEN 
-                    'Q' || CEIL(EXTRACT(MONTH FROM pm.latest_scan_date) / 3.0) || 
-                    ' ' || EXTRACT(YEAR FROM pm.latest_scan_date)
-                WHEN ss.completed_jobs > 0 THEN 'In Progress'
-                WHEN ss.total_scan_jobs > 0 THEN 'Planned'
-                ELSE 'Not Started'
-            END AS "status",
+            -- Migration Status (manual override takes priority)
+            COALESCE(a.migration_status, 
+                CASE
+                    WHEN pm.quantum_ready_count > 0 AND pm.quantum_ready_count = pm.total_scans THEN 
+                        'Q' || CEIL(EXTRACT(MONTH FROM pm.latest_scan_date) / 3.0) || 
+                        ' ' || EXTRACT(YEAR FROM pm.latest_scan_date)
+                    WHEN ss.completed_jobs > 0 THEN 'In Progress'
+                    WHEN ss.total_scan_jobs > 0 THEN 'Planned'
+                    ELSE 'Not Started'
+                END
+            ) AS "status",
             
             -- Certificate and Domain Metrics
             COALESCE(add.cert_changes, 0) AS "cert_changes",
