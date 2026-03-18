@@ -134,8 +134,14 @@ def extract_certificate_fields(raw_response: Dict[str, Any]) -> Dict[str, Any]:
     """Extract certificate fields from raw response."""
     cert_chain = raw_response.get("certificate_chain", {})
     leaf_cert = cert_chain.get("leaf_certificate", {})
-    
+
     return {
+        "cert_subject": leaf_cert.get("subject") or None,
+        "cert_issuer": leaf_cert.get("issuer") or None,
+        "cert_not_before": leaf_cert.get("valid_from") or None,
+        "cert_not_after": leaf_cert.get("valid_until") or None,
+        "public_key_algorithm": leaf_cert.get("public_key_algorithm") or None,
+        "public_key_size_bits": leaf_cert.get("public_key_size") or None,
         "cert_pqc_score": leaf_cert.get("cert_pqc_score"),
         "cert_pqc_grade": leaf_cert.get("cert_pqc_grade"),
         "cert_is_pqc": leaf_cert.get("cert_is_pqc", False),

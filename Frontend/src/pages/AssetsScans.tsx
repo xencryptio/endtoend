@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight } from 'lucide-react';
+import { RefreshCw, Download, ChevronRight, ChevronDown, Play, Server, Activity, Clock, CheckCircle, AlertCircle, Loader, Search, X, FileDown, Terminal, BookOpen, Shield, Lock, Cpu, FileText, Key, Network, HardDrive, ArrowLeft, Copy, ArrowRight, Trash2, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { Button } from '@/components/ui/button';
-import { AgentResultsPage } from '@/components/system-scan/scan-results';
-import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard, UnifiedRefreshButton, UnifiedTableRefresh, UnifiedActionLoading } from '@/components/ui/unified';
+import { AgentDetailedResultsPage } from '@/components/system-scan/AgentDetailedResultsPage';
+import { UnifiedBadge, UnifiedCard, UnifiedExpandable, UnifiedResultCard, UnifiedRefreshButton, UnifiedTableRefresh, UnifiedActionLoading, UnifiedInlineRefresh } from '@/components/ui/unified';
 import { typography } from '@/lib/design-tokens';
 
 
@@ -38,6 +38,10 @@ interface Agent {
   last_seen: string;
   status: string;
   minutes_since_last_seen: number;
+  // Organization tracking (from onboarding)
+  organization_name?: string;
+  suborganization_name?: string;
+  application_name?: string;
 }
 
 interface Task {
@@ -1071,7 +1075,7 @@ const RawJsonSection: React.FC<{ auditResults: any }> = ({ auditResults }) => (
 );
 
 const CryptoAuditDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'downloads' | 'docs'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'downloads' | 'docs'>('dashboard');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -1091,8 +1095,9 @@ const CryptoAuditDashboard: React.FC = () => {
   const [loadingResults, setLoadingResults] = useState<Set<string>>(new Set());
   const [retryingResults, setRetryingResults] = useState<Set<string>>(new Set());
   const [tabTransition, setTabTransition] = useState(false);
-  const [currentPage, setCurrentPage] = useState<'dashboard' | 'agent-results'>('dashboard');
+  const [currentPage, setCurrentPage] = useState<'dashboard' | 'result-detail'>('dashboard');
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [selectedResult, setSelectedResult] = useState<any | null>(null);
 
   const processedCompletionsRef = useRef<Set<string>>(new Set());
   const prevTasksRef = useRef<Task[]>([]);
@@ -1279,6 +1284,42 @@ const CryptoAuditDashboard: React.FC = () => {
     }
   };
 
+  const [deletingAgents, setDeletingAgents] = useState<Set<string>>(new Set());
+
+  const deleteAgent = async (agentId: string, hostname: string) => {
+    if (!confirm(`Are you sure you want to delete agent "${hostname}"?\n\nThis will permanently remove the agent and all its scan history.`)) {
+      return;
+    }
+    
+    setDeletingAgents(prev => new Set(prev).add(agentId));
+    try {
+      const data = await safeFetch<any>(`${VITE_SYSTEM_SCAN_API_URL}/api/v1/agent/${agentId}`, {
+        method: 'DELETE'
+      });
+      if (data.success) {
+        // Remove from local state
+        await fetchAgents();
+        await fetchTasks();
+        // Clean up expanded states
+        setExpandedAgents(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(agentId);
+          return newSet;
+        });
+        agentResults.delete(agentId);
+      }
+    } catch (error) {
+      console.error('Error deleting agent:', error);
+      alert('Failed to delete agent. Please try again.');
+    } finally {
+      setDeletingAgents(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(agentId);
+        return newSet;
+      });
+    }
+  };
+
   const retryFetchResult = async (agentId: string, taskId: string) => {
     setRetryingResults(prev => new Set(prev).add(taskId));
     try {
@@ -1402,13 +1443,38 @@ const CryptoAuditDashboard: React.FC = () => {
     return `${days} days ago`;
   };
 
-  const handleTabChange = (tab: 'dashboard' | 'downloads' | 'docs') => {
+  const handleTabChange = (tab: 'dashboard' | 'history' | 'downloads' | 'docs') => {
     setTabTransition(true);
     setTimeout(() => {
       setActiveTab(tab);
       setTabTransition(false);
     }, 150);
   };
+
+  // Get all scan results across all agents for history view
+  const allScanResults = useMemo(() => {
+    const results: Array<AuditResult & { agent: Agent }> = [];
+    agents.forEach(agent => {
+      const agentResultsList = agentResults.get(agent.agent_id) || [];
+      agentResultsList.forEach(result => {
+        results.push({ ...result, agent });
+      });
+    });
+    // Sort by submitted_at descending (newest first)
+    return results.sort((a, b) => 
+      new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime()
+    );
+  }, [agents, agentResults]);
+
+  // Load all agent results for history view
+  const loadAllAgentResults = useCallback(async () => {
+    setLoading(true);
+    try {
+      await Promise.all(agents.map(agent => fetchAgentResults(agent.agent_id)));
+    } finally {
+      setLoading(false);
+    }
+  }, [agents, fetchAgentResults]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -1479,16 +1545,23 @@ const CryptoAuditDashboard: React.FC = () => {
       <nav className="bg-card border-b">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex gap-1">
-            {(['dashboard', 'downloads', 'docs'] as const).map(tab => (
+            {(['dashboard', 'history', 'downloads', 'docs'] as const).map(tab => (
               <button
                 key={tab}
-                onClick={() => handleTabChange(tab)}
+                onClick={() => {
+                  handleTabChange(tab);
+                  // Load all results when switching to history tab
+                  if (tab === 'history') {
+                    loadAllAgentResults();
+                  }
+                }}
                 className={`px-4 sm:px-6 py-3 font-medium text-sm sm:text-base transition-all relative ${activeTab === tab
                   ? 'text-indigo-600 dark:text-indigo-400'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
               >
                 {tab === 'dashboard' && 'Dashboard'}
+                {tab === 'history' && `Scan History (${allScanResults.length})`}
                 {tab === 'downloads' && 'Downloads'}
                 {tab === 'docs' && 'Documentation'}
                 {activeTab === tab && (
@@ -1735,9 +1808,17 @@ const CryptoAuditDashboard: React.FC = () => {
                                   retryingResults={retryingResults}
                                   getRelativeTime={getRelativeTime}
                                   onNavigateToResults={(agent) => {
-                                    setSelectedAgent(agent);
-                                    setCurrentPage('agent-results');
+                                    // Go directly to most recent result
+                                    const results = agentResults.get(agent.agent_id) || [];
+                                    if (results.length > 0) {
+                                      const latest = results[0];
+                                      setSelectedAgent(agent);
+                                      setSelectedResult(latest);
+                                      setCurrentPage('result-detail');
+                                    }
                                   }}
+                                  onDeleteAgent={deleteAgent}
+                                  isDeleting={deletingAgents.has(agent.agent_id)}
                                 />
                               ))}
                             </tbody>
@@ -1763,25 +1844,141 @@ const CryptoAuditDashboard: React.FC = () => {
                   </div>
                 </div>
               </motion.div>
-            ) : currentPage === 'agent-results' && selectedAgent ? (
+            ) : currentPage === 'result-detail' && selectedResult ? (
               <motion.div
-                key="agent-results"
+                key="result-detail"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
                 transition={{ duration: 0.3 }}
               >
-                <AgentResultsPage
-                  agent={selectedAgent}
-                  results={agentResults.get(selectedAgent.agent_id) || []}
+                <AgentDetailedResultsPage
+                  result={selectedResult}
+                  hostname={selectedAgent?.hostname || selectedResult?.agent?.hostname || 'Unknown'}
                   onBack={() => {
                     setCurrentPage('dashboard');
                     setSelectedAgent(null);
+                    setSelectedResult(null);
                   }}
                 />
               </motion.div>
             ) : null}
           </AnimatePresence>
+        )}
+
+        {activeTab === 'history' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Scan History</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {allScanResults.length} total scan results across all agents
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={async () => {
+                    await loadAllAgentResults();
+                    await refreshAll();
+                  }}
+                  disabled={loading}
+                  size="sm"
+                >
+                  <UnifiedInlineRefresh isRefreshing={loading} size="sm" label="Refresh" />
+                </Button>
+              </div>
+            </div>
+
+            {loading && allScanResults.length === 0 ? (
+              <UnifiedCard padding="spacious" className="flex items-center justify-center py-12">
+                <div className="flex flex-col items-center gap-4">
+                  <Loader className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-muted-foreground">Loading scan history...</p>
+                </div>
+              </UnifiedCard>
+            ) : allScanResults.length === 0 ? (
+              <UnifiedCard padding="spacious" className="flex items-center justify-center py-12">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="p-4 rounded-lg bg-muted">
+                    <FileText className="h-12 w-12 text-muted-foreground" />
+                  </div>
+                  <p className="text-muted-foreground">No scan results found</p>
+                  <p className="text-sm text-muted-foreground">Run scans from the Dashboard tab to see results here</p>
+                </div>
+              </UnifiedCard>
+            ) : (
+              <div className="space-y-4">
+                {allScanResults.map((result) => {
+                  const hasData = !!result.audit_results;
+                  const os = hasData ? detectOS(result.audit_results) : 'Unknown';
+                  const pqcScore = result.audit_results?.pqc_score || {};
+                  const overallScore = pqcScore.overall_score;
+                  const overallGrade = pqcScore.overall_grade || 'N/A';
+                  const securityLevel = pqcScore.security_level;
+                  
+                  // Get key metrics
+                  const getMetrics = () => {
+                    if (!hasData) return [];
+                    const normalizedData = os === 'Windows'
+                      ? result.audit_results
+                      : result.audit_results.with_sudo || result.audit_results.without_sudo || result.audit_results;
+                    
+                    if (os === 'Linux') {
+                      return [
+                        { label: 'Ciphers', value: normalizedData.openssl_crypto?.cipher_information?.total_ciphers || 0 },
+                        { label: 'Certs', value: normalizedData.certificates?.certificates?.length || 0 },
+                        { label: 'Grade', value: overallGrade, valueClassName: overallGrade?.startsWith('A') ? 'text-success' : overallGrade?.startsWith('B') ? 'text-primary' : 'text-warning' }
+                      ];
+                    } else {
+                      return [
+                        { label: 'Cipher Suites', value: normalizedData.tls_ssl_configuration?.cipher_suites?.total_cipher_suites || 0 },
+                        { label: 'Certs', value: (Object.values(normalizedData.certificate_stores || {}) as any[]).reduce((sum: number, store: any) => sum + (store.certificate_count || 0), 0) },
+                        { label: 'Grade', value: overallGrade, valueClassName: overallGrade?.startsWith('A') ? 'text-success' : overallGrade?.startsWith('B') ? 'text-primary' : 'text-warning' }
+                      ];
+                    }
+                  };
+
+                  return (
+                    <UnifiedResultCard
+                      key={result.result_id}
+                      title={result.agent.hostname}
+                      description={`${result.agent.ip_address} • ${os} • ${new Date(result.submitted_at).toLocaleString()}`}
+                      status={hasData ? 'success' : 'error'}
+                      statusLabel={hasData ? (securityLevel ? `${securityLevel.toUpperCase()} SECURITY` : 'Completed') : 'Failed'}
+                      icon={<Server size={20} className={hasData ? 'text-success' : 'text-destructive'} />}
+                      metrics={hasData ? [
+                        { label: 'PQC Score', value: overallScore !== undefined ? overallScore.toFixed(1) : 'N/A', valueClassName: overallScore >= 75 ? 'text-success' : overallScore >= 50 ? 'text-warning' : 'text-destructive' },
+                        ...getMetrics()
+                      ] : undefined}
+                      actions={[
+                        {
+                          label: "View Results",
+                          icon: <Eye size={16} />,
+                          onClick: () => {
+                            setSelectedAgent(result.agent);
+                            setSelectedResult(result);
+                            setCurrentPage('result-detail');
+                            setActiveTab('dashboard');
+                          },
+                          variant: "outline"
+                        }
+                      ]}
+                    >
+                      {!hasData && (
+                        <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                          <div className="flex items-center gap-2 text-destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <p className="text-sm">Scan failed - no audit data available</p>
+                          </div>
+                        </div>
+                      )}
+                    </UnifiedResultCard>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {activeTab === 'downloads' && (
@@ -2384,6 +2581,8 @@ const AgentRow: React.FC<{
   retryingResults: Set<string>;
   getRelativeTime: (date: string) => string;
   onNavigateToResults: (agent: Agent) => void;
+  onDeleteAgent: (agentId: string, hostname: string) => void;
+  isDeleting: boolean;
 }> = ({
   agent,
   info,
@@ -2401,7 +2600,9 @@ const AgentRow: React.FC<{
   onRetryFetch,
   retryingResults,
   getRelativeTime,
-  onNavigateToResults
+  onNavigateToResults,
+  onDeleteAgent,
+  isDeleting
 }) => {
     const isScanning = isScanTriggered || (info?.in_progress_tasks ?? 0) > 0;
 
@@ -2435,6 +2636,13 @@ const AgentRow: React.FC<{
                 <div className="text-xs text-muted-foreground font-mono mt-0.5">
                   ID: {agent.agent_id.substring(0, 12)}
                 </div>
+                {(agent.organization_name || agent.suborganization_name) && (
+                  <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                    {agent.organization_name && <span>{agent.organization_name}</span>}
+                    {agent.suborganization_name && <span> → {agent.suborganization_name}</span>}
+                    {agent.application_name && <span className="text-muted-foreground"> / {agent.application_name}</span>}
+                  </div>
+                )}
               </div>
             </div>
           </td>
@@ -2482,21 +2690,41 @@ const AgentRow: React.FC<{
           </td>
 
           <td className="px-6 py-4 text-center">
-            <Button
-              onClick={(e) => {
-                e.stopPropagation();
-                onTriggerScan();
-              }}
-              disabled={isScanning}
-              size="sm"
-            >
-              <UnifiedActionLoading
-                isLoading={isScanning}
-                loadingText="Scanning..."
-                defaultText="Scan"
-                icon={<Play size={14} className="mr-2" />}
-              />
-            </Button>
+            <div className="flex items-center justify-center gap-2">
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTriggerScan();
+                }}
+                disabled={isScanning}
+                size="sm"
+              >
+                <UnifiedActionLoading
+                  isLoading={isScanning}
+                  loadingText="Scanning..."
+                  defaultText="Scan"
+                  icon={<Play size={14} className="mr-2" />}
+                />
+              </Button>
+              {(agent.status === 'inactive' || agent.status === 'unknown') && (
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteAgent(agent.agent_id, agent.hostname);
+                  }}
+                  disabled={isDeleting}
+                  size="sm"
+                  variant="destructive"
+                  title={`Delete ${agent.status} agent`}
+                >
+                  {isDeleting ? (
+                    <Loader size={14} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                </Button>
+              )}
+            </div>
           </td>
 
           <td className="px-6 py-4 text-center">

@@ -26,13 +26,14 @@ from fastapi.exceptions import RequestValidationError # Import RequestValidation
 from fastapi.responses import JSONResponse # Import JSONResponse
 from pydantic import BaseModel, HttpUrl
 import uvicorn 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, Float
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, Float, JSON
 from sqlalchemy.orm import sessionmaker, relationship, Session
 from sqlalchemy.ext.declarative import declarative_base
 from contextlib import contextmanager
 from logging_config import setup_logging
 from exceptions import APIError
 from logging_middleware import correlation_middleware
+from repo_scoring import RepoScoringEngine
 
 # --- Logging Setup ---
 setup_logging("REPO-SCANNER", logging.DEBUG)
@@ -62,6 +63,9 @@ class Repository(Base):
     total_files_to_scan = Column(Integer, default=0)
     overall_security_score = Column(Float, nullable=True)
     overall_grade = Column(String, nullable=True)
+    migration_plan = Column(JSON, nullable=True)
+    quantum_readiness_detail = Column(JSON, nullable=True)
+    critical_vulnerabilities = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     scan_results = relationship("ScanResult", back_populates="repository", cascade="all, delete-orphan")
 
@@ -90,6 +94,8 @@ class ScanResult(Base):
     quantum_resistance_type = Column(String, nullable=True)  # ✅ NEW: fully_resistant/grover_resistant/vulnerable/deprecated
     deprecated = Column(Boolean, default=False)
     weighted_score = Column(Float, nullable=True)
+    # Comment-aware counts (added by comment-aware scanner)
+    commented_occurrences = Column(Integer, nullable=True, default=0)  # occurrences inside comments
     repository = relationship("Repository", back_populates="scan_results")
     findings = relationship("Finding", back_populates="scan_result", cascade="all, delete-orphan")
 
@@ -155,7 +161,9 @@ async def score_repository_remote(algorithms_dict: Dict) -> Dict:
             "key_size": algo_data.get("key_size"),
             "position": 0,  # Repos don't have position priority
             "context": {
-                "occurrences": algo_data["occurrences"],
+                "occurrences": algo_data["occurrences"],          # real (non-commented)
+                "commented_occurrences": algo_data.get("commented_occurrences", 0),
+                "total_occurrences": algo_data.get("total_occurrences", algo_data["occurrences"]),
                 "files_affected": len(algo_data["files"]),
                 "category": algo_data["category"]
             }
@@ -177,23 +185,50 @@ async def score_repository_remote(algorithms_dict: Dict) -> Dict:
         logger.error(f"Scoring failed: {e}")
         return {"error": str(e)}
 
-# Complete cryptographic patterns from original script
+# ═══════════════════════════════════════════════════════════════════════════════
+# CRYPTO_PATTERNS — Industry-ready cryptographic algorithm detection
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Design principles for FALSE POSITIVE elimination:
+# 1. Use \b word boundaries on ALL patterns
+# 2. Negative lookaheads to exclude variable names, URLs, CSS classes etc.
+# 3. Require cryptographic CONTEXT (API calls, imports, config) not just keywords
+# 4. DES pattern excludes DESCRIBE, DESKTOP, DESIGN, DESTROY, etc.
+# 5. DH pattern excludes DHCP, DHT (BitTorrent), etc.
+# 6. LMS/HQC patterns require uppercase or crypto-context to avoid natural language
+# 7. Falcon excludes bird references, SABER excludes "Sabertooth", etc.
+#
 CRYPTO_PATTERNS = {
-    # Symmetric algorithms
+    # ── Symmetric Encryption ──────────────────────────────────────────────
     'AES': {
-        'patterns': [r'\bAES\b', r'\baes[-_]?(128|192|256)\b', r'AES_', r'Cipher\.AES', r'EVP_aes'],
-        'quantum_resistance_type': 'grover_resistant',  # NEW: Resistant if key >= 256 bits
-        'min_quantum_safe_keysize': 256,  # NEW: Minimum for quantum safety
+        'patterns': [
+            r'\bAES[-_]?(128|192|256)\b',      # AES-256, AES_128, etc.
+            r'\bAES[-_]?(GCM|CBC|CTR|CCM|ECB|CFB|OFB|XTS|SIV)\b',  # AES with mode
+            r'\bCipher\.AES\b',                  # PyCryptodome
+            r'\bEVP_aes_',                        # OpenSSL C API
+            r'\bcrypto[./]aes\b',                 # Go/Node crypto packages
+            r'\bAES\.new\b',                      # PyCrypto/PyCryptodome
+            r'\bjavax\.crypto.*AES\b',            # Java JCA
+            r'\bAes\.(Create|Encrypt|Decrypt)\b', # .NET
+            r'\bAES\b(?![-_]?[a-z]{3,})',         # Bare AES with negative lookahead for non-crypto words
+        ],
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     'ChaCha20': {
-        'patterns': [r'\bChaCha20\b', r'\bchacha20\b', r'CHACHA20', r'EVP_chacha'],
+        'patterns': [
+            r'\bChaCha20\b(?![-_]?Poly)',         # ChaCha20 alone (not ChaCha20-Poly1305)
+            r'\bchacha20\b(?![-_]?poly)',
+            r'\bCHACHA20\b(?![-_]?POLY)',
+            r'\bEVP_chacha20\b',
+        ],
         'quantum_resistance_type': 'grover_resistant',
         'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
     },
     'ChaCha20-Poly1305': {
-        'patterns': [r'\bChaCha20[-_]?Poly1305\b', r'chacha20[-_]poly1305', r'CHACHA20_POLY1305'],
+        'patterns': [r'\bChaCha20[-_]?Poly1305\b', r'\bchacha20[-_]?poly1305\b', r'\bCHACHA20[-_]?POLY1305\b'],
         'quantum_resistance_type': 'grover_resistant',
         'min_quantum_safe_keysize': 256,
         'category': 'Authenticated Encryption'
@@ -223,7 +258,11 @@ CRYPTO_PATTERNS = {
         'category': 'Symmetric Encryption'
     },
     'ARIA': {
-        'patterns': [r'\bARIA\b(?!-)'],
+        'patterns': [
+            r'\bARIA[-_]?(128|192|256)\b',         # ARIA-128, ARIA-256
+            r'\bARIA[-_]?(CBC|GCM|CTR|ECB|CFB)\b', # ARIA with mode
+            r'\bARIA\b(?![-_]?[Ll]abel|[-_]?[Hh]idden|[-_]?[Ll]ive|[-_]?[Rr]ole|[-_]?[Dd]escrib)',  # Exclude HTML aria-*
+        ],
         'quantum_resistance_type': 'grover_resistant',
         'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
@@ -235,43 +274,72 @@ CRYPTO_PATTERNS = {
         'category': 'Symmetric Encryption (Weak)'
     },
     'DES': {
-        'patterns': [r'\bDES\b(?!3|_EDE|C)', r'DES_encrypt', r'EVP_des_'],
+        'patterns': [
+            r'\bDES[-_]encrypt\b',                # OpenSSL API
+            r'\bEVP_des_\w+',                      # OpenSSL EVP
+            r'\bDES[-_]?(CBC|ECB|CFB|OFB)\b',      # DES with mode
+            r'\bDES\.new\b',                       # PyCrypto
+            r'\bCipher\.DES\b',                    # PyCryptodome
+            r'\bDESKeySpec\b',                     # Java
+            r'(?<![A-Za-z])DES(?![A-Za-z]|CRIB|CRIPT|IGN|TINY|TROY|KTOP|K_)',  # Bare DES, excluding DESCRIBE/DESIGN/DESKTOP/DESTROY
+        ],
         'quantum_resistance_type': 'deprecated',
         'min_quantum_safe_keysize': None,
         'category': 'Symmetric Encryption (Broken)'
     },
     'RC4': {
-        'patterns': [r'\bRC4\b', r'\brc4\b', r'ARC4', r'ARCFOUR'],
+        'patterns': [r'\bRC4\b', r'\brc4\b', r'\bARC4\b', r'\bARCFOUR\b'],
         'quantum_resistance_type': 'deprecated',
         'min_quantum_safe_keysize': None,
         'category': 'Stream Cipher (Broken)'
     },
     'GCM': {
-        'patterns': [r'\bGCM\b', r'\bgcm\b', r'Galois.*Counter', r'AES.*GCM'],
-        'quantum_resistance_type': 'mode',  # Not an algorithm itself
+        'patterns': [
+            r'[-_]GCM\b',                          # AES-GCM, AES_GCM
+            r'\bGCM[-_]',                           # GCM-SHA256 etc.
+            r'\bGalois[/\s]*Counter[/\s]*Mode\b',
+            r'\bmode[=:\s]+["\']?GCM\b',           # mode=GCM, mode: GCM
+        ],
+        'quantum_resistance_type': 'mode',
         'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode (AEAD)'
     },
     'CBC': {
-        'patterns': [r'\bCBC\b', r'\bcbc\b', r'Cipher.*Block.*Chaining'],
+        'patterns': [
+            r'[-_]CBC\b',                           # AES-CBC, DES_CBC
+            r'\bCBC[-_]',                           # CBC-MAC etc.
+            r'\bmode[=:\s]+["\']?CBC\b',           # mode=CBC
+            r'\bCipher[./]Block[./]Chaining\b',
+        ],
         'quantum_resistance_type': 'mode',
         'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode'
     },
     'CTR': {
-        'patterns': [r'\bCTR\b(?!L)', r'\bctr\b', r'Counter.*Mode'],
+        'patterns': [
+            r'[-_]CTR\b',                           # AES-CTR
+            r'\bmode[=:\s]+["\']?CTR\b',
+            r'\bCounter[/\s]*Mode\b',
+        ],
         'quantum_resistance_type': 'mode',
         'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode'
     },
     'CCM': {
-        'patterns': [r'\bCCM\b', r'\bccm\b', r'Counter.*CBC.*MAC'],
+        'patterns': [
+            r'[-_]CCM\b',                           # AES-CCM
+            r'\bmode[=:\s]+["\']?CCM\b',
+        ],
         'quantum_resistance_type': 'mode',
         'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode (AEAD)'
     },
     'ECB': {
-        'patterns': [r'\bECB\b', r'\becb\b', r'Electronic.*Codebook'],
+        'patterns': [
+            r'[-_]ECB\b',                           # AES-ECB
+            r'\bmode[=:\s]+["\']?ECB\b',
+            r'\bElectronic[/\s]*Codebook\b',
+        ],
         'quantum_resistance_type': 'mode',
         'min_quantum_safe_keysize': None,
         'category': 'Cipher Mode (Insecure)'
@@ -433,13 +501,24 @@ CRYPTO_PATTERNS = {
         'category': 'Key Exchange'
     },
     'DSA': {
-        'patterns': [r'\bDSA\b(?!A)', r'DSA_', r'Digital Signature Algorithm'],
+        'patterns': [
+            r'\bDSA[-_](sign|verify|key|param)\b',  # Crypto API context
+            r'\bDSA\b(?![-_]?[a-z])',                # Bare DSA, not part of ECDSA
+            r'\bDigital[\s_]Signature[\s_]Algorithm\b',
+            r'\bEVP_PKEY_DSA\b',
+        ],
         'quantum_resistance_type': 'vulnerable',
         'min_quantum_safe_keysize': None,
         'category': 'Digital Signature'
     },
     'DH': {
-        'patterns': [r'\bDiffie[-_]?Hellman\b', r'\bDH\b', r'DHE', r'EVP_PKEY_DH'],
+        'patterns': [
+            r'\bDiffie[-_]?Hellman\b',
+            r'\bDHE[-_]',                            # DHE-RSA, DHE-PSK etc.
+            r'\bEVP_PKEY_DH\b',
+            r'\bDH[-_](param|key|gen)\b',            # DH API context
+            r'\bDH\b(?!CP|T\b|tml|ttp)',             # Bare DH, excluding DHCP, DHT, etc.
+        ],
         'quantum_resistance_type': 'vulnerable',
         'min_quantum_safe_keysize': None,
         'category': 'Key Exchange'
@@ -527,14 +606,21 @@ CRYPTO_PATTERNS = {
         'is_pqc': True
     },
     'Falcon': {
-        'patterns': [r'\bFalcon\b(?!.*[Bb]ird)', r'\bfalcon\b(?!.*bird)'],
+        'patterns': [
+            r'\bFalcon[-_]?(512|1024)\b',           # Falcon with parameter
+            r'\bFalcon\b(?![-_]?(?:[Bb]ird|[Hh]eavy|[Ss]peed|[Cc]rest|[Ee]ye))',  # Falcon not bird
+        ],
         'quantum_resistance_type': 'fully_resistant',
         'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature',
         'is_pqc': True
     },
     'SABER': {
-        'patterns': [r'\bSABER\b', r'\bSaber\b(?!tooth)'],
+        'patterns': [
+            r'\bSABER\b(?!tooth)',
+            r'\bLightSaber\b(?![-_]?(?:[Ss]word|[Ff]ight))',
+            r'\bFireSaber\b',
+        ],
         'quantum_resistance_type': 'fully_resistant',
         'min_quantum_safe_keysize': None,
         'category': 'PQC Key Encapsulation',
@@ -548,14 +634,20 @@ CRYPTO_PATTERNS = {
         'is_pqc': True
     },
     'BIKE': {
-        'patterns': [r'\bBIKE\b(?!-)'],
+        'patterns': [
+            r'\bBIKE[-_]?(L[135])\b',              # BIKE-L1, BIKE-L3, BIKE-L5
+            r'\bBIKE\b(?![-_]?(?:[Ss]hare|[Rr]ack|[Ll]ane|[Rr]ide|[Ss]hop))',  # BIKE not bicycle
+        ],
         'quantum_resistance_type': 'fully_resistant',
         'min_quantum_safe_keysize': None,
         'category': 'PQC Key Encapsulation',
         'is_pqc': True
     },
     'HQC': {
-        'patterns': [r'\bHQC\b'],
+        'patterns': [
+            r'\bHQC[-_]?(128|192|256)\b',           # HQC with parameter
+            r'\bHQC\b(?=.*(?:[Kk]EM|[Ee]ncap|[Dd]ecap|[Cc]rypto|[Pp]ost[-_]?[Qq]uantum))',  # HQC in crypto context
+        ],
         'quantum_resistance_type': 'fully_resistant',
         'min_quantum_safe_keysize': None,
         'category': 'PQC Key Encapsulation',
@@ -576,11 +668,66 @@ CRYPTO_PATTERNS = {
         'is_pqc': True
     },
     'LMS': {
-        'patterns': [r'\bLMS\b(?!-)'],
+        'patterns': [
+            r'\bLMS[-_]?(sign|verify|key)\b',       # LMS in crypto context
+            r'\bHSS[-_]?LMS\b',                     # HSS/LMS hierarchical scheme
+            r'\bLMS\b(?=.*(?:[Ss]ignature|[Hh]ash[-_]?[Bb]ased|[Pp]ost[-_]?[Qq]uantum|NIST))',  # LMS with crypto context
+        ],
         'quantum_resistance_type': 'fully_resistant',
         'min_quantum_safe_keysize': None,
         'category': 'PQC Digital Signature',
         'is_pqc': True
+    },
+    # ── Additional PQC & Hybrid algorithms ────────────────────────────────
+    'McEliece': {
+        'patterns': [r'\bMcEliece\b', r'\bClassic[-_]?McEliece\b', r'\bmceliece\b'],
+        'quantum_resistance_type': 'fully_resistant',
+        'min_quantum_safe_keysize': None,
+        'category': 'PQC Key Encapsulation',
+        'is_pqc': True
+    },
+    'SIKE': {
+        'patterns': [r'\bSIKE\b', r'\bSIDH\b'],
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
+        'category': 'PQC Key Encapsulation (Broken)',
+        'is_pqc': True
+    },
+    'SHAKE128': {
+        'patterns': [r'\bSHAKE[-_]?128\b', r'\bshake128\b'],
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': None,
+        'category': 'Hash Function (XOF)'
+    },
+    'SHAKE256': {
+        'patterns': [r'\bSHAKE[-_]?256\b', r'\bshake256\b'],
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': None,
+        'category': 'Hash Function (XOF)'
+    },
+    'Serpent': {
+        'patterns': [r'\bSerpent\b(?=.*(?:[Cc]ipher|[Ee]ncrypt|[Dd]ecrypt|[Kk]ey|AES))'],
+        'quantum_resistance_type': 'grover_resistant',
+        'min_quantum_safe_keysize': 256,
+        'category': 'Symmetric Encryption'
+    },
+    'IDEA': {
+        'patterns': [r'\bIDEA\b(?=.*(?:[Cc]ipher|[Ee]ncrypt|[Dd]ecrypt|[Kk]ey|[Cc]rypto))'],
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
+        'category': 'Symmetric Encryption (Weak)'
+    },
+    'CAST5': {
+        'patterns': [r'\bCAST5\b', r'\bCAST[-_]128\b'],
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
+        'category': 'Symmetric Encryption (Weak)'
+    },
+    'RC2': {
+        'patterns': [r'\bRC2\b(?=.*(?:[Cc]ipher|[Ee]ncrypt|[Dd]ecrypt|[Kk]ey|[Cc]rypto))'],
+        'quantum_resistance_type': 'deprecated',
+        'min_quantum_safe_keysize': None,
+        'category': 'Symmetric Encryption (Broken)'
     },
 }
 
@@ -595,6 +742,140 @@ CODE_EXTENSIONS = {
     '.md', '.rst', '.txt', '.asciidoc', '.asm', '.s', '.sql', '.proto', 
     '.thrift', '.graphql'
 }
+
+# ---------------------------------------------------------------------------
+# Comment-aware extraction helpers
+# ---------------------------------------------------------------------------
+
+# Language → comment syntax.
+# 'single' : list of line-comment prefixes (stripped as soon as found)
+# 'blk_s'  : block-comment open token
+# 'blk_e'  : block-comment close token
+# 'doc'    : True  → documentation file; only scan inside ``` code fences
+_LANG = {
+    # Python (hash comments; triple-quote docstrings handled separately)
+    '.py':    {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    # Ruby / Shell / YAML / TOML
+    '.rb':    {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.sh':    {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.bash':  {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.zsh':   {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.pl':    {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.yaml':  {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.yml':   {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.toml':  {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    '.r':     {'single': ['#'],          'blk_s': None,  'blk_e': None},
+    # C-family / JVM / JS/TS / Go / Rust / Swift / Kotlin / Dart
+    '.c':     {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.h':     {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.cpp':   {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.hpp':   {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.java':  {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.js':    {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.ts':    {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.jsx':   {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.tsx':   {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.cs':    {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.go':    {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.rs':    {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.swift': {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.kt':    {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.scala': {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.dart':  {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.php':   {'single': ['//', '#'],    'blk_s': '/*',  'blk_e': '*/'},
+    '.m':     {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.mm':    {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.groovy':{'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    # SQL / Lua
+    '.sql':   {'single': ['--'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.lua':   {'single': ['--'],         'blk_s': '--[[', 'blk_e': ']]'},
+    # HTML / CSS – simplified (just skip <!-- --> style)
+    '.html':  {'single': [],             'blk_s': '<!--', 'blk_e': '-->'},
+    '.htm':   {'single': [],             'blk_s': '<!--', 'blk_e': '-->'},
+    '.css':   {'single': [],             'blk_s': '/*',  'blk_e': '*/'},
+    '.scss':  {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    '.sass':  {'single': ['//'],         'blk_s': '/*',  'blk_e': '*/'},
+    # Documentation files – only scan inside ``` … ``` code fences
+    '.md':    {'doc': True},
+    '.rst':   {'doc': True},
+    '.txt':   {'doc': True},
+    '.asciidoc': {'doc': True},
+}
+
+def _find_outside_strings(line: str, token: str) -> Optional[int]:
+    """
+    Return the index of the first occurrence of `token` in `line` that is
+    NOT inside a single- or double-quoted string literal.
+    Returns None if no such occurrence exists.
+
+    This is a best-effort heuristic (handles \\ escapes and mismatched quotes
+    gracefully by falling back to a simple search on error).
+    """
+    in_single = False
+    in_double = False
+    i = 0
+    tlen = len(token)
+    try:
+        while i < len(line):
+            ch = line[i]
+            # Toggle string state (skipping escaped chars)
+            if ch == '\\' and (in_single or in_double):
+                i += 2
+                continue
+            if ch == "'" and not in_double:
+                in_single = not in_single
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+            elif not in_single and not in_double:
+                if line[i:i + tlen] == token:
+                    return i
+            i += 1
+    except Exception:
+        # Fall back: plain search
+        idx = line.find(token)
+        return idx if idx != -1 else None
+    return None
+
+
+def _strip_inline_comment(line: str, single_prefixes: List[str]) -> str:
+    """
+    Remove the inline comment portion from a line (the part starting at the
+    first comment prefix that lies outside string literals).
+    """
+    best = len(line)
+    for prefix in single_prefixes:
+        idx = _find_outside_strings(line, prefix)
+        if idx is not None and idx < best:
+            best = idx
+    return line[:best]
+
+
+def _extract_code_fences(lines: List[str]) -> List[str]:
+    """
+    For documentation files (.md / .rst / .txt), return ONLY the lines that
+    are inside a triple-backtick (```) or triple-tilde (~~~) code fence.
+    Lines outside fences are replaced with empty strings so that line numbers
+    in findings remain valid.
+    """
+    result = []
+    in_fence = False
+    fence_marker = ''
+    for line in lines:
+        stripped = line.strip()
+        if not in_fence:
+            if stripped.startswith('```') or stripped.startswith('~~~'):
+                in_fence = True
+                fence_marker = stripped[:3]
+                result.append('')   # fence open line – don't scan it
+            else:
+                result.append('')   # outside fence – replace with blank
+        else:
+            if stripped.startswith(fence_marker):
+                in_fence = False
+                result.append('')   # fence close line
+            else:
+                result.append(line)
+    return result
 
 def extract_key_size(algorithm: str, match_text: str) -> Optional[int]:
     """Extract key size from algorithm name or context"""
@@ -820,6 +1101,9 @@ class Database:
         repo.last_scanned = datetime.utcnow()
         repo.overall_security_score = scan_data.get('overall_score')
         repo.overall_grade = scan_data.get('overall_grade')
+        repo.migration_plan = scan_data.get('migration_plan')
+        repo.quantum_readiness_detail = scan_data.get('quantum_readiness_detail')
+        repo.critical_vulnerabilities = scan_data.get('critical_vulnerabilities')
         repo.current_status = 'Scan completed successfully'
 
         # Delete old scan results
@@ -832,18 +1116,18 @@ class Database:
                 algorithm=algo,
                 algorithm_type=data.get('algorithm_type'),
                 category=data['category'],
-                # ✅ REMOVED: is_quantum_resistant field (no longer exists)
-                is_pqc=data.get('is_pqc', False),  # True ONLY for actual PQC
-                occurrences=data['occurrences'],
+                is_pqc=data.get('is_pqc', False),
+                occurrences=data['occurrences'],          # real (non-commented) count
+                commented_occurrences=data.get('commented_occurrences', 0),
                 files_affected=len(data['files']),
                 # Scoring data
                 base_score=data.get('base_score'),
                 final_score=data.get('final_score'),
                 grade=data.get('grade'),
                 security_level=data.get('security_level'),
-                quantum_safe=data.get('quantum_safe', False),  # ✅ Correctly calculated
-                quantum_safety_reason=data.get('quantum_safety_reason'),  # ✅ NEW
-                quantum_resistance_type=data.get('quantum_resistance_type'),  # ✅ NEW
+                quantum_safe=data.get('quantum_safe', False),
+                quantum_safety_reason=data.get('quantum_safety_reason'),
+                quantum_resistance_type=data.get('quantum_resistance_type'),
                 deprecated=data.get('deprecated', False),
                 weighted_score=data.get('weighted_score'),
             )
@@ -894,18 +1178,18 @@ class Database:
             algorithms[sr.algorithm] = {
                 'category': sr.category,
                 'algorithm_type': sr.algorithm_type,
-                # ✅ REMOVED: is_quantum_resistant field (no longer exists)
-                'is_pqc': sr.is_pqc,  # True ONLY for actual PQC
-                'occurrences': sr.occurrences,
+                'is_pqc': sr.is_pqc,
+                'occurrences': sr.occurrences,                  # real (non-commented)
+                'commented_occurrences': sr.commented_occurrences or 0,
                 'files_affected': sr.files_affected,
                 'base_score': sr.base_score,
                 'final_score': sr.final_score,
                 'grade': sr.grade,
                 'deprecated': sr.deprecated,
                 'security_level': sr.security_level,
-                'quantum_safe': sr.quantum_safe,  # ✅ PRIMARY field
-                'quantum_safety_reason': sr.quantum_safety_reason,  # ✅ NEW
-                'quantum_resistance_type': sr.quantum_resistance_type,  # ✅ NEW
+                'quantum_safe': sr.quantum_safe,
+                'quantum_safety_reason': sr.quantum_safety_reason,
+                'quantum_resistance_type': sr.quantum_resistance_type,
                 'weighted_score': sr.weighted_score,
             }
 
@@ -960,7 +1244,10 @@ class Database:
             'quantum_readiness_percentage': round(quantum_readiness_percentage, 2),
             'total_files_to_scan': repo.total_files_to_scan,
             'algorithms': algorithms,
-            'category_scores': category_scores
+            'category_scores': category_scores,
+            'migration_plan': repo.migration_plan,
+            'quantum_readiness_detail': repo.quantum_readiness_detail,
+            'critical_vulnerabilities': repo.critical_vulnerabilities,
         }
 
     def get_all_scans(self, db: Session, limit: int = 100, offset: int = 0) -> List[Dict]:
@@ -1078,29 +1365,144 @@ class CryptoScanner:
         return code_files
 
     def scan_file(self, file_path: Path) -> Dict[str, List[Dict]]:
-        """Scan a single file for cryptographic algorithms"""
+        """Scan a single file for cryptographic algorithms – comment-aware."""
         results = defaultdict(list)
-        
+        ext = file_path.suffix.lower()
+        lang = _LANG.get(ext, {})
+
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-                lines = content.split('\n')
-                
+            lines = content.split('\n')
+
+            # ── Documentation files: only scan inside ``` code fences ──────────
+            if lang.get('doc'):
+                lines = _extract_code_fences(lines)
+
+            single_prefixes  = lang.get('single', [])
+            blk_s            = lang.get('blk_s')
+            blk_e            = lang.get('blk_e')
+            is_python        = (ext == '.py')
+
+            in_block_comment = False   # inside /* … */ style block comment
+            in_py_docstring  = False   # inside Python """ / ''' docstring
+            py_ds_delim      = ''      # which delimiter opened the docstring
+
+            for line_num, raw_line in enumerate(lines, 1):
+                line = raw_line
+
+                # ── Python triple-quote docstring tracking ──────────────────
+                if is_python:
+                    stripped = line.strip()
+                    if not in_py_docstring:
+                        # Look for opening triple-quote anywhere on the line
+                        for delim in ('"""', "'''"):
+                            first = line.find(delim)
+                            if first != -1:
+                                # Check if it also closes on the same line
+                                second = line.find(delim, first + 3)
+                                if second != -1:
+                                    # Inline docstring: strip from first to end of second+3
+                                    line = line[:first] + line[second + 3:]
+                                else:
+                                    # Docstring opens but does not close on this line
+                                    line = line[:first]
+                                    in_py_docstring = True
+                                    py_ds_delim = delim
+                                break
+                    else:
+                        # Inside a Python docstring – skip until closing delimiter
+                        close = line.find(py_ds_delim)
+                        if close != -1:
+                            line = line[close + 3:]   # resume scanning after close
+                            in_py_docstring = False
+                            py_ds_delim = ''
+                        else:
+                            line = ''  # Entire line inside docstring
+
+                # ── Block-comment tracking (C-style, SQL, HTML …) ──────────
+                if blk_s and blk_e:
+                    if in_block_comment:
+                        close = line.find(blk_e)
+                        if close != -1:
+                            line = line[close + len(blk_e):]   # resume after */
+                            in_block_comment = False
+                        else:
+                            line = ''   # whole line is inside block comment
+                    # (Re-check on the same line in case block closed above)
+                    if not in_block_comment and blk_s in line:
+                        open_idx = _find_outside_strings(line, blk_s)
+                        if open_idx is not None:
+                            # Check whether the block also closes on this line
+                            close_idx = line.find(blk_e, open_idx + len(blk_s))
+                            if close_idx != -1:
+                                # Inline block: /* … */ – strip just that part
+                                line = line[:open_idx] + line[close_idx + len(blk_e):]
+                            else:
+                                line = line[:open_idx]
+                                in_block_comment = True
+
+                # ── Strip single-line comment suffix ───────────────────────
+                if single_prefixes and line:
+                    line = _strip_inline_comment(line, single_prefixes)
+
+                # ── Check if original line was a pure comment line ──────────
+                original_stripped = raw_line.strip()
+                pure_comment = False
+                if single_prefixes:
+                    pure_comment = any(original_stripped.startswith(p)
+                                       for p in single_prefixes)
+                if blk_s and original_stripped.startswith(blk_s):
+                    pure_comment = True
+                # Python docstring lines
+                if is_python and original_stripped.startswith(('"""', "'''")):
+                    pure_comment = True
+
+                # ── Run patterns against the scannable portion ──────────────
+                if not line.strip():
+                    # Line is empty after stripping (pure comment, blank, or fully inside
+                    # a block comment).  If it was a pure comment line we still want to
+                    # record the matches as `is_commented=True` so that the
+                    # `commented_occurrences` counter is accurate.
+                    if pure_comment and original_stripped:
+                        for algo, patterns in self.compiled_patterns.items():
+                            matched_this_line = False
+                            for pattern, _ in patterns:
+                                if matched_this_line:
+                                    break
+                                for match in pattern.finditer(original_stripped):
+                                    results[algo].append({
+                                        'file':         str(file_path.relative_to(self.repo_path)),
+                                        'line':         line_num,
+                                        'context':      original_stripped,
+                                        'match':        match.group(),
+                                        'key_size':     extract_key_size(algo, match.group()),
+                                        'is_commented': True,
+                                    })
+                                    matched_this_line = True
+                                    break
+                    continue  # nothing left to scan for active-code matches
+
                 for algo, patterns in self.compiled_patterns.items():
-                    for pattern, pattern_str in patterns:
-                        for line_num, line in enumerate(lines, 1):
-                            matches = pattern.finditer(line)
-                            for match in matches:
-                                results[algo].append({
-                                    'file': str(file_path.relative_to(self.repo_path)),
-                                    'line': line_num,
-                                    'context': line.strip(),
-                                    'match': match.group(),
-                                    'key_size': extract_key_size(algo, match.group())
-                                })
+                    matched_this_line = False
+                    for pattern, _ in patterns:
+                        if matched_this_line:
+                            break  # One match per algorithm per line — no duplicates
+                        for match in pattern.finditer(line):
+                            results[algo].append({
+                                'file':         str(file_path.relative_to(self.repo_path)),
+                                'line':         line_num,
+                                'context':      raw_line.strip(),   # show full original line
+                                'match':        match.group(),
+                                'key_size':     extract_key_size(algo, match.group()),
+                                'is_commented': pure_comment,       # False for mixed lines
+                            })
+                            matched_this_line = True
+                            break  # Only one match per pattern per line
+
         except Exception:
             pass
-        
+
         return results
     
     def get_results(self) -> Dict:
@@ -1110,34 +1512,52 @@ class CryptoScanner:
         for algo in self.findings.keys():
             info = CRYPTO_PATTERNS.get(algo, {})
             occurrences = self.findings[algo]
-            unique_files = set(occ['file'] for occ in occurrences)
-            
-            # ✅ Get classification from pattern (not safety determination yet)
+
+            # ── Split commented vs. real (active-code) occurrences ──────────
+            real_occurrences      = [o for o in occurrences if not o.get('is_commented', False)]
+            commented_occurrences = [o for o in occurrences if     o.get('is_commented', False)]
+
+            # Only consider files that contain *real* (non-commented) usages
+            unique_files_real = set(occ['file'] for occ in real_occurrences)
+            unique_files_all  = set(occ['file'] for occ in occurrences)
+
+            # Skip algorithms that appear ONLY in comments – they are not active usages
+            if not real_occurrences:
+                logger.debug(f"Skipping '{algo}' – found only in comments ({len(commented_occurrences)} commented occurrence(s))")
+                continue
+
             is_true_pqc = info.get('is_pqc', False)
 
-            # Get the most common key size for this algorithm
-            key_sizes = [occ.get('key_size') for occ in occurrences if occ.get('key_size')]
-            most_common_key_size = None
-            if key_sizes:
-                most_common_key_size = max(set(key_sizes), key=key_sizes.count)
+            # Key-size: derive from real occurrences first, fall back to all
+            key_sizes = [o.get('key_size') for o in real_occurrences if o.get('key_size')]
+            if not key_sizes:
+                key_sizes = [o.get('key_size') for o in occurrences if o.get('key_size')]
+            most_common_key_size = (
+                max(set(key_sizes), key=key_sizes.count) if key_sizes else None
+            )
             
             algo_data = {
                 'name': algo,
                 'category': info.get('category', 'Unknown'),
-                # ✅ REMOVED: quantum_resistant field
-                'is_pqc': is_true_pqc,  # True PQC flag
-                'occurrences': len(occurrences),
-                'files': list(unique_files),
-                'findings': occurrences,
-                'key_size': most_common_key_size
+                'is_pqc': is_true_pqc,
+                # Primary occurrence count = only lines of REAL, active code
+                'occurrences': len(real_occurrences),
+                # Still expose the full picture for reporting
+                'commented_occurrences': len(commented_occurrences),
+                'total_occurrences': len(occurrences),
+                'files': list(unique_files_real),
+                'all_files': list(unique_files_all),
+                'findings': real_occurrences,           # only real usages in findings
+                'commented_findings': commented_occurrences,
+                'key_size': most_common_key_size,
+                'quantum_resistance_type': info.get('quantum_resistance_type'),
             }
             
             algorithms_data[algo] = algo_data
             
         return {
             'total_files': self.file_count,
-            'total_algorithms': len(self.findings),
-            # ✅ Counts will be calculated after scoring with correct logic
+            'total_algorithms': len(algorithms_data),
             'quantum_safe_count': 0,
             'quantum_vulnerable_count': 0,
             'algorithms': algorithms_data
@@ -1188,18 +1608,15 @@ async def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
                     )
                 scanner.file_count = scanned_count
                 
-            # Get results and score them remotely
+            # Get results and score them using local independent scoring engine
             results = scanner.get_results()
             
-            scoring_response = await score_repository_remote(results['algorithms'])
-            
-            if 'error' in scoring_response:
-                raise Exception(f"Scoring service failed: {scoring_response['error']}")
+            scoring_engine = RepoScoringEngine()
+            scoring_response = scoring_engine.score_algorithms(results['algorithms'])
 
-            # Merge scored data back
+            # Merge scored data back — local engine returns algorithm_scores as a dict
             scored_results = {}
-            for algo_score in scoring_response.get("algorithm_scores", []):
-                algo_name = algo_score["algorithm"]
+            for algo_name, algo_score in scoring_response.get("algorithm_scores", {}).items():
                 if algo_name in results['algorithms']:
                     original_data = results['algorithms'][algo_name]
                     scored_results[algo_name] = {**original_data, **algo_score}
@@ -1207,8 +1624,14 @@ async def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
             results['algorithms'] = scored_results
             results['overall_score'] = scoring_response.get('overall_score')
             results['overall_grade'] = scoring_response.get('overall_grade')
-            results['category_scores'] = scoring_response.get('components')
+            results['category_scores'] = scoring_response.get('category_scores')
+            results['migration_plan'] = scoring_response.get('migration_plan')
+            results['quantum_readiness_detail'] = scoring_response.get('quantum_readiness_detail')
+            results['critical_vulnerabilities'] = scoring_response.get('critical_vulnerabilities')
             results['total_files'] = scanned_count
+            # Calculate correct counts AFTER scoring
+            results['quantum_safe_count'] = scoring_response.get('quantum_safe_count', 0)
+            results['quantum_vulnerable_count'] = scoring_response.get('quantum_vulnerable_count', 0)
             
             db_manager.save_scan_results(db, repo_id, results)
             
@@ -1318,9 +1741,9 @@ class ScanQueueResponse(BaseModel):
 class ScanResultItem(BaseModel):
     category: str
     algorithm_type: Optional[str] = None
-    # ✅ REMOVED: quantum_resistant field
     is_pqc: bool  # True ONLY for actual PQC algorithms (Kyber, Dilithium, etc.)
-    occurrences: int
+    occurrences: int              # real (non-commented) occurrences only
+    commented_occurrences: Optional[int] = 0   # occurrences found inside comments
     files_affected: int
     base_score: Optional[float] = None
     final_score: Optional[float] = None
@@ -1382,6 +1805,9 @@ class ScanDetailsResponse(BaseModel):
     quantum_readiness_percentage: Optional[float] = None
     algorithms: Dict[str, ScanResultItem]
     category_scores: Optional[Dict[str, CategoryScoreItem]] = None
+    migration_plan: Optional[Dict[str, Any]] = None
+    quantum_readiness_detail: Optional[Dict[str, Any]] = None
+    critical_vulnerabilities: Optional[List[str]] = None
     cached: Optional[bool] = None
     message: Optional[str] = None
 
@@ -1458,88 +1884,6 @@ async def generic_exception_handler(request: Request, exc: Exception):
             }
         }
     )
-
-def calculate_repo_overall_score(scored_algorithms: Dict) -> Dict:
-    """
-    Calculate weighted overall score AND category-wise scores for a repository.
-    Returns dict with overall score, grade, and category breakdowns.
-    """
-    if not scored_algorithms:
-        return {
-            'overall_score': 0.0,
-            'overall_grade': 'F',
-            'category_scores': {}
-        }
-    
-    # Group algorithms by their algorithm_type (kex, signature, symmetric, hash)
-    categories = {}
-    for algo_name, data in scored_algorithms.items():
-        algo_type = data.get('algorithm_type', 'unknown')
-        
-        if algo_type not in categories:
-            categories[algo_type] = {
-                'algorithms': [],
-                'total_weighted_score': 0,
-                'total_weight': 0
-            }
-        
-        occurrences = data['occurrences']
-        occurrence_weight = min(occurrences, 50)
-        
-        # Higher weight for critical security categories
-        category = data['category']
-        category_weight = 2.0 if category in [
-            'Asymmetric Encryption', 'Digital Signature', 'Key Exchange',
-            'PQC Digital Signature', 'PQC Key Encapsulation', 'PQC Encryption'
-        ] else 1.0
-        
-        weight = occurrence_weight * category_weight
-        
-        categories[algo_type]['algorithms'].append({
-            'name': algo_name,
-            'final_score': data['final_score'],
-            'grade': data['grade'],
-            'weight': weight
-        })
-        categories[algo_type]['total_weighted_score'] += data['final_score'] * weight
-        categories[algo_type]['total_weight'] += weight
-    
-    # Calculate category scores
-    pqc_analyzer = PQCAnalyzer()
-    category_scores = {}
-    
-    for cat_type, cat_data in categories.items():
-        if cat_data['total_weight'] > 0:
-            avg_score = cat_data['total_weighted_score'] / cat_data['total_weight']
-            category_scores[cat_type] = {
-                'score': round(avg_score, 2),
-                'grade': pqc_analyzer.score_to_grade(avg_score),
-                'algorithm_count': len(cat_data['algorithms']),
-                'best_algorithm': max(cat_data['algorithms'], key=lambda x: x['final_score'])['name'],
-                'worst_algorithm': min(cat_data['algorithms'], key=lambda x: x['final_score'])['name'],
-            }
-    
-    # Calculate overall score from category scores
-    # Weight categories by importance
-    CATEGORY_WEIGHTS = {
-        'kex': 0.35, 'signature': 0.30, 'symmetric': 0.20, 'hash': 0.15
-    }
-    
-    total_weighted_score = 0
-    total_weight = 0
-    
-    for cat_type, cat_score_data in category_scores.items():
-        weight = CATEGORY_WEIGHTS.get(cat_type, 0.1)
-        total_weighted_score += cat_score_data['score'] * weight
-        total_weight += weight
-    
-    overall_score = total_weighted_score / total_weight if total_weight > 0 else 0.0
-    
-    return {
-        'overall_score': round(overall_score, 2),
-        'overall_grade': pqc_analyzer.score_to_grade(overall_score),
-        'category_scores': category_scores
-    }
 
 class GitHubBranchFetcher:
     """Fetch branches from GitHub/GitLab/Bitbucket APIs"""

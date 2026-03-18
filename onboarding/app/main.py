@@ -13,7 +13,7 @@ from typing import List, Optional, Dict, Any
 import pandas as pd
 import httpx
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import io
 import uuid
 from enum import Enum
@@ -28,6 +28,13 @@ from exceptions import APIError # Import APIError
 # Setup unified logging
 setup_logging("ONBOARDING-SERVICE", logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- IST Timezone Configuration ---
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_now():
+    """Get current time in IST timezone"""
+    return datetime.now(IST).replace(tzinfo=None)  # Store without timezone info for consistency
 
 app = FastAPI(title="Excel Batch Scanner API", version="1.0.0")
 app.middleware("http")(correlation_middleware) # Add correlation middleware
@@ -80,12 +87,14 @@ TLS_SCANNER_URL = os.getenv("TLS_SCANNER_URL", "http://localhost:8000")
 REPO_SCANNER_URL = os.getenv("REPO_SCANNER_URL", "http://localhost:8003")
 MAX_CONCURRENT_SCANS = int(os.getenv("MAX_CONCURRENT_SCANS", "5"))
 DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db-service:8001")
+SYSTEM_SCAN_URL = os.getenv("SYSTEM_SCAN_URL", "http://system-scan:9000")
 
 # Add debug logging
 logger.info(f"Configuration loaded:")
 logger.info(f"   TLS_SCANNER_URL: {TLS_SCANNER_URL}")
 logger.info(f"   REPO_SCANNER_URL: {REPO_SCANNER_URL}")
 logger.info(f"   DB_SERVICE_URL: {DB_SERVICE_URL}")
+logger.info(f"   SYSTEM_SCAN_URL: {SYSTEM_SCAN_URL}")
 logger.info(f"   MAX_CONCURRENT_SCANS: {MAX_CONCURRENT_SCANS}")
 
 # GitHub API Configuration
@@ -220,6 +229,98 @@ class OnboardingPayload(BaseModel):
     created_by: Optional[str] = None
 
 
+# ==================== AGENT REGISTRATION HELPER ====================
+
+async def register_server_as_agent(server: dict, org_context: dict = None) -> dict:
+    """
+    Register a server as an agent in the system-scan service.
+    This pre-registers the agent so when the actual agent is installed, 
+    it will match by IP and become active.
+    
+    Args:
+        server: Server dict with ip_address, hostname, server_name, operating_system
+        org_context: Dict with organization_name, suborganization_name, application_name
+        
+    Returns:
+        dict with registration result
+    """
+    ip_address = server.get("ip_address")
+    if not ip_address:
+        logger.warning(f"Server {server.get('server_name', 'unknown')} has no IP address, skipping agent registration")
+        return {"success": False, "reason": "no_ip_address"}
+    
+    # Generate a placeholder agent_id (will be replaced when real agent connects)
+    agent_id = f"onboarded_{uuid.uuid4()}"
+    hostname = server.get("hostname") or server.get("server_name") or f"server-{ip_address}"
+    os_info = server.get("operating_system") or "Unknown OS (Pending Agent Installation)"
+    
+    # Extract organization context
+    org_context = org_context or {}
+    
+    registration_payload = {
+        "agent_id": agent_id,
+        "hostname": hostname,
+        "ip_address": ip_address,
+        "os_info": os_info,
+        "timestamp": get_ist_now().isoformat(),  # Use IST
+        # Organization tracking
+        "organization_name": org_context.get("organization_name"),
+        "suborganization_name": org_context.get("suborganization_name") or server.get("suborganization_name"),
+        "application_name": org_context.get("application_name") or server.get("application_name")
+    }
+    
+    try:
+        response = await call_service(
+            "POST", 
+            f"{SYSTEM_SCAN_URL}/api/v1/agent/register", 
+            json=registration_payload,
+            timeout=10.0
+        )
+        result = response.json()
+        registered_agent_id = result.get("agent_id", agent_id)
+        logger.info(f"Registered server {hostname} ({ip_address}) as agent {registered_agent_id} [Org: {org_context.get('organization_name')}, SubOrg: {org_context.get('suborganization_name')}]")
+        
+        # Trigger a pending scan for this agent (will execute when agent becomes active)
+        try:
+            scan_response = await call_service(
+                "POST",
+                f"{SYSTEM_SCAN_URL}/api/v1/admin/trigger-scan/{registered_agent_id}",
+                timeout=10.0
+            )
+            scan_result = scan_response.json()
+            logger.info(f"Pre-created scan task for agent {registered_agent_id}: {scan_result.get('task_id', 'unknown')}")
+        except Exception as scan_err:
+            logger.warning(f"Could not pre-create scan task for {registered_agent_id}: {scan_err}")
+        
+        return {"success": True, "agent_id": registered_agent_id, "ip_address": ip_address}
+    except Exception as e:
+        logger.exception(f"Failed to register server {hostname} ({ip_address}) as agent: {e}")
+        return {"success": False, "reason": str(e), "ip_address": ip_address}
+
+
+async def register_servers_as_agents(servers: list, org_context: dict = None) -> list:
+    """
+    Register multiple servers as agents in parallel.
+    
+    Args:
+        servers: List of server dicts
+        org_context: Dict with organization_name, suborganization_name, application_name
+        
+    Returns:
+        List of registration results
+    """
+    if not servers:
+        return []
+    
+    tasks = [register_server_as_agent(server, org_context) for server in servers]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    successful = sum(1 for r in results if isinstance(r, dict) and r.get("success"))
+    logger.info(f"Registered {successful}/{len(servers)} servers as agents")
+    
+    return results
+
+
 # ==================== GITHUB INTEGRATION HELPERS AND ENDPOINTS ====================
 
 async def fetch_repo_branches(owner: str, repo_name: str) -> List[str]:
@@ -341,86 +442,51 @@ class TLSScanRow(BaseModel):
 
 
 async def scan_single_tls_domain(domain: str) -> ScanResult:
-    """Scan a single domain using TLS scanner with queue-based API and polling."""
+    """Scan a single domain using TLS scanner with direct API call."""
     logger.info(f"🔍 Initiating TLS scan for domain: {domain}")
     try:
-        # Step 1: Create scan request (queue-based)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Use direct /scan endpoint for single-scan architecture
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{TLS_SCANNER_URL}/create-scan-request",
-                json={"domain": domain},
-                timeout=30.0
+                f"{TLS_SCANNER_URL}/scan",
+                json={
+                    "domain": domain,
+                    "max_concurrent": 1,
+                    "save_to_db": True
+                },
+                timeout=120.0
             )
             response.raise_for_status()
-            batch_data = response.json()
-            batch_id = batch_data.get('batch_id')
+            scan_data = response.json()
             
-            if not batch_id:
-                logger.error(f"Failed to get batch_id for {domain}")
+            # The /scan endpoint returns the result directly (not in a results array)
+            # Check for scan_status in the response
+            status = scan_data.get('scan_status', 'unknown')
+            
+            if status == 'completed':
+                logger.info(f"✅ TLS scan completed successfully for {domain}")
+                return ScanResult(
+                    domain_or_repo=domain,
+                    status="completed",
+                    timestamp=datetime.utcnow()
+                )
+            elif status == 'http_skipped':
+                logger.warning(f"⚠️ TLS scan skipped for {domain} - HTTP only")
+                return ScanResult(
+                    domain_or_repo=domain,
+                    status="http_skipped",
+                    error="Domain uses HTTP only, no TLS",
+                    timestamp=datetime.utcnow()
+                )
+            else:
+                error_msg = scan_data.get('error_message', 'Unknown error')
+                logger.error(f"❌ TLS scan failed for {domain}: {error_msg}")
                 return ScanResult(
                     domain_or_repo=domain,
                     status="failed",
-                    error="Failed to create scan request",
+                    error=error_msg,
                     timestamp=datetime.utcnow()
                 )
-            
-            logger.info(f"📝 Scan queued for {domain}, batch_id: {batch_id}")
-            
-            # Step 2: Poll for completion
-            max_polls = 120  # 120 polls * 5 seconds = 10 minutes max wait
-            poll_interval = 5  # 5 seconds between polls
-            
-            for poll_count in range(max_polls):
-                await asyncio.sleep(poll_interval)
-                
-                # Get batch status
-                status_response = await client.get(
-                    f"{TLS_SCANNER_URL}/batch/{batch_id}",
-                    timeout=10.0
-                )
-                status_response.raise_for_status()
-                batch_status = status_response.json()
-                
-                status = batch_status.get('status')
-                logger.debug(f"📊 Poll {poll_count + 1}/{max_polls} for {domain}: status={status}")
-                
-                if status == 'completed':
-                    successful = batch_status.get('successful_count', 0)
-                    failed = batch_status.get('failed_count', 0)
-                    
-                    if successful > 0:
-                        logger.info(f"TLS scan completed successfully for {domain}")
-                        return ScanResult(
-                            domain_or_repo=domain,
-                            status="completed",
-                            timestamp=datetime.utcnow()
-                        )
-                    else:
-                        logger.error(f"TLS scan failed for {domain}: {failed} failed")
-                        return ScanResult(
-                            domain_or_repo=domain,
-                            status="failed",
-                            error=f"Scan completed but failed ({failed} failures)",
-                            timestamp=datetime.utcnow()
-                        )
-                
-                elif status == 'failed':
-                    logger.error(f"TLS scan batch failed for {domain}")
-                    return ScanResult(
-                        domain_or_repo=domain,
-                        status="failed",
-                        error="Scan batch marked as failed",
-                        timestamp=datetime.utcnow()
-                    )
-            
-            # Timeout after max polls
-            logger.error(f"⏱️ TLS scan for {domain} timed out after {max_polls * poll_interval} seconds")
-            return ScanResult(
-                domain_or_repo=domain,
-                status="failed",
-                error=f"Scan timeout ({max_polls * poll_interval} seconds exceeded)",
-                timestamp=datetime.utcnow()
-            )
 
     except httpx.TimeoutException:
         logger.error(f"⏱️ TLS scan request for {domain} timed out.")
@@ -895,11 +961,15 @@ async def api_onboarding(
 
     # 3) Create bulk servers
     created_servers = []
+    all_servers_for_agent_registration = []  # Collect all servers for agent registration
     if payload.servers:
         try:
             servers_payload = [s.model_dump() for s in payload.servers]
             svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_payload)
             created_servers = svr_resp.json()
+            # Add organization name for agent registration
+            servers_for_agents = [{**s.model_dump(), "organization_name": payload.organization.organization_name} for s in payload.servers]
+            all_servers_for_agent_registration.extend(servers_for_agents)
             logger.info(f"Created {len(created_servers)} servers for org {org_id}")
         except Exception as e:
             logger.exception(f"Failed to create servers: {e}")
@@ -953,13 +1023,33 @@ async def api_onboarding(
 
                     # Servers
                     if app_payload.servers:
-                        servers_payload = []
+                        servers_db_payload = []  # For db-service (clean, no extra fields)
+                        servers_agent_payload = []  # For agent registration (with org names)
                         for s in app_payload.servers:
-                            sd = {**s.model_dump(), "organization_id": org_id, "suborganization_id": suborg_id, "application_id": app_id}
-                            servers_payload.append(sd)
+                            # Clean payload for db-service
+                            sd_db = {
+                                **s.model_dump(), 
+                                "organization_id": org_id, 
+                                "suborganization_id": suborg_id, 
+                                "application_id": app_id
+                            }
+                            servers_db_payload.append(sd_db)
+                            
+                            # Full payload for agent registration (includes names)
+                            sd_agent = {
+                                **s.model_dump(),
+                                "organization_id": org_id, 
+                                "suborganization_id": suborg_id, 
+                                "application_id": app_id,
+                                "organization_name": payload.organization.organization_name,
+                                "suborganization_name": so.suborganization_name,
+                                "application_name": app_payload.application_name
+                            }
+                            servers_agent_payload.append(sd_agent)
                         try:
-                            svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_payload)
-                            logger.info(f"Created {len(servers_payload)} servers for app {app_id}")
+                            svr_resp = await call_service("POST", f"{DB_SERVICE_URL}/organizations/{org_id}/servers/bulk", json=servers_db_payload)
+                            all_servers_for_agent_registration.extend(servers_agent_payload)  # Add to agent registration list
+                            logger.info(f"Created {len(servers_db_payload)} servers for app {app_id}")
                         except Exception as e:
                             logger.exception(f"Failed to create app servers for app {app_id}: {e}")
 
@@ -1052,6 +1142,21 @@ async def api_onboarding(
         except Exception as e:
             logger.exception(f"Failed to schedule TLS/domain scan job {scan_job_id}: {e}")
 
+    # 6b) Register servers as agents in system-scan service (for Crypto Inventory)
+    registered_agents = []
+    if all_servers_for_agent_registration:
+        try:
+            logger.info(f"Registering {len(all_servers_for_agent_registration)} servers as agents for Crypto Inventory...")
+            # Pass organization context for tracking
+            org_context = {
+                "organization_name": payload.organization.organization_name
+            }
+            registered_agents = await register_servers_as_agents(all_servers_for_agent_registration, org_context)
+            successful_registrations = sum(1 for r in registered_agents if isinstance(r, dict) and r.get("success"))
+            logger.info(f"Successfully registered {successful_registrations}/{len(all_servers_for_agent_registration)} servers as agents")
+        except Exception as e:
+            logger.exception(f"Failed to register servers as agents (non-blocking): {e}")
+
     # 7) Create onboarding batch tracking record
     onboarding_batch_id = None
     try:
@@ -1079,9 +1184,10 @@ async def api_onboarding(
         "created_repositories": len(created_repos),
         "created_servers": len(created_servers),
         "created_domains": len(created_domains),
+        "registered_agents": len([r for r in registered_agents if isinstance(r, dict) and r.get("success")]),
         "onboarding_job": job_data if 'job_data' in locals() else None,
         "triggered_scans": triggered_scans,
-        "message": "Onboarding accepted; scans queued (if any)."
+        "message": "Onboarding accepted; scans queued (if any). Servers registered as agents in Crypto Inventory."
     }
 
 
@@ -1439,6 +1545,243 @@ async def delete_batch_job(job_id: str):
         del sse_queues[job_id]
     
     return {"message": "Job deleted successfully"}
+
+
+# ==================== CSV TEMPLATE & UNIFIED CSV ONBOARDING ====================
+
+CSV_TEMPLATE_HEADER = [
+    "organization_name",
+    "organization_email",
+    "suborganization_name",
+    "application_name",
+    "repo_url",
+    "repo_name",
+    "branch_to_scan",
+    "domain",
+    "hostname",
+    "ip_address",
+    "operating_system"
+]
+
+CSV_TEMPLATE_EXAMPLE_ROWS = [
+    ["Acme Corp", "security@acme.com", "Cloud Division", "Web App", "https://github.com/acme/webapp", "webapp", "main", "www.acme.com", "web-server-1", "192.168.1.10", "Linux"],
+    ["Acme Corp", "security@acme.com", "Cloud Division", "Web App", "https://github.com/acme/api", "api", "develop", "api.acme.com", "", "", ""],
+    ["Acme Corp", "security@acme.com", "Cloud Division", "Mobile App", "", "", "", "mobile.acme.com", "mobile-server-1", "192.168.1.20", "Linux"],
+    ["Acme Corp", "security@acme.com", "Enterprise Division", "ERP System", "https://github.com/acme/erp", "erp", "main", "erp.acme.com", "erp-server-1", "192.168.2.10", "Windows"],
+]
+
+
+@app.get("/api/onboarding/csv-template",
+         summary="Download CSV template for onboarding",
+         description="Returns a CSV template file that can be filled out and uploaded for onboarding.")
+async def download_csv_template():
+    """Generate and return a CSV template file for onboarding."""
+    import csv
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header
+    writer.writerow(CSV_TEMPLATE_HEADER)
+    
+    # Write example rows
+    for row in CSV_TEMPLATE_EXAMPLE_ROWS:
+        writer.writerow(row)
+    
+    # Prepare response
+    output.seek(0)
+    content = output.getvalue()
+    
+    return StreamingResponse(
+        io.BytesIO(content.encode('utf-8')),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=onboarding_template.csv"
+        }
+    )
+
+
+def parse_csv_to_json_payload(df: pd.DataFrame, created_by: Optional[str] = None) -> dict:
+    """
+    Convert a flat CSV DataFrame to hierarchical JSON payload for onboarding.
+    
+    CSV columns:
+    - organization_name, organization_email
+    - suborganization_name, application_name
+    - repo_url, repo_name, branch_to_scan
+    - domain
+    - hostname, ip_address, operating_system
+    
+    Each row represents one resource (repo, domain, or server) within an app/suborg/org hierarchy.
+    """
+    # Normalize column names
+    df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
+    
+    # Get organization info from first non-null row
+    org_name = None
+    org_email = None
+    for _, row in df.iterrows():
+        if pd.notna(row.get('organization_name')):
+            org_name = str(row['organization_name']).strip()
+            org_email = str(row.get('organization_email', '')).strip() if pd.notna(row.get('organization_email')) else None
+            break
+    
+    if not org_name:
+        raise ValueError("organization_name is required in CSV")
+    
+    # Build hierarchical structure
+    # Structure: org -> suborgs -> apps -> (repos, domains, servers)
+    suborgs_map = {}  # suborg_name -> {apps: {app_name -> {repos, domains, servers}}}
+    
+    for _, row in df.iterrows():
+        suborg_name = str(row.get('suborganization_name', '')).strip() if pd.notna(row.get('suborganization_name')) else None
+        app_name = str(row.get('application_name', '')).strip() if pd.notna(row.get('application_name')) else None
+        
+        # Skip rows without suborg or app
+        if not suborg_name or not app_name:
+            continue
+        
+        # Initialize suborg if not exists
+        if suborg_name not in suborgs_map:
+            suborgs_map[suborg_name] = {"apps": {}}
+        
+        # Initialize app if not exists
+        if app_name not in suborgs_map[suborg_name]["apps"]:
+            suborgs_map[suborg_name]["apps"][app_name] = {
+                "repositories": [],
+                "domains": [],
+                "servers": []
+            }
+        
+        app_data = suborgs_map[suborg_name]["apps"][app_name]
+        
+        # Add repository if present
+        repo_url = str(row.get('repo_url', '')).strip() if pd.notna(row.get('repo_url')) else None
+        if repo_url:
+            repo_name = str(row.get('repo_name', '')).strip() if pd.notna(row.get('repo_name')) else repo_url.split('/')[-1]
+            branch = str(row.get('branch_to_scan', 'main')).strip() if pd.notna(row.get('branch_to_scan')) else 'main'
+            # Avoid duplicates
+            if not any(r['repo_url'] == repo_url for r in app_data["repositories"]):
+                app_data["repositories"].append({
+                    "repo_url": repo_url,
+                    "repo_name": repo_name,
+                    "branch_to_scan": branch
+                })
+        
+        # Add domain if present
+        domain = str(row.get('domain', '')).strip() if pd.notna(row.get('domain')) else None
+        if domain:
+            # Avoid duplicates
+            if not any(d['domain'] == domain for d in app_data["domains"]):
+                app_data["domains"].append({"domain": domain})
+        
+        # Add server if present
+        hostname = str(row.get('hostname', '')).strip() if pd.notna(row.get('hostname')) else None
+        ip_address = str(row.get('ip_address', '')).strip() if pd.notna(row.get('ip_address')) else None
+        if hostname or ip_address:
+            os_type = str(row.get('operating_system', 'Linux')).strip() if pd.notna(row.get('operating_system')) else 'Linux'
+            # Avoid duplicates
+            server_key = (hostname, ip_address)
+            if not any((s.get('hostname'), s.get('ip_address')) == server_key for s in app_data["servers"]):
+                app_data["servers"].append({
+                    "hostname": hostname,
+                    "ip_address": ip_address,
+                    "operating_system": os_type
+                })
+    
+    # Convert to JSON payload format
+    suborganizations = []
+    for suborg_name, suborg_data in suborgs_map.items():
+        applications = []
+        for app_name, app_resources in suborg_data["apps"].items():
+            applications.append({
+                "application_name": app_name,
+                "repositories": app_resources["repositories"],
+                "domains": app_resources["domains"],
+                "servers": app_resources["servers"]
+            })
+        suborganizations.append({
+            "suborganization_name": suborg_name,
+            "applications": applications
+        })
+    
+    payload = {
+        "organization": {
+            "organization_name": org_name,
+            "organization_email": org_email
+        },
+        "suborganizations": suborganizations,
+        "created_by": created_by
+    }
+    
+    return payload
+
+
+@app.post("/api/onboarding/csv",
+          summary="Onboard organization via unified CSV file",
+          description="""
+          Accepts a single CSV file with all organization data in a flat format.
+          The CSV is converted to JSON and processed the same way as JSON onboarding.
+          
+          CSV Columns:
+          - organization_name, organization_email (required for at least one row)
+          - suborganization_name, application_name (required to group resources)
+          - repo_url, repo_name, branch_to_scan (optional - for repositories)
+          - domain (optional - for TLS scanning)
+          - hostname, ip_address, operating_system (optional - for servers)
+          
+          Download the template from /api/onboarding/csv-template
+          """)
+async def onboarding_csv_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="CSV file with organization data"),
+    created_by: Optional[str] = None
+):
+    """Process unified CSV file and onboard organization."""
+    logger.info(f"Received CSV onboarding upload: {file.filename}")
+    
+    # Validate file type
+    if not file.filename.endswith('.csv'):
+        raise APIError(
+            status_code=400, 
+            error_code="invalid_file_type", 
+            message="File must be a CSV file (.csv)"
+        )
+    
+    try:
+        # Read and parse CSV
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content))
+        
+        if df.empty:
+            raise APIError(
+                status_code=400, 
+                error_code="empty_csv", 
+                message="CSV file is empty"
+            )
+        
+        logger.info(f"Parsed CSV with {len(df)} rows and columns: {list(df.columns)}")
+        
+        # Convert CSV to JSON payload
+        payload_dict = parse_csv_to_json_payload(df, created_by)
+        
+        logger.info(f"Converted CSV to payload: org={payload_dict['organization']['organization_name']}, "
+                   f"suborgs={len(payload_dict.get('suborganizations', []))}")
+        
+        # Parse into Pydantic model
+        payload = OnboardingPayload.parse_obj(payload_dict)
+        
+        # Reuse the JSON onboarding flow
+        return await api_onboarding(background_tasks, payload)
+        
+    except ValueError as e:
+        logger.error(f"CSV validation error: {e}")
+        raise APIError(status_code=400, error_code="csv_validation_error", message=str(e))
+    except pd.errors.EmptyDataError:
+        raise APIError(status_code=400, error_code="empty_csv", message="CSV file is empty or invalid")
+    except Exception as e:
+        logger.exception(f"Failed to process CSV onboarding: {e}")
+        raise APIError(status_code=500, error_code="csv_processing_failed", message=str(e))
 
 
 # ==================== HEALTH CHECK ====================

@@ -506,10 +506,30 @@ export const PQCExpandedResultModal: React.FC<{
                         <div>
                           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Best Algorithm</span>
                           <p className="font-mono text-sm mt-1">{comp.best_algorithm || 'N/A'}</p>
+                          {comp.best_algorithm_context?.source_type && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              <span className="font-medium">Source:</span> {comp.best_algorithm_context.source_type}
+                            </p>
+                          )}
+                          {comp.best_algorithm_context?.location && (
+                            <code className="text-[10px] text-muted-foreground/80 block mt-0.5 break-all">
+                              {comp.best_algorithm_context.location}
+                            </code>
+                          )}
                         </div>
                         <div>
                           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Worst Algorithm</span>
                           <p className="font-mono text-sm mt-1">{comp.worst_algorithm || 'N/A'}</p>
+                          {comp.worst_algorithm_context?.source_type && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              <span className="font-medium">Source:</span> {comp.worst_algorithm_context.source_type}
+                            </p>
+                          )}
+                          {comp.worst_algorithm_context?.location && (
+                            <code className="text-[10px] text-muted-foreground/80 block mt-0.5 break-all">
+                              {comp.worst_algorithm_context.location}
+                            </code>
+                          )}
                         </div>
                       </div>
 

@@ -1,265 +1,212 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, FileText, Hash, Zap } from 'lucide-react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
+import {
+  ChevronDown, FileText, Shield, AlertTriangle, CheckCircle, AlertCircle,
+  Search, Server, Key, Hash, Lock, Globe, Database, Zap, Monitor,
+  TrendingDown, TrendingUp, Calendar, XCircle, Loader2, Eye, GitBranch,
+  Package, Info
+} from 'lucide-react';
 import { Button } from "@/components/ui/button";
-import { UnifiedMetricCard, UnifiedBackButton } from "@/components/ui/unified";
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { UnifiedBackButton } from "@/components/ui/unified";
 import { ScanDetail, Algorithm } from './types';
+import AlgorithmFindingsModal from './AlgorithmFindingsModal';
+import RepoSuggestionsPanel from './RepoSuggestionsPanel';
 
 const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL;
 
-// Helper function to get color for letter grades
-const getGradeColor = (grade: string): string => {
-  if (!grade) return 'text-zinc-500';
-  const letter = grade.charAt(0);
-  switch (letter) {
-    case 'A': return 'text-emerald-600 dark:text-emerald-400';
-    case 'B': return 'text-primary';
-    case 'C': return 'text-warning';
-    case 'D': return 'text-orange-600 dark:text-orange-400';
-    case 'F': return 'text-rose-600 dark:text-rose-400';
-    default: return 'text-zinc-600 dark:text-zinc-400';
-  }
+const formatRepoName = (url: string): string => {
+  try {
+    return url
+      .replace(/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//, '')
+      .replace(/\.git$/, '');
+  } catch { return url; }
 };
 
-// Helper function to get color for score progress bars
-const getScoreBarColor = (score: number): string => {
-  if (score >= 90) return 'bg-emerald-500';
-  if (score >= 80) return 'bg-primary';
-  if (score >= 70) return 'bg-warning';
-  if (score >= 60) return 'bg-orange-500';
-  return 'bg-rose-500';
+// ── shared color helpers ──────────────────────────────────────────────────────
+const gradeColor = (g: string) => {
+  if (!g) return 'text-muted-foreground';
+  const u = g.toUpperCase();
+  if (u.startsWith('A')) return 'text-emerald-500';
+  if (u.startsWith('B')) return 'text-blue-500';
+  if (u.startsWith('C')) return 'text-amber-500';
+  if (u.startsWith('D')) return 'text-orange-500';
+  return 'text-red-500';
+};
+const scoreColor = (s: number) => {
+  if (s >= 90) return 'text-emerald-500';
+  if (s >= 75) return 'text-blue-500';
+  if (s >= 60) return 'text-amber-500';
+  if (s >= 45) return 'text-orange-500';
+  return 'text-red-500';
+};
+const scoreBg = (s: number) => {
+  if (s >= 90) return 'bg-emerald-500';
+  if (s >= 75) return 'bg-blue-500';
+  if (s >= 60) return 'bg-amber-500';
+  if (s >= 45) return 'bg-orange-500';
+  return 'bg-red-500';
+};
+const scoreBarBg = (s: number) => {
+  if (s >= 90) return 'bg-emerald-500/20';
+  if (s >= 75) return 'bg-blue-500/20';
+  if (s >= 60) return 'bg-amber-500/20';
+  if (s >= 45) return 'bg-orange-500/20';
+  return 'bg-red-500/20';
 };
 
-// Helper function to get risk level information
-const getRiskLevelInfo = (score: number): { label: string; color: string; description: string } => {
-  if (score >= 90) return {
-    label: 'Low Risk',
-    color: 'text-emerald-600 dark:text-emerald-400',
-    description: 'Excellent cryptographic security posture'
+const typeIcon = (t: string) => {
+  const icons: Record<string, React.ReactNode> = {
+    kex: <Key className="w-4 h-4" />,
+    signature: <Shield className="w-4 h-4" />,
+    symmetric: <Lock className="w-4 h-4" />,
+    hash: <Hash className="w-4 h-4" />,
   };
-  if (score >= 80) return {
-    label: 'Medium-Low Risk',
-    color: 'text-primary',
-    description: 'Good security with minor improvements needed'
+  return icons[t] || <Shield className="w-4 h-4" />;
+};
+const typeBadgeColor = (t: string) => {
+  const m: Record<string, string> = {
+    kex: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+    signature: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+    symmetric: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    hash: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
   };
-  if (score >= 70) return {
-    label: 'Medium Risk',
-    color: 'text-warning',
-    description: 'Adequate security but needs attention'
-  };
-  if (score >= 60) return {
-    label: 'Medium-High Risk',
-    color: 'text-orange-600 dark:text-orange-400',
-    description: 'Significant security concerns present'
-  };
-  return {
-    label: 'High Risk',
-    color: 'text-rose-600 dark:text-rose-400',
-    description: 'Critical security vulnerabilities detected'
-  };
+  return m[t] || 'bg-muted text-muted-foreground';
+};
+const categoryLabel = (c: string) => {
+  const m: Record<string, string> = { kex: 'Key Exchange', signature: 'Signatures', symmetric: 'Symmetric', hash: 'Hash' };
+  return m[c] || c;
 };
 
-// Helper function to display category names nicely
-const getCategoryDisplayName = (category: string): string => {
-  const names: Record<string, string> = {
-    'kex': 'Key Exchange',
-    'signature': 'Digital Signatures',
-    'symmetric': 'Symmetric Encryption',
-    'hash': 'Hash Functions'
-  };
-  return names[category] || category;
-};
-
-// Add this helper function at the top of your component
-const isDataReady = (scanDetail: ScanDetail | null): boolean => {
-  if (!scanDetail) return false;
-  
-  // Check if critical data is loaded
-  const hasBasicData = !!(
-    scanDetail.overall_security_score !== undefined &&
-    scanDetail.overall_grade &&
-    scanDetail.quantum_readiness_percentage !== undefined
-  );
-  
-  return hasBasicData;
-};
-
-const SkeletonCard = () => (
-  <div className="bg-card/60 rounded-2xl p-6 border backdrop-blur-sm animate-pulse h-48">
-    <div className="h-4 bg-muted/50 rounded w-1/3 mb-6"></div>
-    <div className="flex items-end gap-3 mb-6">
-        <div className="h-12 bg-muted/50 rounded w-16"></div>
-        <div className="h-8 bg-muted/50 rounded w-8"></div>
-    </div>
-    <div className="h-3 bg-muted/50 rounded-full w-full"></div>
+// ── shared sub-components ─────────────────────────────────────────────────────
+const StatPill: React.FC<{ label: string; value: React.ReactNode; color?: string }> = ({ label, value, color = 'text-foreground' }) => (
+  <div className="flex flex-col items-center px-4 py-3 bg-muted/40 rounded-xl border border-border/50">
+    <span className={`text-2xl font-black tabular-nums ${color}`}>{value}</span>
+    <span className="text-xs text-muted-foreground mt-0.5 whitespace-nowrap">{label}</span>
   </div>
 );
 
-interface AlgorithmSectionProps {
-  title: string;
-  description: string;
-  algorithms: (Algorithm & { name: string })[];
-  type: 'safe' | 'unsafe' | 'pqc';
-  onViewOccurrences: (algorithmName: string) => void;
-}
-
-const AlgorithmSection: React.FC<AlgorithmSectionProps> = ({ title, description, algorithms, type, onViewOccurrences }) => {
-  const getBorderColor = () => {
-    switch (type) {
-      case 'pqc': return 'border-blue-500';
-      case 'safe': return 'border-emerald-500';
-      case 'unsafe': return 'border-rose-500';
-    }
-  };
-
-  const getBadgeColor = () => {
-    switch (type) {
-      case 'pqc': return 'bg-primary/10 dark:bg-primary/30 text-primary';
-      case 'safe': return 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
-      case 'unsafe': return 'bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300';
-    }
-  };
-
-  const getIcon = () => {
-    switch (type) {
-      case 'pqc': return <Shield className="w-5 h-5 text-primary" />;
-      case 'safe': return <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />;
-      case 'unsafe': return <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400" />;
-    }
-  };
-
+const ScoreRing: React.FC<{ score: number; grade: string }> = ({ score, grade }) => {
+  const r = 52;
+  const circ = 2 * Math.PI * r;
+  const filled = (score / 100) * circ;
+  const color =
+    score >= 90 ? '#10b981' : score >= 75 ? '#3b82f6' : score >= 60 ? '#f59e0b' : score >= 45 ? '#f97316' : '#ef4444';
   return (
-    <div className="mb-6">
-      <div className={`flex items-center justify-between p-6 ${
-        type === 'pqc' 
-          ? 'bg-primary/5 dark:bg-primary/40' 
-          : type === 'safe' 
-          ? 'bg-emerald-50 dark:bg-emerald-950/40'
-          : 'bg-rose-50 dark:bg-rose-950/40'
-      } border-2 ${getBorderColor()} rounded-2xl shadow-[0_4px_14px_rgba(0,0,0,0.06)] backdrop-blur-sm`}>
-        <div>
-          <div className="flex items-center gap-4 text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight mb-3">
-            <span>{title}</span>
-          </div>
-          <div className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-            {description}
-          </div>
-        </div>
-        <span className={`px-4 py-2 rounded-xl text-sm font-bold shadow-lg ${getBadgeColor()} border-2 ${
-          type === 'pqc' ? 'border-blue-200 dark:border-blue-900' :
-          type === 'safe' ? 'border-emerald-200 dark:border-emerald-900' :
-          'border-rose-200 dark:border-rose-900'
-        }`}>
-          {algorithms.length} Found
-        </span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-        {algorithms.map((algo, idx) => (
-          <div key={`${algo.name}-${idx}`} className="bg-card text-card-foreground border rounded-xl p-6 shadow-md hover:shadow-lg hover:scale-[1.01] transition-all duration-300 cursor-pointer">
-            {/* Algorithm Name and Grade */}
-            <div className="flex items-start justify-between mb-4">
-              <div className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                {algo.name}
-              </div>
-              {algo.grade && (
-                <div className={`text-3xl font-bold ${getGradeColor(algo.grade)}`}>
-                  {algo.grade}
-                </div>
-              )}
-            </div>
-            
-            {/* Category and Type */}
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-4 font-bold">
-              {algo.category}
-            </div>
-            
-            {/* Security Level Badge */}
-            {algo.security_level && (
-              <div className="mb-4 flex flex-wrap gap-2">
-                <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold ${
-                  algo.security_level === 'critical' 
-                    ? 'bg-destructive/10 text-destructive' 
-                    : algo.security_level === 'high' 
-                    ? 'bg-success/10 text-success'
-                    : algo.security_level === 'medium' 
-                    ? 'bg-warning/10 text-warning'
-                    : 'bg-muted text-muted-foreground'
-                }`}>
-                  {algo.security_level.toUpperCase()} SECURITY
-                </span>
-                {algo.deprecated && (
-                  <span className="inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-600">
-                    DEPRECATED
-                  </span>
-                )}
-              </div>
-            )}
-            
-            {/* Usage Statistics */}
-            <div className="flex gap-6 pt-4 border-t mb-4">
-              <div className="bg-muted/30 rounded-lg px-3 py-2 flex-1">
-                <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">Occurrences</span>
-                <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.occurrences}</span>
-              </div>
-              <div className="bg-muted/30 rounded-lg px-3 py-2 flex-1">
-                <span className="text-muted-foreground font-semibold uppercase tracking-wide text-[10px] block mb-1">Files</span>
-                <span className="text-slate-900 dark:text-slate-100 font-bold text-lg">{algo.files_affected || 0}</span>
-              </div>
-            </div>
-            
-            {/* Quantum Safety Section */}
-            {algo.quantum_safe !== undefined && (
-              <div className="pt-4 border-t mb-4">
-                {/* Quantum Safety Status */}
-                <div className={`flex items-center gap-2 text-sm font-bold mb-3 ${
-                  algo.quantum_safe ? 'text-success' : 'text-destructive'
-                }`}>
-                  {algo.quantum_safe ? 'Quantum-Safe' : 'Quantum-Vulnerable'}
-                </div>
-                
-                {/* Explanation */}
-                {algo.quantum_safety_reason && (
-                  <div className="text-xs text-muted-foreground mt-3 leading-relaxed bg-muted/50 p-3 rounded-lg border">
-                    {algo.quantum_safety_reason}
-                  </div>
-                )}
-                
-                {/* Classification Badge */}
-                {algo.quantum_resistance_type && (
-                  <div className="mt-3">
-                    <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold ${
-                      algo.quantum_resistance_type === 'fully_resistant'
-                        ? 'bg-primary/10 text-primary'
-                        : algo.quantum_resistance_type === 'grover_resistant'
-                        ? 'bg-primary/10 text-primary'
-                        : algo.quantum_resistance_type === 'vulnerable'
-                        ? 'bg-destructive/10 text-destructive'
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
-                      {algo.quantum_resistance_type.replace('_', ' ').toUpperCase()}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* View Occurrences Button */}
-            <Button 
-              variant="default"
-              className="w-full"
-              onClick={() => onViewOccurrences(algo.name)}
-            >
-              <Eye className="h-4 w-4 mr-2" />
-              View Occurrences
-            </Button>
-          </div>
-        ))}
+    <div className="relative flex-shrink-0">
+      <svg width="128" height="128" viewBox="0 0 128 128" className="-rotate-90">
+        <circle cx="64" cy="64" r={r} fill="none" stroke="currentColor" strokeWidth="10" className="text-muted/30" />
+        <circle cx="64" cy="64" r={r} fill="none" stroke={color} strokeWidth="10"
+          strokeDasharray={`${filled} ${circ}`} strokeLinecap="round"
+          style={{ transition: 'stroke-dasharray 1s ease' }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-3xl font-black tabular-nums" style={{ color }}>{grade || 'F'}</span>
+        <span className="text-xs font-semibold text-muted-foreground">{score.toFixed(1)}</span>
       </div>
     </div>
   );
 };
 
-import AlgorithmFindingsModal from './AlgorithmFindingsModal';
+const CategoryBar: React.FC<{ name: string; score: number; grade: string; count: number }> = ({ name, score, grade, count }) => (
+  <div className="flex items-center gap-3">
+    <div className="w-32 flex-shrink-0 flex items-center gap-1.5">
+      <span className="text-muted-foreground">{typeIcon(name)}</span>
+      <span className="text-xs font-medium text-muted-foreground truncate">{categoryLabel(name)}</span>
+    </div>
+    <div className={`flex-1 h-2.5 rounded-full overflow-hidden ${scoreBarBg(score)}`}>
+      <div className={`h-full rounded-full ${scoreBg(score)} transition-all duration-700`} style={{ width: `${score}%` }} />
+    </div>
+    <div className="w-24 flex-shrink-0 flex items-center gap-2 justify-end">
+      <span className="text-[10px] text-muted-foreground">{count} algo{count !== 1 ? 's' : ''}</span>
+      <span className={`text-sm font-bold tabular-nums ${scoreColor(score)}`}>{score.toFixed(0)}</span>
+      <span className={`text-sm font-black ${gradeColor(grade)}`}>{grade}</span>
+    </div>
+  </div>
+);
 
+// ── Repo-specific AlgoRow ─────────────────────────────────────────────────────
+const AlgoRow: React.FC<{
+  name: string;
+  algo: Algorithm;
+  onViewOccurrences: (name: string) => void;
+}> = ({ name, algo, onViewOccurrences }) => {
+  const [open, setOpen] = useState(false);
+  const score = algo.final_score ?? 0;
+  const cat = algo.algorithm_type || algo.category || '';
+
+  return (
+    <div className={`border rounded-lg overflow-hidden transition-colors ${open ? 'border-border' : 'border-border/60'}`}>
+      <button onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors text-left">
+        <div className={`w-14 h-7 rounded flex items-center justify-center text-xs font-bold flex-shrink-0 text-white ${scoreBg(score)}`}>
+          {score.toFixed(0)}
+        </div>
+        <span className="font-mono text-sm font-semibold flex-1 min-w-0 truncate">{name}</span>
+        <span className="text-xs text-muted-foreground flex-shrink-0 hidden sm:block tabular-nums">
+          {algo.occurrences} use{algo.occurrences !== 1 ? 's' : ''}
+        </span>
+        <span className="text-xs text-muted-foreground flex-shrink-0 hidden sm:block tabular-nums">
+          {algo.files_affected} file{algo.files_affected !== 1 ? 's' : ''}
+        </span>
+        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold flex-shrink-0 hidden sm:block ${typeBadgeColor(cat)}`}>
+          {cat}
+        </span>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {algo.quantum_safe
+            ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+            : <AlertCircle className="h-3.5 w-3.5 text-red-400/70" />}
+          {algo.is_pqc && <span className="px-1.5 py-0.5 text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded font-semibold">PQC</span>}
+          {algo.deprecated && <span className="px-1.5 py-0.5 text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded font-semibold">OLD</span>}
+        </div>
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-2 border-t bg-muted/10 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Quantum Safety</p>
+              <span className={`px-2.5 py-1 rounded text-xs font-bold ${algo.quantum_safe ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'}`}>
+                {algo.quantum_safe ? 'Quantum-Safe' : 'Quantum-Vulnerable'}
+              </span>
+              {algo.quantum_resistance_type && (
+                <p className="text-xs text-muted-foreground mt-2 capitalize">{algo.quantum_resistance_type.replace(/_/g, ' ')}</p>
+              )}
+              {algo.quantum_safety_reason && (
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{algo.quantum_safety_reason}</p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Usage in Codebase</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-muted-foreground">Active usages</span><span className="font-semibold">{algo.occurrences}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Files affected</span><span className="font-semibold">{algo.files_affected}</span></div>
+                {(algo.commented_occurrences ?? 0) > 0 && (
+                  <div className="flex justify-between"><span className="text-muted-foreground">In comments</span><span className="text-muted-foreground">{algo.commented_occurrences}</span></div>
+                )}
+              </div>
+              <Button variant="outline" size="sm" className="mt-3 h-7 text-xs"
+                onClick={e => { e.stopPropagation(); onViewOccurrences(name); }}>
+                <Eye className="h-3 w-3 mr-1" /> View in files
+              </Button>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Scoring</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-muted-foreground">Base score</span><span>{algo.base_score?.toFixed(1) ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Final score</span><span className={`font-bold ${scoreColor(score)}`}>{score.toFixed(1)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Grade</span><span className={`font-bold ${gradeColor(algo.grade)}`}>{algo.grade}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Security level</span><span className="capitalize">{algo.security_level || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Deprecated</span><span className={algo.deprecated ? 'text-red-500 font-semibold' : 'text-emerald-500'}>{algo.deprecated ? 'Yes' : 'No'}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Main component ────────────────────────────────────────────────────────────
 interface ScanResultsDetailProps {
   scanId: number;
   onBack: () => void;
@@ -269,360 +216,396 @@ const ScanResultsDetail: React.FC<ScanResultsDetailProps> = ({ scanId, onBack })
   const [scanDetail, setScanDetail] = useState<ScanDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'summary' | 'findings' | 'details'>('summary');
+  const [algoFilter, setAlgoFilter] = useState<string>('all');
+  const [qualFilter, setQualFilter] = useState<string>('all');
+  const [algoSearch, setAlgoSearch] = useState('');
+  const [detailSection, setDetailSection] = useState<'migration' | 'quantum' | 'raw'>('migration');
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string | null>(null);
   const [isFindingsModalOpen, setIsFindingsModalOpen] = useState(false);
 
-
   useEffect(() => {
-    const loadScanDetail = async (id: number) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response = await fetch(`${API_URL}/api/scans/${id}`);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch scan details. Status: ${response.status}`);
-        }
-        const data: ScanDetail = await response.json();
-        setScanDetail(data);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load scan details');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadScanDetail(scanId);
+    setIsLoading(true); setError(null);
+    fetch(`${API_URL}/api/scans/${scanId}`)
+      .then(r => { if (!r.ok) throw new Error(`Status ${r.status}`); return r.json(); })
+      .then((data: ScanDetail) => setScanDetail(data))
+      .catch(e => setError(e.message || 'Failed to load scan details'))
+      .finally(() => setIsLoading(false));
   }, [scanId]);
 
-  const renderContent = () => {
-    if (isLoading) {
-      return (
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-center space-y-6">
-            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-            <div className="space-y-2">
-              <p className="text-base font-bold text-foreground">Loading scan details</p>
-              <p className="text-sm text-muted-foreground font-medium">Please wait...</p>
-            </div>
-          </div>
-        </div>
+  const algoEntries = useMemo(() => {
+    if (!scanDetail?.algorithms) return [];
+    return Object.entries(scanDetail.algorithms).map(([name, algo]) => ({ name, algo }));
+  }, [scanDetail]);
+
+  const algoTypes = useMemo(() =>
+    Array.from(new Set(algoEntries.map(({ algo }) => algo.algorithm_type || algo.category || ''))).filter(Boolean),
+    [algoEntries]);
+
+  const filtered = useMemo(() => {
+    let list = algoEntries;
+    if (algoFilter !== 'all') list = list.filter(({ algo }) => (algo.algorithm_type || algo.category) === algoFilter);
+    if (qualFilter === 'pqc') list = list.filter(({ algo }) => algo.is_pqc);
+    else if (qualFilter === 'safe') list = list.filter(({ algo }) => algo.quantum_safe && !algo.is_pqc);
+    else if (qualFilter === 'vulnerable') list = list.filter(({ algo }) => !algo.quantum_safe);
+    if (algoSearch) {
+      const q = algoSearch.toLowerCase();
+      list = list.filter(({ name, algo }) =>
+        name.toLowerCase().includes(q) ||
+        (algo.algorithm_type || '').toLowerCase().includes(q) ||
+        (algo.quantum_safety_reason || '').toLowerCase().includes(q)
       );
     }
+    return list;
+  }, [algoEntries, algoFilter, qualFilter, algoSearch]);
 
-    if (error) {
-      return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-6">
-          <div className="text-center max-w-md bg-card text-card-foreground rounded-2xl p-8 shadow-[0_8px_24px_rgba(0,0,0,0.1)] border">
-            <div className="w-20 h-20 bg-gradient-to-br from-rose-100 to-rose-200 dark:from-rose-900/40 dark:to-rose-950/60 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
-              <XCircle className="w-10 h-10 text-rose-600 dark:text-rose-400" />
-            </div>
-            <p className="text-xl font-bold text-foreground mb-3 tracking-tight">Error Loading Scan</p>
-            <p className="text-sm text-muted-foreground leading-relaxed bg-muted/50 p-4 rounded-lg border">
-              {error}
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    // ADD THIS CHECK - Wait for data to be fully ready
-    if (!isDataReady(scanDetail)) {
-      return (
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-center space-y-6">
-            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-            <div className="space-y-2">
-              <p className="text-base font-bold text-foreground">Processing scan data</p>
-              <p className="text-sm text-muted-foreground font-medium">Almost ready...</p>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (!scanDetail) {
-      return <div className="text-center p-10">No scan details found.</div>;
-    }
-
-    const data = scanDetail;
-    const algorithms = data.algorithms || {};
-    const truePQC: (Algorithm & { name: string })[] = [];
-    const quantumSafe: (Algorithm & { name: string })[] = [];
-    const quantumVulnerable: (Algorithm & { name: string })[] = [];
-    
-    Object.entries(algorithms).forEach(([name, info]) => {
-      const algoWithName = { name, ...info };
-      
-      if (info.is_pqc) {
-        truePQC.push(algoWithName);
-      } else if (info.quantum_safe) {
-        quantumSafe.push(algoWithName);
-      } else {
-        quantumVulnerable.push(algoWithName);
-      }
-    });
-
-    const handleViewOccurrences = (algorithmName: string) => {
-      setSelectedAlgorithm(algorithmName);
-      setIsFindingsModalOpen(true);
-    };
-
-    const handleCloseModal = () => {
-      setIsFindingsModalOpen(false);
-      setSelectedAlgorithm(null);
-    };
-
-    const quantumSafeCount = quantumSafe.length;
-    const quantumVulnerableCount = quantumVulnerable.length;
-    const truePQCCount = truePQC.length;
-
-    return (
-      <div className="p-6 bg-background">
-        <div className="bg-card/70 text-card-foreground p-8 rounded-2xl mb-8 shadow-[0_2px_10px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.3)] border backdrop-blur-sm">
-          <div className="space-y-4 text-sm">
-            <div className="flex flex-wrap gap-6 items-center text-sm">
-              <div>
-                <strong>Branch:</strong>{' '}
-                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-primary/5 dark:bg-primary/50 text-primary text-xs font-semibold border border-primary/20 dark:border-primary/90 shadow-sm">
-                  {data.branch_name || 'main'}
-                </span>
-              </div>
-              <div>
-                <strong>Platform:</strong>{' '}
-                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-primary/5 dark:bg-primary/50 text-primary text-xs font-semibold border border-primary/20 dark:border-primary/90 shadow-sm">
-                  {data.platform || 'Unknown'}
-                </span>
-              </div>
-              <div>
-                <strong>Last Scanned:</strong> {new Date(data.last_scanned).toLocaleString()}
-              </div>
-            </div>
-            <div className="mt-3">
-              <strong>Commit Hash:</strong>{' '}
-              <code className="bg-white dark:bg-slate-700 px-2 py-1 rounded text-xs">{data.repo_hash}</code>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-card/80 border rounded-2xl p-10 mb-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-          <div className="mb-8 pb-6 border-b">
-            <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-primary" />
-              </div>
-              Overall Security Assessment
-            </h3>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                Security Score
-              </div>
-              <div className="flex items-end gap-3 mb-4">
-                <div className="text-6xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  {data.overall_security_score?.toFixed(1) ?? 'N/A'}
-                </div>
-                <div className={`text-3xl font-bold mb-2 ${getGradeColor(data.overall_grade ?? '')}`}>
-                  {data.overall_grade ?? 'N/A'}
-                </div>
-              </div>
-              <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner">
-                <div 
-                  className={`h-full transition-all duration-700 ease-out shadow-sm ${getScoreBarColor(data.overall_security_score ?? 0)}`}
-                  style={{ 
-                    width: `${data.overall_security_score ?? 0}%`,
-                    boxShadow: '0 0 10px currentColor'
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                Quantum Readiness
-              </div>
-              <div className="flex items-end gap-2 mb-4">
-                <div className="text-6xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  {data.quantum_readiness_percentage?.toFixed(1) ?? '0.0'}
-                </div>
-                <div className="text-3xl font-bold text-slate-500 dark:text-slate-400 mb-2">%</div>
-              </div>
-              <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                Percentage of cryptographic <span className="font-semibold text-slate-900 dark:text-slate-100">operations</span> (by occurrence count) 
-                using quantum-safe algorithms with adequate key sizes
-                <div className="text-xs mt-2 text-slate-500 dark:text-slate-500 font-medium">
-                  Based on weighted usage, not algorithm count
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                Risk Level
-              </div>
-              <div className={`text-3xl font-bold tracking-tight mb-4 ${getRiskLevelInfo(data.overall_security_score ?? 0).color}`}>
-                {getRiskLevelInfo(data.overall_security_score ?? 0).label}
-              </div>
-              <div className={`inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border ${
-                (data.overall_security_score ?? 0) >= 80 
-                  ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
-                  : (data.overall_security_score ?? 0) >= 60
-                  ? 'bg-warning/5 dark:bg-warning/30 border-warning/20 dark:border-warning/90 text-warning'
-                  : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
-              }`}>
-                {getRiskLevelInfo(data.overall_security_score ?? 0).description}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {data.category_scores && Object.keys(data.category_scores).length > 0 && (
-          <div className="bg-card/80 border rounded-2xl p-10 mb-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-            <div className="mb-8 pb-6 border-b">
-              <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                  <Package className="w-5 h-5 text-primary" />
-                </div>
-                Security by Algorithm Category
-              </h3>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {Object.entries(data.category_scores).map(([category, score]) => (
-                <div key={category} className="bg-card/70 rounded-xl p-6 border shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:shadow-[0_10px_28px_rgba(0,0,0,0.12)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm group">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest">
-                      {getCategoryDisplayName(category)}
-                    </div>
-                    <div className={`text-2xl font-bold ${getGradeColor(score.grade)} group-hover:scale-110 transition-transform`}>
-                      {score.grade}
-                    </div>
-                  </div>
-                  
-                  <div className={`text-5xl font-bold tracking-tight mb-4 ${getGradeColor(score.grade)}`}>
-                    {score.grade}
-                  </div>
-                  <div className="text-xs text-slate-600 dark:text-slate-400 space-y-2 font-medium">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500 dark:text-slate-500">Algorithms</span>
-                      <span className="font-semibold text-slate-900 dark:text-slate-100">{score.algorithm_count}</span>
-                    </div>
-                    <div title={score.best_algorithm}>
-                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Best:</span>
-                      <span className="ml-1 truncate">{score.best_algorithm}</span>
-                    </div>
-                    <div title={score.worst_algorithm}>
-                      <span className="text-rose-600 dark:text-rose-400 font-semibold">Worst:</span>
-                      <span className="ml-1 truncate">{score.worst_algorithm}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-10">
-          <UnifiedMetricCard
-            label="Files Scanned"
-            value={data.total_files || 0}
-            icon={<FileText size={18} />}
-            iconColor="muted"
-          />
-          <UnifiedMetricCard
-            label="Total Algorithms"
-            value={Object.keys(algorithms).length}
-            icon={<Hash size={18} />}
-            iconColor="muted"
-          />
-          <UnifiedMetricCard
-            label="True PQC"
-            value={truePQCCount}
-            description="Kyber, Dilithium, SPHINCS+"
-            icon={<Zap size={18} />}
-            iconColor="primary"
-          />
-          <UnifiedMetricCard
-            label="Quantum-Safe"
-            value={quantumSafeCount}
-            description="AES-256, SHA-512, etc."
-            icon={<Shield size={18} />}
-            iconColor="success"
-          />
-          <UnifiedMetricCard
-            label="Vulnerable"
-            value={quantumVulnerableCount}
-            description="RSA, ECDSA, weak sizes"
-            icon={<AlertTriangle size={18} />}
-            iconColor="destructive"
-          />
-        </div>
-
-        {quantumVulnerable.length > 0 && (
-          <AlgorithmSection 
-            title="Quantum-Vulnerable Algorithms" 
-            description="Will be broken by quantum computers: RSA, ECDSA, DH, or weak parameters (AES-128, SHA-256)" 
-            algorithms={quantumVulnerable} 
-            type="unsafe"
-            onViewOccurrences={handleViewOccurrences}
-          />
-        )}
-        {truePQC.length > 0 && (
-          <AlgorithmSection 
-            title="Post-Quantum Cryptography (PQC)" 
-            description="Mathematically resistant to quantum attacks: Kyber, Dilithium, SPHINCS+, Falcon, NTRU" 
-            algorithms={truePQC} 
-            type="pqc"
-            onViewOccurrences={handleViewOccurrences}
-          />
-        )}
-        {quantumSafe.length > 0 && (
-          <AlgorithmSection 
-            title="Quantum-Safe (Classical)" 
-            description="Classical algorithms with quantum-resistant parameters: AES-256, SHA-512, ChaCha20-256" 
-            algorithms={quantumSafe} 
-            type="safe"
-            onViewOccurrences={handleViewOccurrences}
-          />
-        )}
-        
-        {selectedAlgorithm && (
-          <AlgorithmFindingsModal
-            isOpen={isFindingsModalOpen}
-            onClose={handleCloseModal}
-            scanId={scanId}
-            algorithmName={selectedAlgorithm}
-            scanDetail={scanDetail}
-          />
-        )}
+  // Loading / error states
+  if (isLoading) return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="text-center space-y-4">
+        <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
+        <p className="text-sm font-semibold text-muted-foreground">Loading scan details…</p>
       </div>
-    );
+    </div>
+  );
+  if (error) return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <div className="text-center max-w-md bg-card rounded-2xl p-8 border">
+        <XCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <p className="text-lg font-bold mb-2">Failed to load</p>
+        <p className="text-sm text-muted-foreground">{error}</p>
+      </div>
+    </div>
+  );
+  if (!scanDetail) return null;
+
+  const data = scanDetail;
+  const score = data.overall_security_score ?? 0;
+  const grade = data.overall_grade ?? 'F';
+  const qr = data.quantum_readiness_detail;
+  const truePQC   = algoEntries.filter(({ algo }) => algo.is_pqc).length;
+  const safe      = algoEntries.filter(({ algo }) => algo.quantum_safe && !algo.is_pqc).length;
+  const vuln      = algoEntries.filter(({ algo }) => !algo.quantum_safe).length;
+
+  const riskColor = score >= 80 ? 'text-emerald-500' : score >= 60 ? 'text-amber-500' : score >= 45 ? 'text-orange-500' : 'text-red-500';
+  const riskLabel = score >= 90 ? 'Low Risk' : score >= 80 ? 'Med-Low Risk' : score >= 70 ? 'Medium Risk' : score >= 60 ? 'Med-High Risk' : 'High Risk';
+
+  const migStepColor = (p: string) => {
+    if (p === 'CRITICAL') return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800';
+    if (p === 'HIGH') return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800';
+    if (p === 'MEDIUM') return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+    return 'bg-muted text-muted-foreground border-border';
   };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="bg-card border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-500/40">
-                <Shield className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  Scan Results for {scanDetail?.repo_url || '...'}
-                </h1>
-                <div className="text-sm text-slate-600 dark:text-slate-400 font-medium">Post-Quantum Cryptography Security Analysis</div>
-              </div>
-            </div>
-            <UnifiedBackButton onClick={onBack} label="Back" />
+      {/* STICKY HEADER */}
+      <header className="sticky top-0 z-30 bg-card/95 backdrop-blur border-b border-border">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center gap-3 py-3">
+          <UnifiedBackButton onClick={onBack} label="Back" />
+          <div className="flex items-center gap-2 min-w-0 ml-1">
+            <GitBranch className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+            <span className="font-semibold text-sm truncate">{formatRepoName(data.repo_url)}</span>
+            <span className="text-muted-foreground/40 hidden sm:block">·</span>
+            <span className="text-xs text-muted-foreground hidden sm:block">{data.branch_name}</span>
+          </div>
+          <div className="ml-auto flex-shrink-0">
+            <span className={`text-sm font-black ${gradeColor(grade)}`}>{grade}</span>
+            <span className="text-xs text-muted-foreground ml-1">{score.toFixed(1)}/100</span>
           </div>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto px-6 py-10">
-        {renderContent()}
+
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+        {/* Critical vulns */}
+        {(data.critical_vulnerabilities ?? []).length > 0 && (
+          <div className="flex gap-3 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl">
+            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-red-700 dark:text-red-300 mb-1">Critical vulnerabilities detected</p>
+              <ul className="space-y-0.5">
+                {(data.critical_vulnerabilities ?? []).map((v, i) => <li key={i} className="text-xs text-red-600 dark:text-red-400">• {v}</li>)}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* TAB BAR */}
+        <div className="flex gap-1 border-b border-border">
+          {(['summary', 'findings', 'details'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-5 py-2.5 text-sm font-semibold capitalize transition-all border-b-2 -mb-px ${
+                tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'
+              }`}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* ═══ SUMMARY TAB ═══ */}
+        {tab === 'summary' && (
+          <div className="space-y-5">
+            {/* Score hero */}
+            <div className="bg-card border border-border rounded-2xl p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+                <ScoreRing score={score} grade={grade} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${riskColor === 'text-emerald-500' || riskColor === 'text-blue-500'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                      : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'}`}>
+                      {riskLabel}
+                    </span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                      (qr?.quantum_readiness_percentage ?? data.quantum_readiness_percentage ?? 0) >= 50
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                        : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'
+                    }`}>
+                      {(data.quantum_readiness_percentage ?? 0).toFixed(1)}% Quantum-Ready
+                    </span>
+                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border">{data.platform || 'Unknown platform'}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatPill label="Algorithms" value={algoEntries.length} />
+                    <StatPill label="True PQC" value={truePQC} color="text-blue-500" />
+                    <StatPill label="Quantum-Safe" value={safe} color="text-emerald-500" />
+                    <StatPill label="Vulnerable" value={vuln} color={vuln > 0 ? 'text-red-500' : 'text-muted-foreground'} />
+                    <StatPill label="Files Scanned" value={data.total_files} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Category scores */}
+            {data.category_scores && Object.keys(data.category_scores).length > 0 && (
+              <Card className="border">
+                <CardHeader className="border-b py-3 px-5">
+                  <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                    <Package className="h-4 w-4" /> Security by Category
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-5 space-y-3.5">
+                  {Object.entries(data.category_scores).map(([cat, s]) => (
+                    <CategoryBar key={cat} name={cat} score={s.score} grade={s.grade} count={s.algorithm_count} />
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Quantum readiness detail */}
+            {qr && (
+              <Card className="border">
+                <CardHeader className="border-b py-3 px-5">
+                  <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                    <Zap className="h-4 w-4" /> Quantum Readiness
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 bg-muted/40 rounded-xl">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Risk Level</p>
+                    <p className={`text-sm font-bold capitalize ${
+                      qr.risk_level === 'low' ? 'text-emerald-500' : qr.risk_level === 'medium' ? 'text-amber-500' : 'text-red-500'
+                    }`}>{qr.risk_level}</p>
+                    {qr.risk_reason && <p className="text-xs text-muted-foreground mt-1">{qr.risk_reason}</p>}
+                  </div>
+                  <div className="p-4 bg-muted/40 rounded-xl">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Migration Status</p>
+                    <p className="text-sm font-bold capitalize">{(qr.migration_status || '').replace(/_/g, ' ')}</p>
+                    {qr.migration_note && <p className="text-xs text-muted-foreground mt-1">{qr.migration_note}</p>}
+                  </div>
+                  <div className="p-4 bg-muted/40 rounded-xl">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Operations</p>
+                    <div className="flex items-center gap-2">
+                      <div className={`flex-1 h-2 rounded-full overflow-hidden ${scoreBarBg(score)}`}>
+                        <div className={`h-full rounded-full ${scoreBg(score)}`}
+                          style={{ width: `${qr.total_crypto_operations > 0 ? (qr.quantum_safe_operations / qr.total_crypto_operations * 100) : 0}%` }} />
+                      </div>
+                      <span className="text-xs font-semibold tabular-nums text-muted-foreground">
+                        {qr.quantum_safe_operations}/{qr.total_crypto_operations}
+                      </span>
+                    </div>
+                  </div>
+                  {qr.pqc_algorithms?.length > 0 && (
+                    <div className="p-4 bg-muted/40 rounded-xl">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">PQC Algorithms Found</p>
+                      <div className="flex flex-wrap gap-1">
+                        {qr.pqc_algorithms.map(a => (
+                          <span key={a} className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-semibold rounded">{a}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Footer metadata */}
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground px-1">
+              <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Scanned {new Date(data.last_scanned).toLocaleString()}</span>
+              <span className="flex items-center gap-1.5"><GitBranch className="h-3.5 w-3.5" /> {data.branch_name}</span>
+              <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" /> Commit: <code>{data.repo_hash?.slice(0, 12)}</code></span>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ FINDINGS TAB ═══ */}
+        {tab === 'findings' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Type filter */}
+              <div className="flex flex-wrap gap-1.5">
+                {(['all', ...algoTypes] as string[]).map(t => {
+                  const cnt = t === 'all' ? algoEntries.length : algoEntries.filter(({ algo }) => (algo.algorithm_type || algo.category) === t).length;
+                  return (
+                    <button key={t} onClick={() => setAlgoFilter(t)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                        algoFilter === t ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/70'
+                      }`}>
+                      {t === 'all' ? 'All Types' : t.charAt(0).toUpperCase() + t.slice(1)} <span className="opacity-70">({cnt})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Quantum filter + search */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'pqc', label: `PQC (${truePQC})` },
+                  { id: 'safe', label: `Safe (${safe})` },
+                  { id: 'vulnerable', label: `Vulnerable (${vuln})` },
+                ].map(f => (
+                  <button key={f.id} onClick={() => setQualFilter(f.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                      qualFilter === f.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/70'
+                    }`}>{f.label}</button>
+                ))}
+              </div>
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <input className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-muted/40 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Search algorithm name…" value={algoSearch} onChange={e => setAlgoSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+              <span>Showing <span className="font-semibold text-foreground">{filtered.length}</span> of {algoEntries.length} algorithms</span>
+              <span className="flex items-center gap-1"><TrendingUp className="h-3.5 w-3.5 text-emerald-500" /> Strong → <TrendingDown className="h-3.5 w-3.5 text-red-400" /> Weak</span>
+            </div>
+            <div className="space-y-1.5">
+              {filtered.length === 0
+                ? <div className="py-16 text-center text-sm text-muted-foreground">No algorithms match your filter.</div>
+                : [...filtered].sort((a, b) => (b.algo.final_score ?? 0) - (a.algo.final_score ?? 0)).map(({ name, algo }) => (
+                    <AlgoRow key={name} name={name} algo={algo}
+                      onViewOccurrences={n => { setSelectedAlgorithm(n); setIsFindingsModalOpen(true); }} />
+                  ))
+              }
+            </div>
+          </div>
+        )}
+
+        {/* ═══ DETAILS TAB ═══ */}
+        {tab === 'details' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                { id: 'migration', label: 'Migration Plan', icon: <Zap className="h-3.5 w-3.5" /> },
+                { id: 'quantum', label: 'Quantum Detail', icon: <Shield className="h-3.5 w-3.5" /> },
+                { id: 'raw', label: 'Raw JSON', icon: <Database className="h-3.5 w-3.5" /> },
+              ] as { id: any; label: string; icon: React.ReactNode }[]).map(s => (
+                <button key={s.id} onClick={() => setDetailSection(s.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                    detailSection === s.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/70'
+                  }`}>
+                  {s.icon} {s.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Migration Plan */}
+            {detailSection === 'migration' && (
+              data.migration_plan
+                ? <RepoSuggestionsPanel
+                    migrationPlan={data.migration_plan}
+                    quantumReadiness={data.quantum_readiness_detail ?? null}
+                    criticalVulnerabilities={data.critical_vulnerabilities}
+                  />
+                : <div className="py-16 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                    <Info className="h-8 w-8 text-muted-foreground/50" />
+                    No migration plan available for this scan.
+                  </div>
+            )}
+
+            {/* Quantum Detail */}
+            {detailSection === 'quantum' && qr && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Vulnerable Algorithms</CardTitle></CardHeader>
+                  <CardContent className="p-4 space-y-1 max-h-64 overflow-y-auto">
+                    {(qr.vulnerable_algorithms ?? []).map(a => (
+                      <div key={a} className="px-2.5 py-1.5 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded text-xs font-mono text-red-700 dark:text-red-300">{a}</div>
+                    ))}
+                    {(qr.vulnerable_algorithms ?? []).length === 0 && <p className="text-xs text-muted-foreground">None found.</p>}
+                  </CardContent>
+                </Card>
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Deprecated Algorithms</CardTitle></CardHeader>
+                  <CardContent className="p-4 space-y-1 max-h-64 overflow-y-auto">
+                    {(qr.deprecated_algorithms ?? []).map(a => (
+                      <div key={a} className="px-2.5 py-1.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded text-xs font-mono text-amber-700 dark:text-amber-300">{a}</div>
+                    ))}
+                    {(qr.deprecated_algorithms ?? []).length === 0 && <p className="text-xs text-muted-foreground">None found.</p>}
+                  </CardContent>
+                </Card>
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Grover-Safe Algorithms</CardTitle></CardHeader>
+                  <CardContent className="p-4 space-y-1 max-h-64 overflow-y-auto">
+                    {(qr.grover_safe_algorithms ?? []).map(a => (
+                      <div key={a} className="px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded text-xs font-mono text-emerald-700 dark:text-emerald-300">{a}</div>
+                    ))}
+                    {(qr.grover_safe_algorithms ?? []).length === 0 && <p className="text-xs text-muted-foreground">None found.</p>}
+                  </CardContent>
+                </Card>
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">PQC Algorithms</CardTitle></CardHeader>
+                  <CardContent className="p-4 space-y-1 max-h-64 overflow-y-auto">
+                    {(qr.pqc_algorithms ?? []).map(a => (
+                      <div key={a} className="px-2.5 py-1.5 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded text-xs font-mono text-blue-700 dark:text-blue-300">{a}</div>
+                    ))}
+                    {(qr.pqc_algorithms ?? []).length === 0 && <p className="text-xs text-muted-foreground">No true PQC algorithms detected.</p>}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+            {detailSection === 'quantum' && !qr && (
+              <div className="py-16 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                <Info className="h-8 w-8 text-muted-foreground/50" />
+                No quantum readiness detail available.
+              </div>
+            )}
+
+            {/* Raw JSON */}
+            {detailSection === 'raw' && (
+              <Card className="border">
+                <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Raw JSON</CardTitle></CardHeader>
+                <CardContent className="p-0">
+                  <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-muted/30">{JSON.stringify(data, null, 2)}</pre>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
       </main>
+
+      {selectedAlgorithm && (
+        <AlgorithmFindingsModal
+          isOpen={isFindingsModalOpen}
+          onClose={() => { setIsFindingsModalOpen(false); setSelectedAlgorithm(null); }}
+          scanId={scanId}
+          algorithmName={selectedAlgorithm}
+          scanDetail={scanDetail}
+        />
+      )}
     </div>
   );
 };

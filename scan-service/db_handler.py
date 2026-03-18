@@ -7,6 +7,11 @@ from http_client import call_service
 logger = logging.getLogger(__name__)
 
 class DatabaseHandler:
+    """
+    Database handler for scan-service.
+    Now uses single-scan architecture (no batches).
+    Each URL is an independent scan result.
+    """
     def __init__(self):
         import os
         self.db_service_url = os.getenv("DB_SERVICE_URL", "http://db-service:8001")
@@ -29,53 +34,16 @@ class DatabaseHandler:
                 logger.error(f"❌ Cannot connect to database service: {e}")
                 self.enabled = False
     
-    async def create_scan_batch(self, batch_id: str, total_urls: int, max_concurrent: int, request_payload: dict = None) -> bool:
-        """Create a new scan batch in database."""
+    async def save_scan_result(self, result: Dict[str, Any]) -> bool:
+        """Save a single scan result to database (no batch required)."""
         await self._ensure_connected()
         
         if not self.enabled:
-            logger.warning("Database disabled, skipping batch creation")
+            logger.warning(f"⚠️  Database disabled, skipping result save for {result.get('url')}")
             return False
         
         try:
-            payload = {
-                "batch_id": batch_id,
-                "total_urls": total_urls,
-                "max_concurrent": max_concurrent,
-                "status": "pending",
-                "request_payload": request_payload or {}
-            }
-            
-            response = await call_service(
-                "POST",
-                f"{self.db_service_url}/scans/batch",
-                json=payload,
-                timeout=10
-            )
-            
-            success = response.status_code in (200, 201)
-            if success:
-                logger.info(f"✅ Batch {batch_id} created in database")
-            else:
-                logger.error(f"❌ Failed to create batch: {response.status_code}")
-            return success
-            
-        except Exception as e:
-            logger.exception("Exception creating batch in DB")
-            return False
-    
-    async def save_scan_result(self, result: Dict[str, Any], batch_id: str) -> bool:
-        """Save a scan result to database."""
-        await self._ensure_connected()
-        
-        if not self.enabled:
-            logger.warning(f"⚠️  Database disabled, skipping result save for batch {batch_id}")
-            return False
-        
-        try:
-            # Prepare payload - ENSURE all required fields are present
             db_data = {
-                "batch_id": batch_id,
                 "request_id": result.get("request_id"),
                 "url": result.get("url"),
                 "status": "completed",
@@ -90,9 +58,7 @@ class DatabaseHandler:
                 "error_message": result.get("error_message"),
             }
             
-            logger.info(f"💾 Saving result for {result.get('url')} to batch {batch_id}")
-            logger.debug(f"📤 Payload keys: {db_data.keys()}")
-            logger.debug(f"📤 scan_status: {db_data.get('scan_status')} (type: {type(db_data.get('scan_status')).__name__})")
+            logger.info(f"💾 Saving scan result for {result.get('url')}")
             
             response = await call_service(
                 "POST",
@@ -101,9 +67,9 @@ class DatabaseHandler:
                 timeout=30
             )
             
-            success = response.status_code in (200, 201)
-            if success:
+            if response.status_code in (200, 201):
                 logger.info(f"✅ Result saved for {result.get('url')}")
+                return True
             else:
                 logger.error(f"❌ Failed to save result: {response.status_code}")
                 try:
@@ -111,48 +77,13 @@ class DatabaseHandler:
                     logger.error(f"❌ Error details: {error_detail}")
                 except:
                     logger.error(f"❌ Response text: {response.text}")
-            return success
-            
+                return False
+                
         except Exception as e:
-            logger.exception(f"Exception saving result to DB: {e}")
-            return False
-    
-    async def update_batch_status(self, batch_id: str, status: str, successful: int = 0, failed: int = 0) -> bool:
-        """Update scan batch status."""
-        await self._ensure_connected()
-        
-        if not self.enabled:
-            logger.warning("Database disabled, skipping batch update")
-            return False
-        
-        try:
-            payload = {
-                "status": status,
-                "successful_count": successful,
-                "failed_count": failed
-            }
-            
-            logger.info(f"📝 Updating batch {batch_id}: {status} (success={successful}, failed={failed})")
-            
-            response = await call_service(
-                "PUT",
-                f"{self.db_service_url}/scans/batch/{batch_id}",
-                json=payload,
-                timeout=10
-            )
-            
-            success = response.status_code == 200
-            if success:
-                logger.info(f"✅ Batch {batch_id} updated")
-            else:
-                logger.error(f"❌ Failed to update batch: {response.status_code}")
-            return success
-            
-        except Exception as e:
-            logger.exception("Exception updating batch status")
+            logger.exception(f"❌ Exception saving result to DB: {e}")
             return False
 
-    async def get_scan_results(self, batch_id: Optional[str] = None, limit: int = 100, offset: int = 0):
+    async def get_scan_results(self, status: Optional[str] = None, limit: int = 100, offset: int = 0):
         """Fetch scan results from database."""
         await self._ensure_connected()
         
@@ -161,13 +92,13 @@ class DatabaseHandler:
             return []
         
         try:
-            params = {"limit": limit, "offset": offset}
-            if batch_id:
-                params["batch_id"] = batch_id
+            params = {"limit": limit, "skip": offset}
+            if status:
+                params["status"] = status
             
             response = await call_service(
                 "GET",
-                f"{self.db_service_url}/scans/results",
+                f"{self.db_service_url}/scans",
                 params=params,
                 timeout=30
             )
@@ -181,56 +112,56 @@ class DatabaseHandler:
             logger.exception("Exception getting scan results")
             return []
 
-    async def get_batch_info(self, batch_id: str):
-        """Get information about a specific batch."""
+    async def get_scan_by_url(self, url: str):
+        """Get scan result for a specific URL."""
         await self._ensure_connected()
         
         if not self.enabled:
-            return {}
+            return None
         
         try:
             response = await call_service(
                 "GET",
-                f"{self.db_service_url}/scans/batch/{batch_id}",
+                f"{self.db_service_url}/scans/url/{url}",
                 timeout=10
             )
             
             if response.status_code == 404:
-                return {}
+                return None
             
             return response.json()
         except Exception as e:
-            logger.exception("Exception getting batch info")
-            return {}
+            logger.exception("Exception getting scan by URL")
+            return None
 
-    async def get_all_batches(self, limit: int = 50, offset: int = 0):
-        """Get all scan batches."""
+    async def get_scan_by_id(self, result_id: int):
+        """Get a specific scan result by ID."""
         await self._ensure_connected()
         
         if not self.enabled:
-            logger.warning("Database disabled, returning empty list")
-            return []
+            return None
         
         try:
             response = await call_service(
                 "GET",
-                f"{self.db_service_url}/scans/batch",
-                params={"limit": limit, "offset": offset},
-                timeout=30
+                f"{self.db_service_url}/scans/result/{result_id}",
+                timeout=10
             )
             
             if response.status_code == 404:
-                logger.warning("Batches endpoint not found, returning empty list")
-                return []
+                return None
             
             return response.json()
         except Exception as e:
-            logger.exception("Exception getting all batches")
-            return []
+            logger.exception("Exception getting scan by ID")
+            return None
 
-    async def search_scans(self, url: Optional[str] = None, status: Optional[str] = None, 
-                          from_date: Optional[str] = None, to_date: Optional[str] = None, limit: int = 100):
-        """Search scan results with filters."""
+    async def search_scans(self, pqc_grade: Optional[str] = None, 
+                          quantum_ready: Optional[bool] = None,
+                          tls_version: Optional[str] = None,
+                          status: Optional[str] = None, 
+                          limit: int = 100):
+        """Search scan results with filters using normalized fields."""
         await self._ensure_connected()
         
         if not self.enabled:
@@ -238,14 +169,14 @@ class DatabaseHandler:
         
         try:
             params = {"limit": limit}
-            if url:
-                params["url"] = url
+            if pqc_grade:
+                params["pqc_grade"] = pqc_grade
+            if quantum_ready is not None:
+                params["quantum_ready"] = quantum_ready
+            if tls_version:
+                params["tls_version"] = tls_version
             if status:
                 params["status"] = status
-            if from_date:
-                params["from_date"] = from_date
-            if to_date:
-                params["to_date"] = to_date
             
             response = await call_service(
                 "GET",
@@ -262,7 +193,7 @@ class DatabaseHandler:
             logger.exception("Exception searching scans")
             return []
     
-    async def save_failed_scan(self, domain: str, error_message: str, batch_id: str, request_id: str) -> bool:
+    async def save_failed_scan(self, domain: str, error_message: str, request_id: str) -> bool:
         """Save a failed scan to database with proper structure."""
         await self._ensure_connected()
         
@@ -275,7 +206,6 @@ class DatabaseHandler:
             is_http_skipped = any(keyword in error_message.upper() for keyword in ["HTTP", "UNREACHABLE", "DNS_FAILED"])
             
             db_data = {
-                "batch_id": batch_id,
                 "request_id": request_id,
                 "url": domain,
                 "status": "completed",  # Use "completed" for consistency
@@ -335,25 +265,6 @@ class DatabaseHandler:
             logger.exception("Exception saving failed scan")
             return False
 
-    async def delete_batch_from_db(self, batch_id: str) -> bool:
-        """Delete a batch and its results from database."""
-        await self._ensure_connected()
-        
-        if not self.enabled:
-            return False
-        
-        try:
-            response = await call_service(
-                "DELETE",
-                f"{self.db_service_url}/scans/batch/{batch_id}",
-                timeout=30
-            )
-            
-            return response.status_code in (200, 204)
-        except Exception as e:
-            logger.exception("Exception deleting batch")
-            return False
-
     async def delete_result_from_db(self, result_id: int) -> bool:
         """Delete a single result from database."""
         await self._ensure_connected()
@@ -390,5 +301,26 @@ class DatabaseHandler:
             return response.json()
         except Exception as e:
             logger.exception("Exception clearing all data")
+            return {"error": str(e)}
+
+    async def get_statistics(self) -> Dict[str, Any]:
+        """Get scan statistics from database."""
+        await self._ensure_connected()
+        
+        if not self.enabled:
+            return {"error": "Database not enabled"}
+        
+        try:
+            response = await call_service(
+                "GET",
+                f"{self.db_service_url}/scans/statistics",
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            return {}
+        except Exception as e:
+            logger.exception("Exception getting statistics")
             return {"error": str(e)}
 

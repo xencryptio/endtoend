@@ -37,9 +37,13 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # ============================================================================
-# STAGE 4: Copy ALL Python files (FIXED)
+# STAGE 4: Copy ALL Python files and tls_scanner package
 # ============================================================================
+# Copy root-level Python files
 COPY *.py .
+
+# Copy tls_scanner package
+COPY tls_scanner/ ./tls_scanner/
 
 # ============================================================================
 # STAGE 5: Configuration

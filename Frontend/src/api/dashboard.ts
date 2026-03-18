@@ -17,3 +17,12 @@ export const getAppDashboard = async (appId: string): Promise<ApplicationDetail>
   const res = await axios.get(`${API_BASE}/app/${appId}/dashboard`);
   return res.data;
 };
+
+export const updateAppStatus = async (appId: string, status: string): Promise<void> => {
+  await axios.patch(`${API_BASE}/app/${appId}/status`, { status });
+};
+
+export const getPQCTrend = async (): Promise<{ month: string; pqc: number }[]> => {
+  const res = await axios.get(`${API_BASE}/pqc-trend`);
+  return res.data;
+};

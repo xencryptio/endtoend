@@ -518,14 +518,14 @@ const buildVulnerabilityList = (
 ): ProcessedVulnerability[] => {
   const vulnerabilities: ProcessedVulnerability[] = [];
 
-  // From Network - FIXED PATH
+  // From Network - include component type and algorithm index for unique keys
   networkData.forEach(domain => {
     const components = domain.raw_response?.pqc_analysis?.components || {};
-    Object.entries(components).forEach(([type, component]) => {
-      component.algorithms?.forEach(algo => {
+    Object.entries(components).forEach(([componentType, component]) => {
+      component.algorithms?.forEach((algo, algoIndex) => {
         if (!algo.quantum_safe || algo.deprecated) {
           vulnerabilities.push({
-            vulnerability_id: `net-${domain.url}-${algo.algorithm}`,
+            vulnerability_id: `net-${domain.url}-${componentType}-${algo.algorithm}-${algoIndex}`,
             algorithm: algo.algorithm,
             type: algo.algorithm_type,
             severity: algo.security_level || "medium",
@@ -562,12 +562,12 @@ const buildVulnerabilityList = (
     });
   });
 
-  // From Code
-  codeData.forEach(repo => {
-    repo.algorithms?.forEach(algo => {
+  // From Code - include repo index and algorithm index for uniqueness
+  codeData.forEach((repo, repoIndex) => {
+    repo.algorithms?.forEach((algo, algoIndex) => {
       if (!algo.quantum_safe) {
         vulnerabilities.push({
-          vulnerability_id: `code-${repo.repo_url}-${algo.algorithm}`,
+          vulnerability_id: `code-${repoIndex}-${algo.algorithm}-${algo.category}-${algoIndex}`,
           algorithm: algo.algorithm,
           type: algo.category,
           severity: algo.occurrences > 20 ? 'critical' : algo.occurrences > 10 ? 'high' : 'medium',
@@ -602,16 +602,16 @@ const buildVulnerabilityList = (
     });
   });
 
-  // From System
+  // From System - include component type and algorithm index
   systemData.forEach(agent => {
     const components = agent.raw_audit_results?.pqc_score?.components || {};
-    Object.entries(components).forEach(([type, component]) => {
-      component.algorithms?.forEach(algo => {
+    Object.entries(components).forEach(([componentType, component]) => {
+      component.algorithms?.forEach((algo, algoIndex) => {
         if (!algo.quantum_safe || algo.deprecated) {
           vulnerabilities.push({
-            vulnerability_id: `sys-${agent.agent_id}-${algo.algorithm}`,
+            vulnerability_id: `sys-${agent.agent_id}-${componentType}-${algo.algorithm}-${algoIndex}`,
             algorithm: algo.algorithm,
-            type: type,
+            type: componentType,
             severity: algo.security_level || "medium",
             quantum_risk: algo.quantum_safety_reason || "Quantum vulnerability detected",
             pqc_status: 'quantum-vulnerable',

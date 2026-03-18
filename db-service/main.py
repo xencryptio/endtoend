@@ -23,6 +23,7 @@ from logging_middleware import correlation_middleware
 from dashboard.router import router as dashboard_router
 from export.router import router as export_router
 from vulnerabilities.router import router as vulnerabilities_router
+from applications.router import router as applications_router # NEW IMPORT
 
 from database import get_scandb_session, get_repo_scanner_session, get_system_scanner_session
 
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(dashboard_router)
 app.include_router(export_router)
 app.include_router(vulnerabilities_router)
+app.include_router(applications_router)
 
 
 
@@ -127,134 +129,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 # ============================================================
-# SCAN BATCH ENDPOINTS (Multiple URLs in one scan request)
-# ============================================================
-
-@app.post("/scans/batch", response_model=schemas.ScanBatch)
-def create_scan_batch(
-    batch: schemas.ScanBatchCreate, 
-    db: Session = Depends(get_db)
-):
-    """
-    Create a new scan batch (represents one scan request with multiple URLs).
-    Returns the created batch with a unique batch_id.
-    """
-    log.info(f"📥 Creating batch: {batch.batch_id} with {batch.total_urls} URLs")
-    try:
-        result = crud.create_scan_batch(db, batch)
-        log.info(f"✅ Batch created: {result.batch_id}")
-        return result
-    except Exception as e:
-        log.exception("❌ Scan batch creation failed")
-        raise APIError(status_code=500, error_code="batch_creation_failed", 
-                      message=f"Scan batch creation failed: {str(e)}")
-
-@app.get("/scans/batch", response_model=List[schemas.ScanBatch])
-def get_all_scan_batches(
-    skip: int = 0, 
-    limit: int = 100,
-    status: str = None,  # NEW: Filter by status
-    db: Session = Depends(get_db)
-):
-    """
-    Get all scan batches with pagination and optional status filter.
-    Status values: 'pending', 'processing', 'completed', 'failed'
-    """
-    log.info(f"Entered /scans/batch endpoint (status filter: {status})")
-    try:
-        result = crud.get_scan_batches(db, skip=skip, limit=limit, status=status)
-        log.info(f"Scan batches retrieved successfully (count: {len(result)})")
-        return result
-    except Exception as e:
-        log.exception("Scan batches retrieval failed")
-        raise APIError(status_code=500, error_code="batch_retrieval_failed", message=f"Scan batches retrieval failed: {str(e)}")
-
-@app.get("/scans/batch/{batch_id}", response_model=schemas.ScanBatchWithNormalizedResults)
-def get_scan_batch_by_id(batch_id: str, db: Session = Depends(get_db)):
-    """
-    Get a specific scan batch with all its scan results.
-    
-    Each result includes:
-    - Normalized fields for fast filtering/display
-    - raw_response for complete technical details
-    """
-    log.info(f"Entered /scans/batch/{batch_id} endpoint")
-    try:
-        batch = crud.get_scan_batch(db, batch_id)
-        if not batch:
-            raise APIError(status_code=404, error_code="batch_not_found", message=f"Scan batch {batch_id} not found")
-        
-        # This endpoint is intended to return normalized results.
-        # We can directly use the ScanBatchWithNormalizedResults schema which will handle
-        # the conversion of each `scan_result` in the batch.
-        # The commented-out code seems to be an incomplete attempt at filtering,
-        # which is not required by the current logic of this endpoint.
-        
-        # The `from_orm` method will create the Pydantic model from the SQLAlchemy model.
-        # It will automatically convert the `scan_results` list as well.
-        batch_with_filtered_results = schemas.ScanBatchWithNormalizedResults.from_orm(batch)
-        
-        log.info(f"Scan batch {batch_id} retrieved successfully")
-        return batch_with_filtered_results
-    except APIError:
-        raise
-    except Exception as e:
-        log.exception(f"Scan batch {batch_id} retrieval failed")
-        raise APIError(status_code=500, error_code="batch_retrieval_failed", message=f"Scan batch {batch_id} retrieval failed: {str(e)}")
-
-@app.delete("/scans/batch/{batch_id}")
-def delete_scan_batch_endpoint(batch_id: str, db: Session = Depends(get_db)):
-    """
-    Delete a scan batch and all its associated scan results.
-    """
-    log.info(f"Entered /scans/batch/{batch_id} endpoint for deletion")
-    try:
-        success = crud.delete_scan_batch_completely(db, batch_id)
-        if not success:
-            raise APIError(status_code=404, error_code="batch_not_found", message=f"Scan batch {batch_id} not found or already deleted")
-        
-        log.info(f"Scan batch {batch_id} deleted successfully")
-        return {
-            "message": "Scan batch and all its results deleted successfully",
-            "batch_id": batch_id
-        }
-    except APIError:
-        raise
-    except Exception as e:
-        log.exception(f"Scan batch {batch_id} deletion failed")
-        raise APIError(status_code=500, error_code="batch_deletion_failed", message=f"Scan batch {batch_id} deletion failed: {str(e)}")
-
-@app.put("/scans/batch/{batch_id}", response_model=schemas.ScanBatch)
-def update_scan_batch(
-    batch_id: str,
-    batch: schemas.ScanBatchUpdate,
-    db: Session = Depends(get_db)
-):
-    """
-    Update a scan batch's status and counts.
-    """
-    log.info(f"Entered /scans/batch/{batch_id} endpoint for update")
-    try:
-        updated_batch = crud.update_scan_batch_status(
-            db,
-            batch_id=batch_id,
-            status=batch.status,
-            successful_count=batch.successful_count,
-            failed_count=batch.failed_count
-        )
-        if not updated_batch:
-            raise APIError(status_code=404, error_code="batch_not_found", message=f"Scan batch {batch_id} not found")
-        
-        log.info(f"Scan batch {batch_id} updated successfully")
-        return updated_batch
-    except APIError:
-        raise
-    except Exception as e:
-        log.exception(f"Scan batch {batch_id} update failed")
-        raise APIError(status_code=500, error_code="batch_update_failed", message=f"Scan batch {batch_id} update failed: {str(e)}")
-
-# ============================================================
-# INDIVIDUAL SCAN RESULT ENDPOINTS
+# SCAN RESULT ENDPOINTS (Each scan is independent - no batches)
 # ============================================================
 
 @app.post("/scans/result", response_model=schemas.ScanResult)
@@ -263,37 +138,52 @@ def create_scan_result(
     db: Session = Depends(get_db)
 ):
     """
-    Store a single scan result (linked to a batch_id).
+    Store a single scan result (standalone - no batch).
     """
-    log.info("Entered /scans/result endpoint")
+    log.info(f"📥 Creating scan result for URL: {scan.url}")
     try:
         result = crud.create_scan_result(db, scan)
-        log.info("Scan result created successfully")
+        log.info(f"✅ Scan result created with ID: {result.id}")
         return result
     except Exception as e:
-        log.exception("Scan result creation failed")
-        raise APIError(status_code=500, error_code="result_creation_failed", message=f"Scan result creation failed: {str(e)}")
+        log.exception("❌ Scan result creation failed")
+        raise APIError(status_code=500, error_code="result_creation_failed", 
+                      message=f"Scan result creation failed: {str(e)}")
 
-@app.get("/scans/results", response_model=List[schemas.ScanResultWithNormalized])
+@app.get("/scans", response_model=List[schemas.ScanResultWithNormalized])
 def get_all_scan_results(
-    batch_id: Optional[str] = None,
     status: Optional[str] = None,
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db)
 ):
     """
-    Get all scan results with optional filtering.
-    
-    Query by normalized fields:
-    - ?status=completed
-    - ?batch_id=batch_123
-    
-    Returns normalized fields + raw_response for each result.
+    Get all scan results with optional status filter.
+    Returns individual scan results (not grouped by batch).
+    """
+    log.info(f"Entered /scans endpoint (status filter: {status})")
+    try:
+        results = crud.get_scan_results(db, status=status, skip=skip, limit=limit)
+        log.info(f"Scan results retrieved successfully (count: {len(results)})")
+        return [schemas.ScanResultWithNormalized.from_orm(r) for r in results]
+    except Exception as e:
+        log.exception("Scan results retrieval failed")
+        raise APIError(status_code=500, error_code="results_retrieval_failed", message=f"Scan results retrieval failed: {str(e)}")
+
+@app.get("/scans/results", response_model=List[schemas.ScanResultWithNormalized])
+def get_scan_results_alt(
+    status: Optional[str] = None,
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db)
+):
+    """
+    Alias for /scans - Get all scan results.
+    Kept for backward compatibility.
     """
     log.info("Entered /scans/results endpoint")
     try:
-        results = crud.get_scan_results(db, batch_id=batch_id, status=status, skip=skip, limit=limit)
+        results = crud.get_scan_results(db, status=status, skip=skip, limit=limit)
         log.info("Scan results retrieved successfully")
         return [schemas.ScanResultWithNormalized.from_orm(r) for r in results]
     except Exception as e:
@@ -304,13 +194,6 @@ def get_all_scan_results(
 def get_scan_result_by_id(result_id: int, db: Session = Depends(get_db)):
     """
     Get a specific scan result by its ID.
-    
-    Returns:
-    - Normalized queryable fields (pqc_grade, kex_score, tls_version, etc.)
-    - raw_response: Complete JSON audit trail
-    
-    Frontend receives BOTH - uses normalized fields for display,
-    raw_response for drill-down and detailed analysis.
     """
     log.info(f"Entered /scans/result/{result_id} endpoint")
     try:
@@ -319,18 +202,36 @@ def get_scan_result_by_id(result_id: int, db: Session = Depends(get_db)):
             raise APIError(status_code=404, error_code="result_not_found", message=f"Scan result {result_id} not found")
         
         log.info(f"Scan result {result_id} retrieved successfully")
-        return result
+        return schemas.ScanResultWithNormalized.from_orm(result)
     except APIError:
         raise
     except Exception as e:
         log.exception(f"Scan result {result_id} retrieval failed")
         raise APIError(status_code=500, error_code="result_retrieval_failed", message=f"Scan result {result_id} retrieval failed: {str(e)}")
 
+@app.get("/scans/url/{url:path}", response_model=schemas.ScanResultWithNormalized)
+def get_scan_result_by_url(url: str, db: Session = Depends(get_db)):
+    """
+    Get the most recent scan result for a specific URL.
+    """
+    log.info(f"Entered /scans/url/{url} endpoint")
+    try:
+        result = crud.get_scan_result_by_url(db, url)
+        if not result:
+            raise APIError(status_code=404, error_code="result_not_found", message=f"No scan result found for URL: {url}")
+        
+        log.info(f"Scan result for {url} retrieved successfully")
+        return schemas.ScanResultWithNormalized.from_orm(result)
+    except APIError:
+        raise
+    except Exception as e:
+        log.exception(f"Scan result for {url} retrieval failed")
+        raise APIError(status_code=500, error_code="result_retrieval_failed", message=f"Scan result retrieval failed: {str(e)}")
+
 @app.delete("/scans/result/{result_id}")
-def delete_individual_scan_result(result_id: int, db: Session = Depends(get_db)):
+def delete_scan_result_endpoint(result_id: int, db: Session = Depends(get_db)):
     """
     Delete a single scan result.
-    The batch counts will be automatically updated.
     """
     log.info(f"Entered /scans/result/{result_id} endpoint for deletion")
     try:
@@ -341,7 +242,8 @@ def delete_individual_scan_result(result_id: int, db: Session = Depends(get_db))
         log.info(f"Scan result {result_id} deleted successfully")
         return {
             "message": "Scan result deleted successfully",
-            "result_id": result_id
+            "result_id": result_id,
+            "timestamp": datetime.now().isoformat()
         }
     except APIError:
         raise
@@ -349,31 +251,40 @@ def delete_individual_scan_result(result_id: int, db: Session = Depends(get_db))
         log.exception(f"Scan result {result_id} deletion failed")
         raise APIError(status_code=500, error_code="result_deletion_failed", message=f"Scan result {result_id} deletion failed: {str(e)}")
 
+@app.delete("/scans/clear-all")
+def clear_all_scans_endpoint(db: Session = Depends(get_db)):
+    """
+    DANGER: Delete ALL scan results from database.
+    """
+    log.info("Entered /scans/clear-all endpoint")
+    try:
+        deleted_count = crud.delete_all_scans(db)
+        log.info(f"All scans cleared: {deleted_count} results deleted")
+        return {
+            "message": "All scan results deleted successfully",
+            "deleted_results": deleted_count,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        log.exception("Clear all scans failed")
+        raise APIError(status_code=500, error_code="clear_all_failed", message=f"Clear all scans failed: {str(e)}")
+
 @app.get("/scans/search", response_model=List[schemas.ScanResultWithNormalized])
 def search_scan_results(
-    pqc_grade: Optional[str] = None,  # Filter by PQC grade: A+, A, B, etc.
-    quantum_ready: Optional[bool] = None,  # Only quantum-ready scans
-    tls_version: Optional[str] = None,  # Filter by TLS version: TLS 1.3
+    pqc_grade: Optional[str] = None,
+    quantum_ready: Optional[bool] = None,
+    tls_version: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
     """
     Search scan results using normalized fields.
-    
-    Examples:
-    - /scans/search?pqc_grade=A&quantum_ready=true
-    - /scans/search?tls_version=TLS%201.3
-    - /scans/search?status=completed
-    
-    Uses normalized DB columns for efficient queries.
-    Returns results with both normalized fields AND raw_response.
     """
     log.info("Entered /scans/search endpoint")
     try:
         query = db.query(models.ScanResult)
         
-        # Filter by normalized fields
         if pqc_grade:
             query = query.filter(models.ScanResult.pqc_overall_grade == pqc_grade)
         
@@ -381,22 +292,34 @@ def search_scan_results(
             query = query.filter(models.ScanResult.pqc_quantum_ready == quantum_ready)
         
         if tls_version:
-            # Use contains for flexible matching (e.g., "TLS 1.3" in "TLS 1.2, TLS 1.3")
             query = query.filter(models.ScanResult.tls_version.ilike(f"%{tls_version}%"))
         
         if status:
             query = query.filter(models.ScanResult.status == status)
         
         results = query.order_by(
-            models.ScanResult.completed_at.desc().nulls_last()
+            models.ScanResult.created_at.desc().nulls_last()
         ).limit(limit).all()
         
         log.info("Scan results searched successfully")
-        # Use from_orm to convert each SQLAlchemy model instance to a Pydantic model
         return [schemas.ScanResultWithNormalized.from_orm(r) for r in results]
     except Exception as e:
         log.exception("Scan results search failed")
         raise APIError(status_code=500, error_code="results_search_failed", message=f"Scan results search failed: {str(e)}")
+
+@app.get("/scans/statistics", response_model=schemas.ScanStatistics)
+def get_scan_statistics_endpoint(db: Session = Depends(get_db)):
+    """
+    Get scan statistics.
+    """
+    log.info("Entered /scans/statistics endpoint")
+    try:
+        stats = crud.get_scan_statistics(db)
+        log.info("Scan statistics retrieved successfully")
+        return stats
+    except Exception as e:
+        log.exception("Scan statistics retrieval failed")
+        raise APIError(status_code=500, error_code="statistics_failed", message=f"Scan statistics retrieval failed: {str(e)}")
 
 
 # ============================================================
@@ -597,65 +520,6 @@ def create_onboarding_job_endpoint(job: dict, db: Session = Depends(get_db)):
         log.exception("Onboarding job create failed")
         raise APIError(status_code=500, error_code="onboarding_job_create_failed", message=str(e))
 
-@app.delete("/scans/clear-all")
-def clear_all_data(db: Session = Depends(get_db)):
-    """
-    DANGER: Delete ALL scan batches and results from database.
-    This operation cannot be undone.
-    """
-    log.info("Entered /scans/clear-all endpoint")
-    try:
-        # Delete in correct order: results first, then batches
-        deleted_results = db.query(models.ScanResult).delete()
-        deleted_batches = db.query(models.ScanBatch).delete()
-        
-        db.commit()
-        
-        log.info("All data cleared successfully")
-        return {
-            "message": "All data cleared successfully from database",
-            "deleted_results": deleted_results,
-            "deleted_batches": deleted_batches,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        db.rollback()
-        log.exception("Error clearing all data")
-        raise APIError(status_code=500, error_code="clear_all_failed", message=f"Error clearing data: {str(e)}")
-
-@app.get("/scans/stats")
-def get_scan_statistics(db: Session = Depends(get_db)):
-    """
-    Get database statistics using normalized fields.
-    
-    Efficiently queries normalized columns (no JSON parsing needed).
-    """
-    log.info("Entered /scans/stats endpoint")
-    try:
-        stats = crud.get_scan_statistics(db)
-        log.info("Scan statistics retrieved successfully")
-        return stats
-    except Exception as e:
-        log.exception("Scan statistics retrieval failed")
-        raise APIError(status_code=500, error_code="stats_retrieval_failed", message=f"Scan statistics retrieval failed: {str(e)}")
-
-# Optional: Add endpoint to get batch with all its results (useful for detail views)
-
-@app.get("/scans/batch/{batch_id}/with-results")
-def get_batch_with_results(batch_id: str, db: Session = Depends(get_db)):
-    """
-    Get a batch with all its associated results.
-    Useful for detail pages.
-    """
-    log.info(f"Entered /scans/batch/{batch_id}/with-results endpoint")
-    try:
-        # TODO: Implement actual batch and results retrieval logic
-        # Placeholder response to fix syntax error
-        return {"batch_id": batch_id, "results": []}
-    except Exception as e:
-        log.exception("Batch with results retrieval failed")
-        raise APIError(status_code=500, error_code="batch_results_retrieval_failed", message=f"Batch {batch_id} with results retrieval failed: {str(e)}")
-
 # ============================================================
 # ONBOARDING BATCH ENDPOINTS
 # ============================================================
@@ -807,20 +671,18 @@ def root():
     """
     return {
         "service": "Scan Storage Service",
-        "version": "1.0",
-        "description": "Persistent storage for crypto scan results",
+        "version": "2.0",
+        "description": "Persistent storage for crypto scan results (single-scan architecture)",
         "endpoints": {
-            "POST /scans/batch": "Create a new scan batch",
-            "GET /scans/batch": "Get all scan batches",
-            "GET /scans/batch/{batch_id}": "Get specific batch with results",
-            "DELETE /scans/batch/{batch_id}": "Delete a batch and its results",
             "POST /scans/result": "Store a single scan result",
-            "GET /scans/result": "Get all scan results (filter by batch_id/status)",
+            "GET /scans": "Get all scan results (filter by status)",
+            "GET /scans/results": "Alias for /scans",
+            "GET /scans/result/{result_id}": "Get specific scan result by ID",
+            "GET /scans/url/{url}": "Get scan result by URL",
             "GET /scans/search": "Search results by normalized fields (pqc_grade, etc.)",
-            "GET /scans/result/{result_id}": "Get specific scan result",
+            "GET /scans/statistics": "Get scan statistics",
             "DELETE /scans/result/{result_id}": "Delete a scan result",
             "DELETE /scans/clear-all": "Clear ALL data (dangerous)",
-            "GET /scans/stats": "Get database statistics",
             "GET /health": "Health check",
             "Mount /export": "Export endpoints (see /export/docs)"
         }

@@ -1,51 +1,4 @@
-import React, { useEffect, useState } from "react";
-
-// Helper to fetch onboarding org/suborg/app/repo hierarchy
-const fetchOnboardingRepos = async () => {
-  const DB_API_BASE = (import.meta.env.VITE_DB_API_URL as string | undefined) || 'http://localhost:8001';
-  const base = DB_API_BASE.replace(/\/$/, '');
-
-  const orgsRes = await fetch(`${base}/organizations`);
-  if (!orgsRes.ok) return [];
-
-  const orgs = await orgsRes.json();
-  const result = [] as any[];
-
-  for (const org of orgs) {
-    const orgReposRes = await fetch(`${base}/organizations/${org.id}/repositories`);
-    const orgRepos = orgReposRes.ok ? await orgReposRes.json() : [];
-
-    const suborgsRes = await fetch(`${base}/organizations/${org.id}/suborganizations`);
-    const suborgs = suborgsRes.ok ? await suborgsRes.json() : [];
-
-    const suborgList = [] as any[];
-    for (const suborg of suborgs) {
-      const suborgReposRes = await fetch(`${base}/suborganizations/${suborg.id}/repositories`);
-      const suborgRepos = suborgReposRes.ok ? await suborgReposRes.json() : [];
-
-      const appsRes = await fetch(`${base}/suborganizations/${suborg.id}/applications`);
-      const apps = appsRes.ok ? await appsRes.json() : [];
-
-      const appList = [] as any[];
-      for (const app of apps) {
-        const appReposRes = await fetch(`${base}/applications/${app.id}/repositories`);
-        const appRepos = appReposRes.ok ? await appReposRes.json() : [];
-        appList.push({ ...app, repositories: appRepos });
-      }
-
-      suborgList.push({ ...suborg, repositories: suborgRepos, applications: appList });
-    }
-
-    result.push({ ...org, repositories: orgRepos, suborgs: suborgList });
-  }
-
-  return result;
-};
-
-// ...existing code...
-
-// Place these inside the component, after React import
-
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, Trash2, RotateCcw } from 'lucide-react';
 import { Button } from "@/components/ui/button";
@@ -56,6 +9,155 @@ import { typography } from '@/lib/design-tokens';
 import { Scan, StatusType } from './types';
 import ScanResultsDetail from './ScanResultsDetail';
 
+// Helper to fetch onboarding org/suborg/app/repo hierarchy — fully parallel with Promise.all
+const fetchOnboardingRepos = async () => {
+  const DB_API_BASE = (import.meta.env.VITE_DB_API_URL as string | undefined) || 'http://localhost:8001';
+  const base = DB_API_BASE.replace(/\/$/, '');
+
+  const orgsRes = await fetch(`${base}/organizations`);
+  if (!orgsRes.ok) return [];
+  const orgs = await orgsRes.json();
+
+  return Promise.all(orgs.map(async (org: any) => {
+    // Fetch org repos + suborgs in parallel
+    const [orgReposRes, suborgsRes] = await Promise.all([
+      fetch(`${base}/organizations/${org.id}/repositories`),
+      fetch(`${base}/organizations/${org.id}/suborganizations`),
+    ]);
+    const [orgRepos, suborgs] = await Promise.all([
+      orgReposRes.ok ? orgReposRes.json() : Promise.resolve([]),
+      suborgsRes.ok ? suborgsRes.json() : Promise.resolve([]),
+    ]);
+
+    // Fetch all suborg repos + apps in parallel
+    const suborgList = await Promise.all((suborgs as any[]).map(async (suborg: any) => {
+      const [subReposRes, appsRes] = await Promise.all([
+        fetch(`${base}/suborganizations/${suborg.id}/repositories`),
+        fetch(`${base}/suborganizations/${suborg.id}/applications`),
+      ]);
+      const [suborgRepos, apps] = await Promise.all([
+        subReposRes.ok ? subReposRes.json() : Promise.resolve([]),
+        appsRes.ok ? appsRes.json() : Promise.resolve([]),
+      ]);
+
+      // Fetch all app repos in parallel
+      const appList = await Promise.all((apps as any[]).map(async (app: any) => {
+        const appReposRes = await fetch(`${base}/applications/${app.id}/repositories`);
+        const appRepos = appReposRes.ok ? await appReposRes.json() : [];
+        return { ...app, repositories: appRepos };
+      }));
+
+      return { ...suborg, repositories: suborgRepos, applications: appList };
+    }));
+
+    return { ...org, repositories: orgRepos, suborgs: suborgList };
+  }));
+};
+
+// ─── ScanRow — defined OUTSIDE CryptoScanner so React.memo works correctly ───
+interface ScanRowProps {
+  scan: Scan;
+  onView: (id: number) => void;
+  onRetry: (scan: Scan) => void;
+  onDelete: (id: number) => void;
+  retryingId: number | null;
+  deletingId: number | null;
+}
+
+const ITEMS_PER_PAGE = 20;
+
+const ScanRow = React.memo<ScanRowProps>(({ scan, onView, onRetry, onDelete, retryingId, deletingId }) => {
+  const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
+  const fileCountDisplay =
+    scan.scan_status === 'in_progress' && scan.total_files_to_scan > 0
+      ? `${scan.total_files || 0} / ${scan.total_files_to_scan}`
+      : scan.total_files || '-';
+
+  const getStatusBadge = () => {
+    switch (scan.scan_status) {
+      case 'pending': return 'warning';
+      case 'in_progress': return 'info';
+      case 'completed': return 'success';
+      case 'failed': return 'error';
+      case 'cached': return 'success';
+      default: return 'neutral';
+    }
+  };
+
+  const getStatusLabel = () => {
+    switch (scan.scan_status) {
+      case 'pending': return 'Queued';
+      case 'in_progress': return 'In Progress';
+      case 'completed': return 'Completed';
+      case 'failed': return 'Failed';
+      case 'cached': return 'Cached';
+      default: return scan.scan_status || 'Unknown';
+    }
+  };
+
+  const getStatusIcon = () => {
+    switch (scan.scan_status) {
+      case 'pending': return <Clock className="h-5 w-5" />;
+      case 'in_progress': return <RefreshCw className="h-5 w-5 animate-spin" />;
+      case 'completed':
+      case 'cached': return <CheckCircle className="h-5 w-5" />;
+      case 'failed': return <XCircle className="h-5 w-5" />;
+      default: return <Shield className="h-5 w-5" />;
+    }
+  };
+
+  const quantumReadinessDisplay = scan.quantum_readiness_percentage !== undefined && scan.quantum_readiness_percentage !== null
+    ? `${Math.round(scan.quantum_readiness_percentage)}%`
+    : 'N/A';
+  const riskLevelDisplay = scan.overall_grade ?? 'N/A';
+  const securityScoreDisplay = scan.overall_security_score !== undefined && scan.overall_security_score !== null
+    ? `${Math.round(scan.overall_security_score)}/100`
+    : 'N/A';
+
+  return (
+    <UnifiedResultCard
+      key={scan.id}
+      title={formatRepoName(scan.repo_url)}
+      description={`${scan.platform || 'Unknown'} • Branch: ${scan.branch_name || 'main'} • ${fileCountDisplay} files`}
+      status={getStatusBadge()}
+      statusLabel={getStatusLabel()}
+      icon={getStatusIcon()}
+      metrics={[
+        { label: "Quantum Readiness", value: quantumReadinessDisplay, valueClassName: "text-primary" },
+        { label: "Risk Level", value: riskLevelDisplay, valueClassName: "text-warning" },
+        { label: "Security Score", value: securityScoreDisplay, valueClassName: "text-success" }
+      ]}
+      actions={[
+        ...(canView ? [{
+          label: "View Results",
+          icon: <Eye className="w-4 h-4 mr-2" />,
+          onClick: () => onView(scan.id),
+          variant: "outline" as const
+        }] : []),
+        ...((scan.scan_status === 'failed' || scan.scan_status === 'in_progress' || scan.scan_status === 'pending') ? [{
+          label: retryingId === scan.id ? "Retrying..." : "Retry",
+          icon: retryingId === scan.id ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />,
+          onClick: () => onRetry(scan),
+          variant: "outline" as const,
+          disabled: retryingId === scan.id
+        }] : []),
+        {
+          label: "Delete",
+          icon: deletingId === scan.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />,
+          onClick: () => onDelete(scan.id),
+          variant: "destructive" as const,
+          disabled: deletingId === scan.id
+        }
+      ]}
+    >
+      {scan.current_status && (
+        <div className="text-sm text-muted-foreground mb-2">{scan.current_status}</div>
+      )}
+    </UnifiedResultCard>
+  );
+});
+ScanRow.displayName = 'ScanRow';
+
 interface CryptoScannerProps {
   onBack: () => void;
   autoLoadRepo?: string;
@@ -65,8 +167,9 @@ const API_URL = import.meta.env.VITE_REPO_SCAN_API_URL
 
 const formatRepoName = (url: string) => {
   try {
-    const parts = url.replace(/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//, '');
-    return parts;
+    return url
+      .replace(/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//, '')
+      .replace(/\.git$/, '');
   } catch {
     return url;
   }
@@ -99,10 +202,33 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
   const [deletingAll, setDeletingAll] = useState(false);
   const [retryingId, setRetryingId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'onboarded'>('scan');
+  const [currentPage, setCurrentPage] = useState(1);
+  // Ref to detect unchanged polls and skip re-renders
+  const scansSignatureRef = useRef('');
+
+  // ── defined BEFORE the useEffects that call it to avoid TDZ error ──
+  const loadHistory = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/scans?limit=200`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const data: Scan[] = await response.json();
+      // Smart diff — skip setScans if data hasn't changed (no unnecessary re-renders)
+      const newSig = data.map(s => `${s.id}:${s.scan_status}:${s.total_files ?? 0}`).join('|');
+      if (newSig !== scansSignatureRef.current) {
+        scansSignatureRef.current = newSig;
+        setScans(data);
+        setCurrentPage(1);
+      }
+      setIsLoading(false);
+    } catch (error) {
+      showStatusMessage('Failed to fetch scan history', 'error');
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadHistory();
-  }, []);
+  }, [loadHistory]);
 
   // Auto-load repo scan results if navigated from Applications page
   useEffect(() => {
@@ -141,7 +267,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     setTimeout(() => setShowStatus(false), 5000);
   };
 
-  const deleteScan = async (scanId: number) => {
+  const deleteScan = useCallback(async (scanId: number) => {
     if (!window.confirm('Are you sure you want to delete this scan and all its results? This action cannot be undone.')) {
       return;
     }
@@ -167,9 +293,9 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     } finally {
       setDeletingId(null);
     }
-  };
+  }, [loadHistory]);
 
-  const retryScan = async (scan: Scan) => {
+  const retryScan = useCallback(async (scan: Scan) => {
     setRetryingId(scan.id);
     try {
       // DELETE the old failed scan FIRST before creating new one
@@ -215,17 +341,21 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     } finally {
       setRetryingId(null);
     }
-  };
+  }, [loadHistory]);
 
   useEffect(() => {
     if (!autoRefresh) return;
-    
+    // Only keep polling while at least one scan is actively in-progress or pending
+    const hasActive = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending');
+    if (!hasActive) {
+      setAutoRefresh(false);
+      return;
+    }
     const interval = setInterval(() => {
       loadHistory();
-    }, 4000); // Faster polling - every 2 seconds instead of 3
-    
+    }, 8000); // 8 s is sufficient; aggressive 4 s polling caused unnecessary re-renders
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [autoRefresh, scans, loadHistory]);
 
   const fetchBranches = async (url: string) => {
     if (!url.trim()) {
@@ -332,28 +462,6 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     return () => clearTimeout(timer);
   }, [repoUrl]);
 
-  const loadHistory = async () => {
-    try {
-      console.log('🔄 Loading scan history from:', `${API_URL}/api/scans`);
-      // Increase limit to 200 to handle large onboarding batches (100 domains, 100 repos)
-      const response = await fetch(`${API_URL}/api/scans?limit=200`);
-      console.log('📡 Response status:', response.status);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data: Scan[] = await response.json();
-      console.log('✅ Loaded scans:', data.length, 'scans');
-      setScans(data);
-      setIsLoading(false);
-    } catch (error) {
-      console.error('❌ Failed to load history:', error);
-      showStatusMessage('Failed to fetch scan history', 'error');
-      setIsLoading(false);
-    }
-  };
-
   const scanRepository = async () => {
     if (!repoUrl.trim()) {
       showStatusMessage('Please enter a repository URL', 'error');
@@ -408,13 +516,13 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     }
   };
 
-  const refreshHistory = async () => {
+  const refreshHistory = useCallback(async () => {
     setIsRefreshing(true);
     await loadHistory();
     setTimeout(() => setIsRefreshing(false), 500);
-  };
+  }, [loadHistory]);
 
-  const deleteAllScans = async () => {
+  const deleteAllScans = useCallback(async () => {
     if (!window.confirm('Delete ALL scan history? This removes every repository scan record.')) return;
     setDeletingAll(true);
     try {
@@ -424,6 +532,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
         throw new Error(data?.message || 'Failed to delete all scans');
       }
       showStatusMessage('All scan history deleted', 'success');
+      scansSignatureRef.current = '';
       setScans([]);
     } catch (error: any) {
       const errMsg = error instanceof Error ? error.message : 'Failed to delete all scans';
@@ -431,16 +540,16 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     } finally {
       setDeletingAll(false);
     }
-  };
+  }, []);
 
-  const handleOnboardingRepoScan = (url: string, branch?: string) => {
+  const handleOnboardingRepoScan = useCallback((url: string, branch?: string) => {
     if (!url) return;
     setRepoUrl(url);
     setBranchName(branch || 'main');
     setCurrentView('list');
-    setIsAutoScanFromOnboarding(true); // Mark as auto-scan from onboarding
+    setIsAutoScanFromOnboarding(true);
     void validateUrl(url);
-  };
+  }, []);
 
   const performScanWithRepo = async (url: string, branch: string) => {
     if (!url.trim() || !branch.trim()) {
@@ -481,136 +590,17 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     }
   };
 
-  useEffect(() => {
-    const hasInProgress = scans.some(s => 
-      s.scan_status === 'in_progress' || s.scan_status === 'pending'
-    );
-    // Don't stop auto-refresh immediately - give it time to show completion
-    if (!hasInProgress && autoRefresh) {
-      // Wait 5 seconds before stopping to ensure UI updates
-      setTimeout(() => setAutoRefresh(false), 5000);
-    }
-  }, [scans, autoRefresh]);
-
-  const handleViewResults = (scanId: number) => {
+  const handleViewResults = useCallback((scanId: number) => {
     setSelectedScanId(scanId);
     setCurrentView('detail');
-  };
+  }, []);
 
-    const ScanRow: React.FC<{ scan: Scan }> = ({ scan }) => {
-      const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
-      const fileCountDisplay =
-        scan.scan_status === 'in_progress' && scan.total_files_to_scan > 0
-          ? `${scan.total_files || 0} / ${scan.total_files_to_scan}`
-          : scan.total_files || '-';
-  
-      const getStatusBadge = () => {
-        switch (scan.scan_status) {
-          case 'pending':
-            return 'warning';
-          case 'in_progress':
-            return 'info';
-          case 'completed':
-            return 'success';
-          case 'failed':
-            return 'error';
-          case 'cached':
-            return 'success';
-          default:
-            return 'neutral';
-        }
-      };
-
-      const getStatusLabel = () => {
-        switch (scan.scan_status) {
-          case 'pending':
-            return 'Queued';
-          case 'in_progress':
-            return 'In Progress';
-          case 'completed':
-            return 'Completed';
-          case 'failed':
-            return 'Failed';
-          case 'cached':
-            return 'Cached';
-          default:
-            return scan.scan_status || 'Unknown';
-        }
-      };
-
-      const getStatusIcon = () => {
-        switch (scan.scan_status) {
-          case 'pending':
-            return <Clock className="h-5 w-5" />;
-          case 'in_progress':
-            return <RefreshCw className="h-5 w-5 animate-spin" />;
-          case 'completed':
-          case 'cached':
-            return <CheckCircle className="h-5 w-5" />;
-          case 'failed':
-            return <XCircle className="h-5 w-5" />;
-          default:
-            return <Shield className="h-5 w-5" />;
-        }
-      };
-
-      // Format metrics from scan results
-      const quantumReadinessDisplay = scan.quantum_readiness_percentage !== undefined && scan.quantum_readiness_percentage !== null
-        ? `${Math.round(scan.quantum_readiness_percentage)}%`
-        : 'N/A';
-      
-      const riskLevelDisplay = scan.overall_grade !== undefined && scan.overall_grade !== null
-        ? scan.overall_grade
-        : 'N/A';
-
-      const securityScoreDisplay = scan.overall_security_score !== undefined && scan.overall_security_score !== null
-        ? `${Math.round(scan.overall_security_score)}/100`
-        : 'N/A';
-
-      return (
-        <UnifiedResultCard
-          key={scan.id}
-          title={formatRepoName(scan.repo_url)}
-          description={`${scan.platform || 'Unknown'} • Branch: ${scan.branch_name || 'main'} • ${fileCountDisplay} files`}
-          status={getStatusBadge()}
-          statusLabel={getStatusLabel()}
-          icon={getStatusIcon()}
-          metrics={[
-            { label: "Quantum Readiness", value: quantumReadinessDisplay, valueClassName: "text-primary" },
-            { label: "Risk Level", value: riskLevelDisplay, valueClassName: "text-warning" },
-            { label: "Security Score", value: securityScoreDisplay, valueClassName: "text-success" }
-          ]}
-          actions={[
-            ...(canView ? [{
-              label: "View Results",
-              icon: <Eye className="w-4 h-4 mr-2" />,
-              onClick: () => handleViewResults(scan.id),
-              variant: "outline" as const
-            }] : []),
-            ...((scan.scan_status === 'failed' || scan.scan_status === 'in_progress' || scan.scan_status === 'pending') ? [{
-              label: retryingId === scan.id ? "Retrying..." : "Retry",
-              icon: retryingId === scan.id ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />,
-              onClick: () => retryScan(scan),
-              variant: "outline" as const,
-              disabled: retryingId === scan.id
-            }] : []),
-            {
-              label: "Delete",
-              icon: deletingId === scan.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />,
-              onClick: () => deleteScan(scan.id),
-              variant: "destructive" as const,
-              disabled: deletingId === scan.id
-            }
-          ]}
-        >
-          {scan.current_status && (
-            <div className="text-sm text-muted-foreground mb-2">
-              {scan.current_status}
-            </div>
-          )}
-        </UnifiedResultCard>
-      );
-    };
+  // Pagination helpers (ScanRow defined above as React.memo)
+  const totalPages = Math.ceil(scans.length / ITEMS_PER_PAGE);
+  const paginatedScans = useMemo(
+    () => scans.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
+    [scans, currentPage]
+  );
 
   if (currentView === 'detail' && selectedScanId) {
     return (
@@ -857,9 +847,51 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
                   </div>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {scans.map((scan) => <ScanRow key={scan.id} scan={scan} />)}
-                </div>
+                <>
+                  <div className="space-y-4">
+                    {paginatedScans.map((scan) => (
+                      <ScanRow
+                        key={scan.id}
+                        scan={scan}
+                        onView={handleViewResults}
+                        onRetry={retryScan}
+                        onDelete={deleteScan}
+                        retryingId={retryingId}
+                        deletingId={deletingId}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Pagination controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-6 pt-4 border-t">
+                      <p className="text-sm text-muted-foreground">
+                        Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, scans.length)} of {scans.length} scans
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-sm font-medium px-2">
+                          Page {currentPage} / {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                          disabled={currentPage === totalPages}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
         </div>

@@ -42,6 +42,8 @@ class AlgorithmScoreOutput(BaseModel):
     quantum_safety_reason: Optional[str] = None
     deprecated: bool
     vulnerabilities: List[str] = Field(default_factory=list)
+    context: Optional[Dict] = Field(default_factory=dict, description="Source location and metadata")
+    category: Optional[str] = Field(None, description="Algorithm category for grouping")
 
 
 class ComponentScore(BaseModel):
@@ -55,6 +57,8 @@ class ComponentScore(BaseModel):
     weight_in_final: float
     best_algorithm: str
     worst_algorithm: str
+    best_algorithm_context: Optional[Dict] = Field(default_factory=dict, description="Source context for best algorithm")
+    worst_algorithm_context: Optional[Dict] = Field(default_factory=dict, description="Source context for worst algorithm")
     pqc_percentage: float
     hybrid_percentage: float
     deprecated_count: int
@@ -108,6 +112,7 @@ class UniversalScoringResponse(BaseModel):
     security_features: Optional[SecurityFeatures] = None
     quantum_ready: bool
     hybrid_ready: bool
+    quantum_readiness_detail: Optional[Dict] = None
     critical_vulnerabilities: List[str] = Field(default_factory=list)
     compliance_status: Dict[str, bool] = Field(default_factory=dict)
     metadata: Dict = Field(default_factory=dict, description="Original request metadata + processing info")

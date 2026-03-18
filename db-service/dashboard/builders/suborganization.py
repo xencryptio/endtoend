@@ -158,14 +158,8 @@ def build_suborg_view(suborg_id: str, db: Session) -> Dict[str, Any]:
         # Calculate Time Complexity
         time_complexity = get_time_complexity(total_vulnerabilities)
 
-        # Determine Migration Status
-        migration_status = get_migration_status(
-            row.get("quantum_ready_count", 0),
-            row.get("total_scans", 0),
-            row.get("latest_scan_date", datetime.now()),
-            row.get("completed_jobs", 0),
-            row.get("total_scan_jobs", 0)
-        )
+        # Migration Status — use the SQL-computed value which respects manual overrides
+        migration_status = row.get("status", "Not Started")
 
         # Determine App Category
         app_category = determine_app_category(

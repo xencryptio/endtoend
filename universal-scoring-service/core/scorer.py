@@ -1,12 +1,32 @@
 """
-Universal PQC Scoring Engine
-SINGLE implementation that works for agent, TLS, and repository scans
+Universal PQC Scoring Engine — Quantum Readiness Framework v2
+
+Scoring philosophy (NIST IR 8413 / CISA PQC Migration Guidance 2024):
+──────────────────────────────────────────────────────────────────────
+* Key Exchange (KEX) is the PRIMARY migration priority.
+  Hybrid KEX (ECDH + ML-KEM) can be deployed TODAY and protects against
+  Harvest-Now-Decrypt-Later (HNDL) attacks immediately.
+* Symmetric: AES-256 / ChaCha20-Poly1305 are already Grover-safe
+  (128-bit post-quantum security). No migration needed.
+* Certificates: no public CA supports PQC certs yet (2024-2026), so
+  classical ECDSA P-256 / RSA-2048 must not be heavily penalised.
+
+Grade thresholds (QR readiness scale):
+  A+  >= 90  Full hybrid KEX + strong symmetric
+  A   >= 85  Hybrid KEX deployed, excellent everything
+  B+  >= 78  Hybrid KEX at server preference
+  B   >= 72  Hybrid KEX available, TLS 1.3 active
+  B-  >= 65  Some hybrid KEX, classical fallback majority
+  C+  >= 58  X25519 only (no hybrid), good symmetric
+  C   >= 50  ECDHE + good symmetric, no hybrid
+  C-  >= 42  Older patterns but not broken
+  D   >= 35  Legacy concerns
+  F   <  35  Broken or severely inadequate
 """
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from .algorithms import PQ_RESISTANCE_TABLE, PQC_ALGORITHMS, DEPRECATED_ALGORITHMS, HYBRID_ALGORITHMS
 from .models import AlgorithmScoreOutput, ComponentScore, ProtocolAnalysis, CertificateAnalysis, SecurityFeatures
 import logging
-import re
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -31,12 +51,16 @@ class UniversalPQCScorer:
         }
         
         self.component_weights = {
-            "kex": 0.35, "signature": 0.30, "symmetric": 0.20, "hash": 0.15,
+            # KEX weight raised: PQ hybrid KEX is deployable TODAY and is the
+            # primary indicator of quantum readiness in active TLS sessions.
+            # Signature weight lowered: PQC certificates don't exist yet for
+            # public CAs, so a 30% penalty for classical certs is unfair.
+            "kex": 0.40, "signature": 0.20, "symmetric": 0.25, "hash": 0.15,
             "protocol": 0.10, "certificate": 0.10
         }
 
     def score_algorithms(
-        self, 
+        self,
         algorithms: List[Dict],
         scoring_type: str = "generic",
         metadata: Dict = None,
@@ -47,7 +71,7 @@ class UniversalPQCScorer:
         """
         if not algorithms:
             return self._empty_result(scoring_type)
-        
+
         scored_algorithms = []
         for algo in algorithms:
             score = self._score_single_algorithm(
@@ -60,33 +84,34 @@ class UniversalPQCScorer:
                 context=algo.get("context", {})
             )
             scored_algorithms.append(score)
-        
+
         components_data = self._group_by_component(scored_algorithms)
-        
+
         components = {}
         for comp_type, scores in components_data.items():
             if scores:
                 components[comp_type] = self._aggregate_component(scores, comp_type)
-        
-        overall_score = self._calculate_overall_score(components)
+
+        # hybrid_ready must be computed BEFORE overall_score so the bonus is applied
+        hybrid_ready = self._check_hybrid_readiness(scored_algorithms)
+        overall_score = self._calculate_overall_score(components, scored_algorithms, hybrid_ready)
         overall_grade = self._score_to_grade(overall_score)
         security_level = self._determine_security_level(overall_score)
-        quantum_ready = self._check_quantum_readiness(components, overall_score)
-        hybrid_ready = self._check_hybrid_readiness(scored_algorithms)
-        
+        quantum_ready = self._check_quantum_readiness(components, overall_score, hybrid_ready)
+
         vulnerabilities = self._identify_vulnerabilities(scored_algorithms, components)
-        
-        compliance = self._check_compliance(components, overall_score)
-        
+        compliance = self._check_compliance(components, overall_score, hybrid_ready)
+        qr_detail = self._build_qr_detail(scored_algorithms, components, hybrid_ready)
+
         protocol_analysis = None
         certificate_analysis = None
         security_features = None
         if scoring_type == "tls" and raw_response:
-            data_for_analysis = { "raw_response": raw_response }
+            data_for_analysis = {"raw_response": raw_response}
             protocol_analysis = self._analyze_protocol_features(data_for_analysis)
-            sig_scores = [s for s in scored_algorithms if s.algorithm_type == 'signature']
+            sig_scores = [s for s in scored_algorithms if s.algorithm_type == "signature"]
             certificate_analysis = self._analyze_certificate_chain(data_for_analysis, sig_scores)
-            kex_scores = [s for s in scored_algorithms if s.algorithm_type == 'kex']
+            kex_scores = [s for s in scored_algorithms if s.algorithm_type == "kex"]
             security_features = self._analyze_security_features(data_for_analysis, kex_scores)
 
         return {
@@ -97,6 +122,7 @@ class UniversalPQCScorer:
             "security_level": security_level,
             "quantum_ready": quantum_ready,
             "hybrid_ready": hybrid_ready,
+            "quantum_readiness_detail": qr_detail,
             "components": {k: v.dict() for k, v in components.items()},
             "algorithm_scores": [s.dict() for s in scored_algorithms],
             "protocol_analysis": protocol_analysis.dict() if protocol_analysis else None,
@@ -118,9 +144,18 @@ class UniversalPQCScorer:
         context: Dict = None
     ) -> AlgorithmScoreOutput:
         type_table = self.resistance_table.get(algo_type, {})
-        base_score = type_table.get(name.upper(), 0)
-        
-        if base_score == 0:
+        name_upper = name.upper()
+
+        # --- Exact lookup first (highest priority) ----------------------------
+        # Use explicit table entry if present, even when the score is 0.
+        # A score of 0 is a DELIBERATE value (e.g. RSA KEX = 0 because it is
+        # classically weak and not quantum-safe).  Falling into fuzzy_lookup for
+        # zero-scored algorithms would incorrectly award points via substring
+        # matches (e.g. "RSA" matches "RSA-PSK"→35, "DH" matches "DHE-PSK"→45).
+        if name_upper in type_table:
+            base_score = float(type_table[name_upper])
+        else:
+            # Algorithm name not in table — try case-insensitive fuzzy search.
             base_score = self._fuzzy_lookup(name, type_table)
         
         key_size_score = self._calculate_key_size_bonus(name, key_size or 0, algo_type)
@@ -155,7 +190,9 @@ class UniversalPQCScorer:
             security_level=self._determine_security_level(final_score),
             quantum_safe=quantum_safe,
             quantum_safety_reason=safety_reason,
-            deprecated=deprecated
+            deprecated=deprecated,
+            context=context or {},
+            category=algo_type
         )
 
     def _group_by_component(self, scores: List[AlgorithmScoreOutput]) -> Dict[str, List[AlgorithmScoreOutput]]:
@@ -168,14 +205,30 @@ class UniversalPQCScorer:
     def _aggregate_component(self, scores: List[AlgorithmScoreOutput], comp_type: str) -> ComponentScore:
         if not scores:
             return None
-        
+
         final_scores = [s.final_score for s in scores]
         weighted_scores = [s.weighted_score for s in scores]
         position_weights = [1.0 / (1 + 0.05 * s.position) for s in scores]
-        
+
         avg_score = sum(final_scores) / len(final_scores)
         weighted_avg = sum(weighted_scores) / sum(position_weights) if sum(position_weights) > 0 else avg_score
-        
+
+        # PQC-aware KEX aggregation:
+        # Classical ECDHE entries must not drag down the component score when
+        # hybrid (ML-KEM / Kyber) groups are present, because the TLS handshake
+        # will USE the highest-priority group the client supports — meaning any
+        # session with a modern client actually uses the PQC hybrid exchange.
+        # Weight: 85% from PQC scores, 15% from classical scores.
+        if comp_type == "kex":
+            pqc_scores_list = [s.final_score for s in scores if s.is_pqc or s.is_hybrid]
+            cls_scores_list = [s.final_score for s in scores if not (s.is_pqc or s.is_hybrid)]
+            if pqc_scores_list and cls_scores_list:
+                pqc_avg = sum(pqc_scores_list) / len(pqc_scores_list)
+                cls_avg = sum(cls_scores_list) / len(cls_scores_list)
+                weighted_avg = pqc_avg * 0.85 + cls_avg * 0.15
+            elif pqc_scores_list:
+                weighted_avg = sum(pqc_scores_list) / len(pqc_scores_list)
+
         pqc_count = sum(1 for s in scores if s.is_pqc)
         pqc_percentage = (pqc_count / len(scores)) * 100 if scores else 0
         hybrid_count = sum(1 for s in scores if s.is_hybrid)
@@ -186,6 +239,9 @@ class UniversalPQCScorer:
         pfs_algos = ["DHE", "ECDHE", "X25519", "X448"] + list(self.pqc_algorithms)
         pfs_enabled = any(any(pfs in s.algorithm.upper() for pfs in pfs_algos) for s in scores) if comp_type == "kex" else False
 
+        best_algo = max(scores, key=lambda x: x.final_score)
+        worst_algo = min(scores, key=lambda x: x.final_score)
+        
         return ComponentScore(
             component_type=comp_type,
             algorithms=scores,
@@ -194,8 +250,10 @@ class UniversalPQCScorer:
             weighted_average=round(weighted_avg, 2),
             grade=self._score_to_grade(weighted_avg),
             weight_in_final=self.component_weights.get(comp_type, 0.1),
-            best_algorithm=max(scores, key=lambda x: x.final_score).algorithm,
-            worst_algorithm=min(scores, key=lambda x: x.final_score).algorithm,
+            best_algorithm=best_algo.algorithm,
+            worst_algorithm=worst_algo.algorithm,
+            best_algorithm_context=best_algo.context or {},
+            worst_algorithm_context=worst_algo.context or {},
             pqc_percentage=round(pqc_percentage, 2),
             hybrid_percentage=round(hybrid_percentage, 2),
             deprecated_count=deprecated_count,
@@ -204,59 +262,228 @@ class UniversalPQCScorer:
             pfs_enabled=pfs_enabled
         )
 
-    def _calculate_overall_score(self, components: Dict[str, ComponentScore]) -> float:
-        total_score = 0
-        total_weight = 0
-        
+    def _calculate_overall_score(
+        self,
+        components: Dict[str, ComponentScore],
+        scored_algorithms: List[AlgorithmScoreOutput],
+        hybrid_ready: bool
+    ) -> float:
+        # Stage 1: standard weighted average across components
+        total_score = 0.0
+        total_weight = 0.0
         for comp in components.values():
             weight = self.component_weights.get(comp.component_type, 0.1)
             total_score += comp.weighted_average * weight
             total_weight += weight
-        
-        return total_score / total_weight if total_weight > 0 else 0
+        base = total_score / total_weight if total_weight > 0 else 0.0
 
-    def _check_quantum_readiness(self, components: Dict[str, ComponentScore], overall_score: float) -> bool:
-        if overall_score < 80:
-            return False
-        
-        has_pqc = any(comp.pqc_percentage > 0 for comp in components.values())
-        
-        high_quantum_safe = all(
-            comp.quantum_safe_count / comp.algorithm_count >= 0.5
-            for comp in components.values() if comp.algorithm_count > 0
-        )
-        
-        return has_pqc or high_quantum_safe
+        # Stage 2: hybrid KEX bonus — reflects that HNDL protection is most
+        # critical concern for active TLS sessions, and hybrid KEX solves it.
+        bonus = 0.0
+        if hybrid_ready:
+            best_pqc_kex = max(
+                (s.final_score for s in scored_algorithms
+                 if s.algorithm_type == "kex" and (s.is_pqc or s.is_hybrid)),
+                default=0.0
+            )
+            if best_pqc_kex >= 97:   # ML-KEM-768/1024 or equivalent
+                bonus = 18.0
+            elif best_pqc_kex >= 92:
+                bonus = 15.0
+            elif best_pqc_kex >= 85:
+                bonus = 12.0
+            else:
+                bonus = 8.0
+
+            # Reduce bonus slightly if symmetric is weak
+            sym_comp = components.get("symmetric")
+            if sym_comp and sym_comp.weighted_average < 65:
+                bonus -= 5.0
+
+        raw = base + bonus
+
+        # Stage 3: minimum floor — a server advertising hybrid KEX + good
+        # symmetric (Grover-safe) should never score below 55 regardless of
+        # classical cert drag.
+        sym_comp_s3 = components.get("symmetric")
+        sym_ok = (sym_comp_s3.weighted_average >= 70) if sym_comp_s3 is not None else False
+        if hybrid_ready and sym_ok:
+            raw = max(raw, 55.0)
+
+        # Stage 4: Protocol quality adjustment
+        # Use the populated "protocol" component (from Step 6 in crypto_audit.py)
+        # to apply two symmetric corrections:
+        #
+        # a) TLS 1.3-forward bonus (fills B-grade gap):
+        #    Servers that run TLS 1.3 exclusively and have not been caught by
+        #    the hybrid KEX bonus deserve modest recognition; they have already
+        #    eliminated DHE/RSA cipher debt and are one config flag away from
+        #    deploying X25519MLKEM768.  Without this, every non-Cloudflare
+        #    server collapses into the C-/D range regardless of how clean their
+        #    stack is.
+        #
+        # b) Legacy protocol penalty:
+        #    Accepting TLS 1.0/1.1 is a Harvest-Now-Decrypt-Later amplifier
+        #    (more historical traffic exposed). Penalise proportionally.
+        proto_comp = components.get("protocol")
+        if proto_comp is not None:
+            proto_avg = proto_comp.weighted_average
+            # a) TLS 1.3-forward bonus: TLS 1.3 present (alone or with TLS 1.2)
+            #    scores >80 on the protocol component; TLS 1.2-only scores 75.
+            if not hybrid_ready and proto_avg >= 80:   # TLS 1.3 present
+                raw += 7.0   # Fills B-grade gap: moves C+ servers to B range
+            elif proto_avg < 50:                       # TLS 1.0/1.1 detected
+                penalty = (50.0 - proto_avg) * 0.2    # up to -10 pts at SSL 3.0
+                raw = max(0.0, raw - penalty)
+
+        return min(raw, 100.0)
+
+    def _check_quantum_readiness(
+        self,
+        components: Dict[str, ComponentScore],
+        overall_score: float,
+        hybrid_ready: bool
+    ) -> bool:
+        # A server is quantum-ready when:
+        # 1. It offers PQC/hybrid key exchange (HNDL protection today), AND
+        # 2. Its symmetric encryption is Grover-safe (AES-256 / ChaCha20 = 128-bit PQC)
+        # We do NOT require PQC certificates because CAs cannot issue them yet (2024).
+        sym_comp = components.get("symmetric")
+        sym_ok = (sym_comp.weighted_average >= 70) if sym_comp else False
+        return hybrid_ready and sym_ok
 
     def _check_hybrid_readiness(self, scores: List[AlgorithmScoreOutput]) -> bool:
-        return any(s.is_hybrid for s in scores)
+        # Only KEX algorithms matter for hybrid readiness — a PQC signature sitting
+        # in the list should not trigger a false positive here.
+        return any(s.is_hybrid and s.algorithm_type == "kex" for s in scores)
+
+    def _build_qr_detail(
+        self,
+        scored_algorithms: List[AlgorithmScoreOutput],
+        components: Dict[str, ComponentScore],
+        hybrid_ready: bool
+    ) -> Dict:
+        kex_scores = [s for s in scored_algorithms if s.algorithm_type == "kex"]
+        hybrid_kex = [s.algorithm for s in kex_scores if s.is_hybrid or s.is_pqc]
+        classical_kex = [s.algorithm for s in kex_scores if not (s.is_hybrid or s.is_pqc)]
+        sig_algos = [s.algorithm for s in scored_algorithms if s.algorithm_type == "signature"]
+        sym_scores = [s for s in scored_algorithms if s.algorithm_type == "symmetric"]
+        strong_sym = [s.algorithm for s in sym_scores if s.final_score >= 80]
+        weak_sym = [s.algorithm for s in sym_scores if s.final_score < 60]
+
+        # HNDL risk assessment
+        # Risk tiers:
+        #   low    — hybrid PQC/classical KEX deployed (ML-KEM, Kyber hybrid)
+        #   medium — modern classical KEX only (X25519, ECDHE, FFDHE-3072+)
+        #            These are NOT quantum-safe but represent sound current practice.
+        #   high   — weak or legacy KEX only (RSA, plain DH-1024, DHE-512, etc.)
+        # The '15' threshold captures X25519 (score≈30) and ECDHE (score≈10-20)
+        # while excluding plain RSA key exchange (score≈0) and weak DH (score≈5).
+        if hybrid_ready:
+            hndl_risk = "low"
+            hndl_reason = ("Hybrid PQC/classical key exchange is deployed. "
+                           "Active TLS sessions are protected against Harvest-Now-Decrypt-Later attacks.")
+        elif any(s.final_score >= 15 for s in kex_scores):
+            hndl_risk = "medium"
+            hndl_reason = ("No PQC hybrid KEX detected. Modern classical KEX (X25519/ECDHE) is in use — "
+                           "data is classically secure but vulnerable to Harvest-Now-Decrypt-Later. "
+                           "Deploying X25519MLKEM768 would eliminate this risk immediately.")
+        else:
+            hndl_risk = "high"
+            hndl_reason = ("Weak or legacy key exchange (DH-1024 / RSA KEX) with no PQC hybrid groups. "
+                           "Critical HNDL exposure — prioritise immediate KEX migration to "
+                           "X25519 + X25519MLKEM768.")
+
+        kex_comp = components.get("kex")
+        sig_comp = components.get("signature")
+        sym_comp = components.get("symmetric")
+        proto_comp = components.get("protocol")
+
+        # Collect detected legacy (deprecated) protocols
+        legacy_protocols_detected = [
+            s.algorithm for s in scored_algorithms
+            if s.algorithm_type == "protocol" and s.deprecated
+        ]
+
+        # Migration tier
+        if legacy_protocols_detected:
+            migration_tier = 3
+            lp_str = ", ".join(legacy_protocols_detected)
+            migration_note = (
+                f"Critical: deprecated protocol(s) detected: {lp_str}. "
+                "Disable TLS 1.0/1.1 immediately, then deploy X25519MLKEM768 hybrid KEX."
+            )
+        elif hybrid_ready and (sym_comp and sym_comp.weighted_average >= 70):
+            migration_tier = 1
+            migration_note = "KEX migration complete. Await PQC certificate issuance by CAs (est. 2026-2028)."
+        elif hybrid_ready:
+            migration_tier = 2
+            migration_note = "Hybrid KEX deployed. Upgrade symmetric to AES-256 / ChaCha20-Poly1305."
+        else:
+            migration_tier = 3
+            migration_note = "Deploy hybrid KEX groups (X25519MLKEM768 / X25519MLKEM1024) as first priority."
+
+        return {
+            "hndl_risk": hndl_risk,
+            "hndl_reason": hndl_reason,
+            "migration_tier": migration_tier,
+            "migration_note": migration_note,
+            "hybrid_kex_groups": hybrid_kex,
+            "classical_kex_groups": classical_kex,
+            "signature_algorithms": sig_algos,
+            "strong_symmetric": strong_sym,
+            "weak_symmetric": weak_sym,
+            "legacy_protocols": legacy_protocols_detected,
+            "kex_score": round(kex_comp.weighted_average, 2) if kex_comp else 0.0,
+            "sym_score": round(sym_comp.weighted_average, 2) if sym_comp else 0.0,
+            "sig_score": round(sig_comp.weighted_average, 2) if sig_comp else 0.0,
+            "proto_score": round(proto_comp.weighted_average, 2) if proto_comp else None,
+            "nist_standards_used": [a for a in hybrid_kex if "MLKEM" in a.upper()],
+            "draft_standards_used": [a for a in hybrid_kex if "KYBER" in a.upper() and "MLKEM" not in a.upper()],
+        }
     
     def _identify_vulnerabilities(self, scores: List[AlgorithmScoreOutput], components: Dict[str, ComponentScore]) -> List[str]:
         vulns = []
-        
+
         deprecated_algos = [s.algorithm for s in scores if s.deprecated]
         if deprecated_algos:
             vulns.append(f"Deprecated algorithms detected: {', '.join(deprecated_algos[:3])}")
-        
+
         for comp_type, comp_data in components.items():
-            if comp_data.weighted_average < 50:
-                vulns.append(f"Critical weakness in {comp_type}: score {comp_data.weighted_average}")
-        
+            if comp_data.weighted_average < 20:
+                vulns.append(f"Critical weakness in {comp_type}: score {comp_data.weighted_average:.1f}")
+
         if "kex" in components and components["kex"].pqc_percentage == 0:
-            vulns.append("No post-quantum key exchange algorithms detected")
-        
+            vulns.append(
+                "No post-quantum key exchange detected — HNDL risk: data encrypted today "
+                "could be decrypted by a future quantum computer"
+            )
+
+        sym_comp = components.get("symmetric")
+        if sym_comp and sym_comp.weighted_average < 50:
+            vulns.append(
+                f"Symmetric encryption below Grover-safe threshold (score {sym_comp.weighted_average:.1f}): "
+                "upgrade to AES-256-GCM or ChaCha20-Poly1305"
+            )
+
         return vulns
 
-    def _check_compliance(self, components: Dict[str, ComponentScore], overall_score: float) -> Dict[str, bool]:
+    def _check_compliance(
+        self,
+        components: Dict[str, ComponentScore],
+        overall_score: float,
+        hybrid_ready: bool = False
+    ) -> Dict[str, bool]:
+        sym_comp = components.get("symmetric")
+        sym_ok = (sym_comp.weighted_average >= 70) if sym_comp else False
+        all_comps_ok = all(comp.weighted_average >= 60 for comp in components.values())
         return {
-            "PCI DSS 4.0": overall_score >= 70 and all(
-                comp.weighted_average >= 60 for comp in components.values()
-            ),
+            "PCI DSS 4.0": overall_score >= 70 and all_comps_ok,
             "NIST 800-52r2": overall_score >= 75,
             "FIPS 140-3": overall_score >= 80,
-            "CNSA 2.0 (Quantum-Ready)": overall_score >= 85 and any(
-                comp.pqc_percentage > 0 for comp in components.values()
-            )
+            # CNSA 2.0 requires ML-KEM hybrid KEX + AES-256; classical certs are
+            # still acceptable during the transition period (until ~2030).
+            "CNSA 2.0 (Quantum-Ready)": hybrid_ready and sym_ok,
         }
 
     def _determine_security_level(self, score: float) -> str:
@@ -267,16 +494,15 @@ class UniversalPQCScorer:
         else: return "critical"
     
     def _score_to_grade(self, score: float) -> str:
-        if score >= 97: return "A+"
-        elif score >= 93: return "A"
-        elif score >= 90: return "A-"
-        elif score >= 87: return "B+"
-        elif score >= 83: return "B"
-        elif score >= 80: return "B-"
-        elif score >= 77: return "C+"
-        elif score >= 73: return "C"
-        elif score >= 70: return "C-"
-        elif score >= 60: return "D"
+        if score >= 90: return "A+"
+        elif score >= 85: return "A"
+        elif score >= 78: return "B+"
+        elif score >= 72: return "B"
+        elif score >= 65: return "B-"
+        elif score >= 58: return "C+"
+        elif score >= 50: return "C"
+        elif score >= 42: return "C-"
+        elif score >= 35: return "D"
         else: return "F"
     
     def _determine_quantum_safety(
@@ -295,11 +521,24 @@ class UniversalPQCScorer:
         return False, "Not quantum-resistant"
 
     def _fuzzy_lookup(self, name: str, table: Dict) -> float:
+        """Case-insensitive substring lookup that prefers the LONGEST key match.
+
+        Preferring the longest key prevents short tokens like "DSA" from
+        shadowing longer, more specific entries like "ECDSA" or "MLDSA".
+        Both the input name and every table key are uppercased before
+        comparison so mixed-case keys (e.g. "ChaCha20-Poly1305") are found
+        correctly after all keys were normalised to uppercase in algorithms.py.
+        """
         name_upper = name.upper()
-        for key in table.keys():
-            if key in name_upper or name_upper in key:
-                return table[key]
-        return 0
+        best_score = 0.0
+        best_match_len = 0
+        for key, score in table.items():
+            key_upper = key.upper()
+            if key_upper in name_upper or name_upper in key_upper:
+                if len(key_upper) > best_match_len:
+                    best_match_len = len(key_upper)
+                    best_score = float(score)
+        return best_score
     
     def _calculate_key_size_bonus(self, algo: str, key_size: int, algo_type: str) -> float:
         if key_size == 0:
@@ -313,6 +552,14 @@ class UniversalPQCScorer:
         
         elif algo_type in ["kex", "signature"]:
             if "RSA" in algo.upper() or "DH" in algo.upper():
+                # Guard: EC curve bit-sizes (224–521) are sometimes mis-attributed
+                # to RSA algorithm names when a cert chain mixes key types
+                # (e.g. ECDSA leaf signed by RSA intermediate).  Applying a
+                # −30 penalty to key_size=384 as if it were a 384-bit RSA key
+                # would be catastrophically wrong — no CA issues <512-bit RSA.
+                # Treat any sub-512 key_size here as an artefact and skip.
+                if key_size < 512:
+                    return 0
                 if key_size >= 4096: return 10
                 elif key_size >= 2048: return 0
                 else: return -30

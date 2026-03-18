@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse # Im
 from fastapi.exceptions import RequestValidationError # Import RequestValidationError
 from pydantic import BaseModel, ValidationError
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uvicorn
 import json
 import os
@@ -22,6 +22,13 @@ import requests
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import os
+
+# --- IST Timezone Configuration ---
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_now():
+    """Get current time in IST timezone"""
+    return datetime.now(IST).replace(tzinfo=None)  # Store without timezone info for consistency
 
 # --- Remote Scoring Configuration ---
 SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
@@ -196,42 +203,397 @@ def _extract_linux_algorithms(audit: Dict) -> List[Dict]:
 
 
 def _extract_windows_algorithms(audit: Dict) -> List[Dict]:
-    """Extract algorithms from Windows audit results"""
+    """
+    Extract algorithms from Windows audit results.
+
+    Every cipher suite and every certificate is scored individually —
+    no deduplication — so the scoring reflects the real distribution
+    of strong vs. weak algorithms across the full configuration.
+
+    Per cipher suite:
+      - KEX (from key_exchange field, or derived from cipher name)
+      - Symmetric cipher
+      - Hash / MAC algorithm
+
+    Per certificate (all stores):
+      - Signature algorithm (RSA, ECDSA, …)
+      - Hash extracted from the signature algorithm name
+    """
     algorithms = []
     position = 0
-    
-    # 1. TLS cipher suites
+
+    STORE_INFO = {
+        "current_user_root_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\Root",
+            "Trusted Root Certificates (User)",
+            "CurrentUser\\Root",
+        ),
+        "local_machine_root_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\Root",
+            "Trusted Root Certificates (Machine)",
+            "LocalMachine\\Root",
+        ),
+        "current_user_ca_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\CA",
+            "Intermediate CA (User)",
+            "CurrentUser\\CA",
+        ),
+        "local_machine_ca_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\CA",
+            "Intermediate CA (Machine)",
+            "LocalMachine\\CA",
+        ),
+        "current_user_authroot_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot",
+            "Third-Party Root (User)",
+            "CurrentUser\\AuthRoot",
+        ),
+        "local_machine_authroot_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot",
+            "Third-Party Root (Machine)",
+            "LocalMachine\\AuthRoot",
+        ),
+        "current_user_my_store": (
+            "HKCU\\SOFTWARE\\Microsoft\\SystemCertificates\\My",
+            "Personal Certificates (User)",
+            "CurrentUser\\My",
+        ),
+        "local_machine_my_store": (
+            "HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\My",
+            "Personal Certificates (Machine)",
+            "LocalMachine\\My",
+        ),
+    }
+
+    CIPHER_LOCATION = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\Configuration\\Local\\SSL\\00010002"
+
+    # =========================================================================
+    # 1. Parse every TLS cipher suite — one scored entry per component per suite
+    # =========================================================================
     tls = audit.get("tls_ssl_configuration", {})
     cipher_suites = tls.get("cipher_suites", {})
-    
-    for cipher in cipher_suites.get("cipher_details", [])[:10]:
-        algorithms.append({
-            "name": cipher.get("name", "UNKNOWN"),
-            "algorithm_type": "symmetric",
-            "position": position,
-            "context": {
-                "source": "tls_cipher",
-                "protocols": cipher.get("protocols", "")
-            }
-        })
-        position += 1
-    
-    # 2. Certificate signatures
-    cert_stores = audit.get("certificate_stores", {})
-    for store_name, store_data in cert_stores.items():
-        for cert in store_data.get("certificates", [])[:3]:
-            sig_algo = cert.get("signature_algorithm")
-            if sig_algo:
+
+    for cipher in cipher_suites.get("cipher_details", []):
+        cipher_name = cipher.get("name", "")
+        kex_raw     = cipher.get("key_exchange", "")
+        hash_algo   = cipher.get("hash_algorithm", "")
+        cipher_hex  = cipher.get("cipher_suite_hex", "")
+        cipher_type = cipher.get("type", "")
+
+        base_ctx = {
+            "cipher_suite": cipher_name,
+            "cipher_hex": cipher_hex,
+            "location": CIPHER_LOCATION,
+        }
+
+        # --- KEX: prefer explicit field, fall back to name-derived value ---
+        normalized_kex = None
+        if kex_raw:
+            normalized_kex = _normalize_kex_algorithm(kex_raw, cipher_name)
+        if not normalized_kex:
+            normalized_kex = _extract_kex_from_cipher_name(cipher_name)
+        if normalized_kex:
+            algorithms.append({
+                "name": normalized_kex,
+                "algorithm_type": "kex",
+                "position": position,
+                "context": {**base_ctx, "source": "tls_cipher_suite", "source_type": "TLS Cipher Suite"},
+            })
+            position += 1
+
+        # --- Symmetric cipher ---
+        symmetric_algo = _extract_symmetric_from_cipher(cipher_name)
+        if symmetric_algo:
+            algorithms.append({
+                "name": symmetric_algo,
+                "algorithm_type": "symmetric",
+                "position": position,
+                "key_size": _extract_key_size_from_cipher(cipher_name),
+                "context": {**base_ctx, "source": "tls_cipher_suite", "source_type": "TLS Cipher Suite",
+                            "cipher_type": cipher_type},
+            })
+            position += 1
+
+        # --- Hash / MAC ---
+        if hash_algo:
+            normalized_hash = _normalize_hash_algorithm(hash_algo)
+            if normalized_hash:
                 algorithms.append({
-                    "name": sig_algo,
-                    "algorithm_type": "signature",
-                    "key_size": cert.get("public_key_size", 0),
+                    "name": normalized_hash,
+                    "algorithm_type": "hash",
                     "position": position,
-                    "context": {"source": f"cert_store_{store_name}"}
+                    "context": {**base_ctx, "source": "tls_cipher_suite", "source_type": "TLS Cipher Suite (MAC)"},
                 })
                 position += 1
-    
+
+    # =========================================================================
+    # 2. Every certificate — signature + hash, one entry each
+    # =========================================================================
+    cert_stores = audit.get("certificate_stores", {})
+
+    for store_key, store_data in cert_stores.items():
+        if not isinstance(store_data, dict):
+            continue
+
+        info = STORE_INFO.get(store_key)
+        if info:
+            registry_path, store_friendly, logical_path = info
+        else:
+            registry_path  = store_key
+            store_friendly = store_data.get("store_name", store_key)
+            logical_path   = store_key
+
+        store_base_ctx = {
+            "store_path": logical_path,
+            "registry_path": registry_path,
+            "store_friendly_name": store_friendly,
+            "location": registry_path,
+        }
+
+        for cert in store_data.get("certificates", []):
+            sig_algo   = cert.get("signature_algorithm") or ""
+            subject    = cert.get("subject", "")
+            thumbprint = cert.get("thumbprint", "")
+
+            cert_ctx = {
+                **store_base_ctx,
+                "source": f"certificate_{store_key}",
+                "certificate_subject": subject[:80] if subject else "Unknown",
+                "certificate_thumbprint": thumbprint[:16] + "..." if thumbprint else "",
+                "original_algorithm": sig_algo,
+                "public_key_algorithm": cert.get("public_key_algorithm", ""),
+            }
+
+            # Signature algorithm entry
+            if sig_algo:
+                normalized_sig = _normalize_signature_algorithm(sig_algo)
+                if normalized_sig:
+                    algorithms.append({
+                        "name": normalized_sig,
+                        "algorithm_type": "signature",
+                        "key_size": cert.get("public_key_size", 0),
+                        "position": position,
+                        "context": {**cert_ctx, "source_type": "Windows Certificate Store"},
+                    })
+                    position += 1
+
+            # Hash algorithm extracted from signature name
+            sig_upper = sig_algo.upper()
+            if "SHA384" in sig_upper:
+                cert_hash = "SHA-384"
+            elif "SHA512" in sig_upper:
+                cert_hash = "SHA-512"
+            elif "SHA256" in sig_upper:
+                cert_hash = "SHA-256"
+            elif "SHA1" in sig_upper:
+                cert_hash = "SHA-1"
+            elif "MD5" in sig_upper:
+                cert_hash = "MD5"
+            else:
+                cert_hash = None
+
+            if cert_hash:
+                algorithms.append({
+                    "name": cert_hash,
+                    "algorithm_type": "hash",
+                    "position": position,
+                    "context": {**cert_ctx, "source_type": "Certificate Signature Hash",
+                                "source": "certificate_signature"},
+                })
+                position += 1
+
+    # =========================================================================
+    # 3. CryptoAPI — FIPS mode bonus
+    # =========================================================================
+    crypto_api = audit.get("cryptoapi_info", {})
+    if crypto_api.get("fips_mode_enabled"):
+        algorithms.append({
+            "name": "FIPS-140-2",
+            "algorithm_type": "protocol",
+            "position": position,
+            "context": {
+                "source": "cryptoapi_fips_mode",
+                "source_type": "CryptoAPI Configuration",
+                "location": "HKLM\\System\\CurrentControlSet\\Control\\Lsa\\FIPSAlgorithmPolicy",
+            },
+        })
+        position += 1
+
     return algorithms
+
+
+def _normalize_kex_algorithm(kex: str, cipher_name: str = "") -> str:
+    """Normalize key exchange algorithm names to match scoring table."""
+    kex_upper = kex.upper().strip()
+    
+    # Map Windows KEX names to scoring table names
+    kex_mapping = {
+        "ECDH": "ECDHE",
+        "RSA": "RSA",
+        "PSK": "PSK",
+        "DH": "DHE",
+        "DHE": "DHE",
+        "ECDHE": "ECDHE",
+    }
+    
+    # Check for modern/PQC KEX in cipher name
+    cipher_upper = cipher_name.upper()
+    if "X25519" in cipher_upper:
+        if "MLKEM" in cipher_upper or "KYBER" in cipher_upper:
+            return "X25519MLKEM768"  # Hybrid PQC
+        return "X25519"
+    if "X448" in cipher_upper:
+        return "X448"
+    if "MLKEM" in cipher_upper or "KYBER" in cipher_upper:
+        return "MLKEM768"
+    
+    return kex_mapping.get(kex_upper, kex_upper)
+
+
+def _extract_kex_from_cipher_name(cipher_name: str) -> str:
+    """Extract KEX algorithm from full cipher suite name."""
+    name_upper = cipher_name.upper()
+    
+    # Check for PQC hybrid first
+    if "X25519MLKEM" in name_upper or "X25519_MLKEM" in name_upper:
+        return "X25519MLKEM768"
+    if "X25519KYBER" in name_upper or "X25519_KYBER" in name_upper:
+        return "X25519KYBER768DRAFT00"
+    
+    # Check standard patterns
+    if "ECDHE_ECDSA" in name_upper or "ECDHE_RSA" in name_upper:
+        return "ECDHE"
+    if "DHE_RSA" in name_upper or "DHE_DSS" in name_upper:
+        return "DHE"
+    if name_upper.startswith("TLS_RSA_"):
+        return "RSA"
+    if name_upper.startswith("TLS_PSK_") or "_PSK_" in name_upper:
+        return "PSK"
+    if "ECDHE" in name_upper:
+        return "ECDHE"
+    if "DHE" in name_upper:
+        return "DHE"
+    
+    # TLS 1.3 cipher suites don't include KEX in name
+    if name_upper.startswith("TLS_AES_") or name_upper.startswith("TLS_CHACHA"):
+        return "ECDHE"  # TLS 1.3 defaults to ECDHE/X25519
+    
+    return ""
+
+
+def _extract_symmetric_from_cipher(cipher_name: str) -> str:
+    """Extract and normalize symmetric cipher from cipher suite name."""
+    name_upper = cipher_name.upper()
+    
+    # AES-GCM variants (preferred)
+    if "AES_256_GCM" in name_upper or "AES-256-GCM" in name_upper:
+        return "AES-256-GCM"
+    if "AES_128_GCM" in name_upper or "AES-128-GCM" in name_upper:
+        return "AES-128-GCM"
+    
+    # AES-CBC variants
+    if "AES_256_CBC" in name_upper or "AES-256-CBC" in name_upper:
+        return "AES-256-CBC"
+    if "AES_128_CBC" in name_upper or "AES-128-CBC" in name_upper:
+        return "AES-128-CBC"
+    
+    # ChaCha20-Poly1305
+    if "CHACHA20" in name_upper:
+        return "CHACHA20-POLY1305"
+    
+    # 3DES (deprecated)
+    if "3DES" in name_upper or "DES_CBC3" in name_upper:
+        return "3DES"
+    
+    # RC4 (broken)
+    if "RC4" in name_upper:
+        return "RC4"
+    
+    # Generic fallback - try to extract AES pattern
+    if "AES" in name_upper:
+        if "256" in name_upper:
+            if "GCM" in name_upper:
+                return "AES-256-GCM"
+            return "AES-256-CBC"
+        if "128" in name_upper:
+            if "GCM" in name_upper:
+                return "AES-128-GCM"
+            return "AES-128-CBC"
+        return "AES-256"  # Default to AES-256
+    
+    return ""
+
+
+def _extract_key_size_from_cipher(cipher_name: str) -> int:
+    """Extract key size from cipher name."""
+    if "256" in cipher_name:
+        return 256
+    if "128" in cipher_name:
+        return 128
+    if "192" in cipher_name:
+        return 192
+    return 0
+
+
+def _normalize_hash_algorithm(hash_algo: str) -> str:
+    """Normalize hash algorithm names."""
+    hash_upper = hash_algo.upper().strip()
+    
+    hash_mapping = {
+        "SHA384": "SHA-384",
+        "SHA256": "SHA-256",
+        "SHA1": "SHA-1",
+        "SHA512": "SHA-512",
+        "MD5": "MD5",
+    }
+    
+    return hash_mapping.get(hash_upper, hash_upper)
+
+
+def _normalize_signature_algorithm(sig_algo: str) -> str:
+    """Normalize certificate signature algorithm names."""
+    sig_upper = sig_algo.upper().strip()
+    
+    # Map Windows signature algorithm names to scoring table format
+    sig_mapping = {
+        "SHA256RSA": "RSA-SHA256",
+        "SHA384RSA": "RSA-SHA384",
+        "SHA512RSA": "RSA-SHA512",
+        "SHA1RSA": "RSA",  # Deprecated, maps to base RSA
+        "MD5RSA": "RSA",   # Broken, maps to base RSA
+        "SHA256ECDSA": "ECDSA-SHA256",
+        "SHA384ECDSA": "ECDSA-SHA384",
+        "SHA512ECDSA": "ECDSA-SHA512",
+        "RSASSA-PSS": "RSA-PSS",
+        "ED25519": "ED25519",
+        "ED448": "ED448",
+    }
+    
+    # Handle format like "sha256RSA" -> "SHA256RSA"
+    normalized = sig_mapping.get(sig_upper)
+    if normalized:
+        return normalized
+    
+    # Try partial matching
+    if "ECDSA" in sig_upper:
+        if "384" in sig_upper:
+            return "ECDSA-SHA384"
+        if "512" in sig_upper:
+            return "ECDSA-SHA512"
+        return "ECDSA-SHA256"
+    
+    if "RSA" in sig_upper:
+        if "PSS" in sig_upper:
+            return "RSA-PSS"
+        if "384" in sig_upper:
+            return "RSA-SHA384"
+        if "512" in sig_upper:
+            return "RSA-SHA512"
+        if "256" in sig_upper:
+            return "RSA-SHA256"
+        return "RSA"
+    
+    return sig_algo  # Return original if no mapping
 
 from logging_config import setup_logging
 # Configure logging
@@ -247,7 +609,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -285,7 +647,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 # Configuration
-AGENT_TIMEOUT_MINUTES = 5
+AGENT_TIMEOUT_MINUTES = 0.5  # Agent is inactive if no heartbeat for 30+ seconds
 AGENT_FOLDERS = {
     "linux": "agents/linux",
     "windows": "agents/windows"
@@ -305,7 +667,11 @@ class Agent(Base):
     ip_address = Column(String, nullable=False)
     os_info = Column(String, nullable=False)
     registered_at = Column(DateTime, nullable=False)
-    last_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=True)  # NULL for onboarded agents awaiting real agent
+    # Organization tracking (populated during onboarding)
+    organization_name = Column(String, nullable=True)
+    suborganization_name = Column(String, nullable=True)
+    application_name = Column(String, nullable=True)
     tasks = relationship("Task", back_populates="agent", cascade="all, delete-orphan")
     results = relationship("Result", back_populates="agent", cascade="all, delete-orphan")
 
@@ -339,6 +705,10 @@ class AgentRegistration(BaseModel):
     ip_address: str
     os_info: str
     timestamp: str
+    # Optional organization tracking (from onboarding)
+    organization_name: Optional[str] = None
+    suborganization_name: Optional[str] = None
+    application_name: Optional[str] = None
 
 class SystemInfo(BaseModel):
     agent_id: str
@@ -375,7 +745,7 @@ def get_agent_status(agent: Agent) -> str:
         return "unknown"
     
     try:
-        time_diff = datetime.now() - agent.last_seen
+        time_diff = get_ist_now() - agent.last_seen
         if time_diff > timedelta(minutes=AGENT_TIMEOUT_MINUTES):
             return "inactive"
         return "active"
@@ -384,12 +754,12 @@ def get_agent_status(agent: Agent) -> str:
         return "unknown"
 
 def update_agent_last_seen(db: Session, agent_id: str):
-    """Update the last_seen timestamp for an agent"""
+    """Update the last_seen timestamp for an agent using IST"""
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
     if agent:
-        agent.last_seen = datetime.now()
+        agent.last_seen = get_ist_now()
         db.commit()
-        logger.debug(f"Updated last_seen for {agent_id}")
+        logger.debug(f"Updated last_seen for {agent_id} (IST)")
 
 def get_folder_files(folder_name: str):
     """Get list of files in a folder with their sizes"""
@@ -413,29 +783,86 @@ def get_folder_files(folder_name: str):
 # Endpoints
 @app.post("/api/v1/agent/register")
 async def register_agent(registration: AgentRegistration, db: Session = Depends(get_db)):
-    """Register a new agent with system information"""
+    """Register a new agent with system information.
+    
+    If an agent with the same IP address already exists, reuse that agent record
+    instead of creating a new one. This handles reinstallation scenarios.
+    
+    Agents registered via onboarding (agent_id starts with 'onboarded_') will have
+    last_seen set to None so they show as inactive until a real agent connects.
+    """
     logger.info("Entered /api/v1/agent/register endpoint")
     try:
+        # Use IST for all timestamps
+        timestamp = get_ist_now()
+        
+        # Check if this is a pre-registered agent from onboarding (no real agent installed yet)
+        is_onboarded_placeholder = registration.agent_id.startswith("onboarded_")
+        
+        # For onboarded placeholders, set last_seen to None (will show as inactive)
+        # For real agents, use the IST timestamp
+        effective_last_seen = None if is_onboarded_placeholder else timestamp
+        
+        # First, check if agent with same agent_id exists
         agent = db.query(Agent).filter(Agent.agent_id == registration.agent_id).first()
-        timestamp = datetime.fromisoformat(registration.timestamp)
+        
         if agent:
+            # Agent ID matches - update existing agent
             agent.hostname = registration.hostname
             agent.ip_address = registration.ip_address
             agent.os_info = registration.os_info
-            agent.last_seen = timestamp
+            # Only update last_seen for real agents, not onboarded placeholders
+            if not is_onboarded_placeholder:
+                agent.last_seen = timestamp
+            # Update org info if provided (from onboarding)
+            if registration.organization_name:
+                agent.organization_name = registration.organization_name
+            if registration.suborganization_name:
+                agent.suborganization_name = registration.suborganization_name
+            if registration.application_name:
+                agent.application_name = registration.application_name
+            logger.info(f"Agent updated (same ID): {registration.agent_id} ({registration.hostname})")
         else:
-            agent = Agent(
-                agent_id=registration.agent_id,
-                hostname=registration.hostname,
-                ip_address=registration.ip_address,
-                os_info=registration.os_info,
-                registered_at=timestamp,
-                last_seen=timestamp
-            )
-            db.add(agent)
+            # Check if there's an existing agent with same IP address
+            existing_agent_by_ip = db.query(Agent).filter(
+                Agent.ip_address == registration.ip_address
+            ).first()
+            
+            if existing_agent_by_ip:
+                # Reuse existing agent record - keep the original agent_id (due to FK constraints)
+                logger.info(f"Found existing agent with same IP {registration.ip_address}, reactivating...")
+                existing_agent_by_ip.hostname = registration.hostname
+                existing_agent_by_ip.os_info = registration.os_info
+                # Only update last_seen for real agents
+                if not is_onboarded_placeholder:
+                    existing_agent_by_ip.last_seen = timestamp
+                # Update org info if provided (from onboarding)
+                if registration.organization_name:
+                    existing_agent_by_ip.organization_name = registration.organization_name
+                if registration.suborganization_name:
+                    existing_agent_by_ip.suborganization_name = registration.suborganization_name
+                if registration.application_name:
+                    existing_agent_by_ip.application_name = registration.application_name
+                agent = existing_agent_by_ip
+                logger.info(f"Agent reactivated (same IP): {existing_agent_by_ip.agent_id} ({registration.hostname})")
+            else:
+                # New agent - create new record
+                agent = Agent(
+                    agent_id=registration.agent_id,
+                    hostname=registration.hostname,
+                    ip_address=registration.ip_address,
+                    os_info=registration.os_info,
+                    registered_at=timestamp,
+                    last_seen=effective_last_seen,  # None for onboarded placeholders
+                    organization_name=registration.organization_name,
+                    suborganization_name=registration.suborganization_name,
+                    application_name=registration.application_name
+                )
+                db.add(agent)
+                logger.info(f"New agent registered: {registration.agent_id} ({registration.hostname}) [placeholder={is_onboarded_placeholder}]")
+        
         db.commit()
-        logger.info(f"Agent registered: {registration.agent_id} ({registration.hostname})")
-        return {"success": True, "message": "Agent registered successfully", "agent_id": registration.agent_id}
+        return {"success": True, "message": "Agent registered successfully", "agent_id": agent.agent_id}
     except SQLAlchemyError as e:
         db.rollback()
         logger.exception("Agent registration failed")
@@ -455,6 +882,28 @@ async def receive_system_info(system_info: SystemInfo, db: Session = Depends(get
         logger.exception("Failed to process system info")
         raise APIError(status_code=500, error_code="system_info_failed", message=f"Failed to process system info: {str(e)}")
 
+@app.delete("/api/v1/agent/{agent_id}")
+async def delete_agent(agent_id: str, db: Session = Depends(get_db)):
+    """Delete an agent and all its associated tasks and results"""
+    logger.info(f"Entered DELETE /api/v1/agent/{agent_id} endpoint")
+    try:
+        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
+        if not agent:
+            raise APIError(status_code=404, error_code="agent_not_found", message=f"Agent {agent_id} not found")
+        
+        hostname = agent.hostname
+        db.delete(agent)  # Cascade will delete tasks and results
+        db.commit()
+        
+        logger.info(f"Agent deleted: {agent_id} ({hostname})")
+        return {"success": True, "message": f"Agent {hostname} deleted successfully", "agent_id": agent_id}
+    except APIError:
+        raise
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.exception("Agent deletion failed")
+        raise APIError(status_code=500, error_code="delete_failed", message=f"Failed to delete agent: {str(e)}")
+
 @app.get("/api/v1/agent/fetchaction/{agent_id}")
 async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
     """Agent polls this endpoint to check if a scan is requested"""
@@ -464,7 +913,7 @@ async def fetch_action(agent_id: str, db: Session = Depends(get_db)):
         task = db.query(Task).filter(Task.agent_id == agent_id, Task.status == 'pending').order_by(Task.created_at).first()
         if task:
             task.status = 'in_progress'
-            task.started_at = datetime.now()
+            task.started_at = get_ist_now()
             db.commit()
             logger.info(f"Scan task dispatched to agent: {agent_id}")
             return FetchActionResponse(scan_flag=True, task_id=task.task_id, message="Crypto audit scan requested")
@@ -509,7 +958,7 @@ async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
             agent_id=audit_data.agent_id,
             task_id=audit_data.task_id,
             audit_results=json.dumps(scored_results),  # Store scored results
-            received_at=datetime.now(),
+            received_at=get_ist_now(),
             submitted_at=datetime.fromisoformat(audit_data.timestamp)
         )
         db.add(new_result)
@@ -517,7 +966,7 @@ async def receive_audit_result(request: Request, db: Session = Depends(get_db)):
         task = db.query(Task).filter(Task.task_id == audit_data.task_id).first()
         if task:
             task.status = 'completed'
-            task.completed_at = datetime.now()
+            task.completed_at = get_ist_now()
         
         db.commit()
         logger.info(f"Audit results received from: {audit_data.agent_id} (Task: {audit_data.task_id})")
@@ -540,8 +989,8 @@ async def trigger_scan(agent_id: str, db: Session = Depends(get_db)):
         if status == "inactive":
             logger.warning(f"Triggering scan for inactive agent: {agent_id}")
         
-        task_id = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-        new_task = Task(task_id=task_id, agent_id=agent_id, status="pending", created_at=datetime.now())
+        task_id = f"task_{get_ist_now().strftime('%Y%m%d_%H%M%S_%f')}"
+        new_task = Task(task_id=task_id, agent_id=agent_id, status="pending", created_at=get_ist_now())
         db.add(new_task)
         db.commit()
         
@@ -557,14 +1006,17 @@ async def list_agents(db: Session = Depends(get_db)):
     """List all registered agents with current status"""
     logger.info("Entered /api/v1/admin/agents endpoint")
     try:
-        agents = db.query(Agent).order_by(Agent.last_seen.desc()).all()
+        agents = db.query(Agent).order_by(Agent.last_seen.desc().nullslast()).all()
         agents_with_status = []
         for agent in agents:
             agent_dict = {c.name: getattr(agent, c.name) for c in agent.__table__.columns}
             agent_dict["status"] = get_agent_status(agent)
             try:
-                time_diff = datetime.now() - agent.last_seen
-                agent_dict["minutes_since_last_seen"] = int(time_diff.total_seconds() / 60)
+                if agent.last_seen:
+                    time_diff = get_ist_now() - agent.last_seen
+                    agent_dict["minutes_since_last_seen"] = int(time_diff.total_seconds() / 60)
+                else:
+                    agent_dict["minutes_since_last_seen"] = 999999  # Never seen (onboarded placeholder)
             except:
                 agent_dict["minutes_since_last_seen"] = 999999
             agents_with_status.append(agent_dict)
@@ -575,7 +1027,7 @@ async def list_agents(db: Session = Depends(get_db)):
         return {
             "success": True, "count": len(agents_with_status), "active_count": active_count,
             "inactive_count": len(agents_with_status) - active_count,
-            "timeout_minutes": AGENT_TIMEOUT_MINUTES, "server_time": datetime.now().isoformat(),
+            "timeout_minutes": AGENT_TIMEOUT_MINUTES, "server_time": get_ist_now().isoformat(),
             "agents": agents_with_status
         }
     except Exception as e:
@@ -638,13 +1090,18 @@ async def get_stats(db: Session = Depends(get_db)):
     logger.info("Entered /api/v1/admin/stats endpoint")
     try:
         total_agents = db.query(func.count(Agent.agent_id)).scalar()
-        active_agents = db.query(func.count(Agent.agent_id)).filter(Agent.last_seen > datetime.now() - timedelta(minutes=AGENT_TIMEOUT_MINUTES)).scalar()
+        # Count active agents: those with last_seen within timeout AND not NULL
+        cutoff_time = get_ist_now() - timedelta(minutes=AGENT_TIMEOUT_MINUTES)
+        active_agents = db.query(func.count(Agent.agent_id)).filter(
+            Agent.last_seen.isnot(None),
+            Agent.last_seen > cutoff_time
+        ).scalar()
         task_stats = db.query(Task.status, func.count(Task.status)).group_by(Task.status).all()
         result_count = db.query(func.count(Result.result_id)).scalar()
         
         logger.info("Stats retrieved successfully")
         return {
-            "success": True, "timestamp": datetime.now().isoformat(),
+            "success": True, "timestamp": get_ist_now().isoformat(),
             "agents": {"total": total_agents, "active": active_agents, "inactive": total_agents - active_agents},
             "tasks": {"total": sum(c for s, c in task_stats), **{s: c for s, c in task_stats}},
             "results": {"total": result_count}

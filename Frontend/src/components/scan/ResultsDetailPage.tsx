@@ -1,40 +1,21 @@
-import React, { useState, useMemo, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { 
-  ArrowLeft, 
-  Search, 
-  X, 
-  Globe, 
-  Lock, 
-  Key, 
-  Hash, 
-  Shield, 
-  Zap, 
-  Check, 
-  CheckCircle, 
-  AlertTriangle, 
-  ShieldAlert, 
-  Info, 
-  Clock,
-  FileText,
-  Package,
-  Loader2,
-  Eye
+﻿import React, { useState, useMemo, useEffect } from "react";
+import {
+  Search, Globe, Lock, Key, Shield, Zap, Check, CheckCircle, AlertCircle,
+  AlertTriangle, ShieldAlert, ChevronDown, TrendingUp, TrendingDown,
+  Calendar, Database, Info, X, Hash
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { UnifiedBackButton, UnifiedMetricCard } from "@/components/ui/unified";
+import { UnifiedBackButton } from "@/components/ui/unified";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import SuggestionsPanel from "./SuggestionsPanel";
 
-// ============================================================================
-// TYPES & INTERFACES
-// ============================================================================
-
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface ScanResult {
+  id?: number;
+  batch_id?: string;
   request_id: string;
   url: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: "pending" | "processing" | "completed" | "failed";
   requested_at: string;
   total_urls: number;
   execution_time_seconds?: number;
@@ -61,7 +42,7 @@ interface ScanResult {
   quantum_score?: number;
   quantum_grade?: string;
   detailedResults?: ScanResult[];
-  finalDomainProgress?: {[key: string]: {status: string, duration?: number}};
+  finalDomainProgress?: { [key: string]: { status: string; duration?: number } };
   pqc_analysis?: {
     overall_score: number;
     overall_grade: string;
@@ -85,893 +66,624 @@ interface ComponentScore {
   quantum_safe_count: number;
 }
 
+export type ScanStatus = "completed" | "failed" | "pending" | "http_skipped";
+
 interface ResultsDetailPageProps {
   scan: ScanResult;
   onBack: () => void;
   targetDomain?: string;
 }
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-const getGradeColor = (grade: string): string => {
-  if (!grade) return 'text-zinc-500';
-  const g = grade.toUpperCase();
-  if (g.startsWith('A')) return 'text-emerald-600 dark:text-emerald-400';
-  if (g.startsWith('B')) return 'text-primary';
-  if (g.startsWith('C')) return 'text-warning';
-  if (g.startsWith('D')) return 'text-orange-600 dark:text-orange-400';
-  return 'text-rose-600 dark:text-rose-400';
+// ── Color helpers ─────────────────────────────────────────────────────────────
+const gradeColor = (g: string): string => {
+  if (!g) return "text-muted-foreground";
+  const u = g.toUpperCase();
+  if (u.startsWith("A")) return "text-emerald-500";
+  if (u.startsWith("B")) return "text-blue-500";
+  if (u.startsWith("C")) return "text-amber-500";
+  if (u.startsWith("D")) return "text-orange-500";
+  return "text-red-500";
+};
+const scoreColor = (s: number): string => {
+  if (s >= 90) return "text-emerald-500";
+  if (s >= 75) return "text-blue-500";
+  if (s >= 60) return "text-amber-500";
+  if (s >= 45) return "text-orange-500";
+  return "text-red-500";
+};
+const scoreBg = (s: number): string => {
+  if (s >= 90) return "bg-emerald-500";
+  if (s >= 75) return "bg-blue-500";
+  if (s >= 60) return "bg-amber-500";
+  if (s >= 45) return "bg-orange-500";
+  return "bg-red-500";
+};
+const scoreBarBg = (s: number): string => {
+  if (s >= 90) return "bg-emerald-500/20";
+  if (s >= 75) return "bg-blue-500/20";
+  if (s >= 60) return "bg-amber-500/20";
+  if (s >= 45) return "bg-orange-500/20";
+  return "bg-red-500/20";
+};
+const gradeBorder = (g: string): string => {
+  if (!g) return "border-border text-muted-foreground";
+  const u = g.toUpperCase();
+  if (u.startsWith("A")) return "border-emerald-500 text-emerald-600 dark:text-emerald-400";
+  if (u.startsWith("B")) return "border-blue-500 text-blue-600 dark:text-blue-400";
+  if (u.startsWith("C")) return "border-amber-500 text-amber-600 dark:text-amber-400";
+  if (u.startsWith("D")) return "border-orange-500 text-orange-600 dark:text-orange-400";
+  return "border-red-500 text-red-600 dark:text-red-400";
 };
 
-const getScoreBarColor = (score: number): string => {
-  if (score >= 90) return 'bg-emerald-500';
-  if (score >= 80) return 'bg-primary';
-  if (score >= 70) return 'bg-warning';
-  if (score >= 60) return 'bg-orange-500';
-  return 'bg-rose-500';
+const gradeToScore = (g: string): number => {
+  if (!g) return 0;
+  const map: Record<string, number> = { 'A+': 97, 'A': 90, 'A-': 85, 'B+': 78, 'B': 72, 'B-': 68, 'C+': 58, 'C': 52, 'C-': 45, 'D': 38, 'F': 20 };
+  return map[g] ?? 50;
 };
 
-const getRiskLevelInfo = (score: number): { label: string; color: string; description: string } => {
-  if (score >= 90) return {
-    label: 'Low Risk',
-    color: 'text-emerald-600 dark:text-emerald-400',
-    description: 'Excellent cryptographic security posture'
-  };
-  if (score >= 80) return {
-    label: 'Medium-Low Risk',
-    color: 'text-primary',
-    description: 'Good security with minor improvements needed'
-  };
-  if (score >= 70) return {
-    label: 'Medium Risk',
-    color: 'text-warning',
-    description: 'Adequate security but needs attention'
-  };
-  if (score >= 60) return {
-    label: 'Medium-High Risk',
-    color: 'text-orange-600 dark:text-orange-400',
-    description: 'Significant security concerns present'
-  };
-  return {
-    label: 'High Risk',
-    color: 'text-rose-600 dark:text-rose-400',
-    description: 'Critical security vulnerabilities detected'
-  };
+// Derive grades from cipher data when the backend doesn't provide them
+const deriveEncGrade = (encName: string): string => {
+  if (!encName) return '';
+  const u = encName.toUpperCase();
+  if (u.includes('CHACHA20') || u.includes('AES-256-GCM') || u.includes('AES_256_GCM')) return 'A';
+  if (u.includes('AES-256') || u.includes('AES_256')) return 'A-';
+  if (u.includes('AES-128-GCM') || u.includes('AES_128_GCM')) return 'B+';
+  if (u.includes('AES-128') || u.includes('AES_128')) return 'B';
+  if (u.includes('3DES') || u.includes('RC4') || u.includes('DES')) return 'F';
+  return 'C';
 };
 
-const getSectionIcon = (section: string) => {
-  const icons: Record<string, React.ReactNode> = {
-    "kex": <Key className="w-5 h-5" />,
-    "signature": <Shield className="w-5 h-5" />,
-    "symmetric": <Lock className="w-5 h-5" />,
-    "certificate": <Shield className="w-5 h-5" />,
-    "protocol": <Globe className="w-5 h-5" />
-  };
-  return icons[section] || <Shield className="w-5 h-5" />;
+const deriveKexGrade = (kex: string, cipherName: string): string => {
+  if (!kex && !cipherName) return '';
+  const u = (kex || cipherName || '').toUpperCase();
+  if (u.includes('MLKEM') || u.includes('KYBER') || u.includes('X25519MLKEM')) return 'A+';
+  if (u.includes('X25519') || u.includes('X448')) return 'A-';
+  if (u.includes('ECDHE') || u.includes('ECDH')) return 'B+';
+  if (u.includes('DHE') || u.includes('DH')) return 'C+';
+  if (u.includes('RSA')) return 'F';
+  return '';
 };
 
-const getCategoryDisplayName = (category: string): string => {
-  const names: Record<string, string> = {
-    'kex': 'Key Exchange',
-    'signature': 'Digital Signatures',
-    'symmetric': 'Symmetric Encryption',
-    'certificate': 'Certificate Security',
-    'protocol': 'Protocol Security'
-  };
-  return names[category] || category;
+const compLabel = (k: string): string => ({
+  kex: "Key Exchange", signature: "Signatures", symmetric: "Symmetric",
+  certificate: "Certificate", protocol: "Protocol"
+}[k] || k);
+
+const compIcon = (k: string): React.ReactNode => ({
+  kex: <Key className="w-4 h-4" />, signature: <Shield className="w-4 h-4" />,
+  symmetric: <Lock className="w-4 h-4" />, certificate: <CheckCircle className="w-4 h-4" />,
+  protocol: <Globe className="w-4 h-4" />,
+}[k] || <Shield className="w-4 h-4" />);
+
+const formatDate = (val: string | undefined): string => {
+  if (!val) return "N/A";
+  try { return new Date(val).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return val; }
 };
 
-const PQCStatusBadges: React.FC<{
-  is_pqc?: boolean;
-  is_hybrid?: boolean;
-  quantum_safe?: boolean;
-}> = ({ is_pqc, is_hybrid, quantum_safe }) => (
-  <div className="flex items-center gap-2 flex-wrap">
-    {is_pqc && <span className="px-1.5 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 rounded text-purple-700 dark:text-purple-300">PQC</span>}
-    {is_hybrid && <span className="px-1.5 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 rounded text-blue-700 dark:text-blue-300">Hybrid</span>}
-    {quantum_safe && <span className="px-1.5 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 rounded text-green-700 dark:text-green-300">Quantum-Safe</span>}
+// ── Shared atoms ──────────────────────────────────────────────────────────────
+const Row: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({ label, value, mono = false }) => (
+  <div className="flex items-start justify-between py-2 border-b border-border/40 last:border-0 gap-6">
+    <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 w-28">{label}</span>
+    <span className={`text-xs text-right text-foreground break-all leading-relaxed ${mono ? "font-mono" : ""}`}>{value}</span>
   </div>
 );
 
-// ============================================================================
-// DETAIL COMPONENTS FOR DOMAIN DETAIL PAGE
-// ============================================================================
+const PassBadge: React.FC<{ pass: boolean; yes?: string; no?: string }> = ({ pass, yes = "Yes", no = "No" }) =>
+  pass
+    ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-xs font-medium"><Check className="w-3 h-3" />{yes}</span>
+    : <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 text-xs font-medium"><X className="w-3 h-3" />{no}</span>;
 
-const TechnicalInfoCard: React.FC<{
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  onViewDetails: () => void;
-  itemCount?: number;
-}> = ({ title, description, icon, onViewDetails, itemCount }) => {
+const ScoreRing: React.FC<{ score: number; grade: string }> = ({ score, grade }) => {
+  const r = 52; const circ = 2 * Math.PI * r; const filled = (score / 100) * circ;
+  const color = score >= 90 ? '#10b981' : score >= 75 ? '#3b82f6' : score >= 60 ? '#f59e0b' : score >= 45 ? '#f97316' : '#ef4444';
   return (
-    <div className="bg-card text-card-foreground border border-slate-200 dark:border-slate-700 rounded-xl shadow-md hover:shadow-lg transition-all duration-300">
-      <div className="p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            {icon}
-            <div>
-              <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">{title}</h4>
-              <p className="text-xs text-muted-foreground mt-1">{description}</p>
-            </div>
-          </div>
-          {itemCount !== undefined && (
-            <span className="px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-bold">
-              {itemCount} Items
-            </span>
-          )}
-        </div>
-        
-        <Button 
-          variant="default"
-          className="w-full"
-          onClick={onViewDetails}
-        >
-          <Eye className="h-4 w-4 mr-2" />
-          View Details
-        </Button>
+    <div className="relative flex-shrink-0">
+      <svg width="128" height="128" viewBox="0 0 128 128" className="-rotate-90">
+        <circle cx="64" cy="64" r={r} fill="none" stroke="currentColor" strokeWidth="10" className="text-muted/30" />
+        <circle cx="64" cy="64" r={r} fill="none" stroke={color} strokeWidth="10"
+          strokeDasharray={`${filled} ${circ}`} strokeLinecap="round"
+          style={{ transition: 'stroke-dasharray 1s ease' }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-3xl font-black tabular-nums" style={{ color }}>{grade || 'F'}</span>
+        <span className="text-xs font-semibold text-muted-foreground">{score.toFixed(1)}</span>
       </div>
     </div>
   );
 };
 
-const TechnicalDetailModal: React.FC<{
-  isOpen: boolean;
-  onClose: () => void;
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ isOpen, onClose, title, icon, children }) => {
-  if (!isOpen) return null;
+const StatPill: React.FC<{ label: string; value: React.ReactNode; color?: string }> = ({ label, value, color = 'text-foreground' }) => (
+  <div className="flex flex-col items-center px-4 py-3 bg-muted/40 rounded-xl border border-border/50">
+    <span className={`text-2xl font-black tabular-nums ${color}`}>{value}</span>
+    <span className="text-xs text-muted-foreground mt-0.5 whitespace-nowrap">{label}</span>
+  </div>
+);
 
+const TLSComponentBar: React.FC<{ name: string; comp: ComponentScore }> = ({ name, comp }) => {
+  const score = comp.weighted_average ?? 0;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-card text-card-foreground rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden"
-      >
-        {/* Modal Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            {icon}
-            <h3 className="text-xl font-bold">{title}</h3>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </Button>
-        </div>
-
-        {/* Modal Content */}
-        <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
-          <div className="space-y-4">
-            {children}
-          </div>
-        </div>
-      </motion.div>
+    <div className="flex items-center gap-3">
+      <div className="w-28 flex-shrink-0 flex items-center gap-1.5">
+        <span className="text-muted-foreground">{compIcon(name)}</span>
+        <span className="text-xs font-medium text-muted-foreground truncate">{compLabel(name)}</span>
+      </div>
+      <div className={`flex-1 h-2.5 rounded-full overflow-hidden ${scoreBarBg(score)}`}>
+        <div className={`h-full rounded-full ${scoreBg(score)} transition-all duration-700`} style={{ width: `${score}%` }} />
+      </div>
+      <div className="w-24 flex-shrink-0 flex items-center gap-2 justify-end">
+        {comp.pqc_percentage > 0
+          ? <span className="text-[10px] text-muted-foreground">{comp.pqc_percentage}% PQC</span>
+          : <span className="text-[10px] text-muted-foreground/40 italic">{name === 'symmetric' || name === 'protocol' ? 'N/A' : '0%'}</span>}
+        <span className={`text-sm font-bold tabular-nums ${scoreColor(score)}`}>{score.toFixed(0)}</span>
+        <span className={`text-sm font-black ${gradeColor(comp.grade)}`}>{comp.grade}</span>
+      </div>
     </div>
   );
 };
 
-const DetailRow: React.FC<{ label: string; value: string | React.ReactNode; className?: string }> = ({ label, value, className = '' }) => (
-  <div className={`flex justify-between items-start py-1 ${className}`}>
-    <span className="text-slate-500 font-semibold text-xs uppercase tracking-wider min-w-0 flex-shrink">{label}:</span>
-    <span className="text-foreground text-right ml-4 min-w-0 break-words text-sm">{value}</span>
-  </div>
-);
+// ── Cipher row ────────────────────────────────────────────────────────────────
+const CipherRow: React.FC<{ cipher: any }> = ({ cipher }) => {
+  const [open, setOpen] = useState(false);
+  const isTls13 = cipher.protocol === 'TLS 1.3';
 
-const ComponentScoreCard: React.FC<{ name: string; data: ComponentScore }> = ({ name, data }) => {
+  // Use backend grades if available, fall back to derived
+  const kexGrade = cipher.kex_pqc_grade
+    || (isTls13 ? '' : deriveKexGrade(cipher.key_exchange || '', cipher.name || ''));
+  const encGrade = cipher.encryption_pqc_grade || deriveEncGrade(cipher.encryption || '');
+
+  // For TLS 1.3, show the enc grade as the primary badge (KEX comes from curves section)
+  const badgeGrade = isTls13 ? encGrade : (kexGrade || encGrade);
+  const badgeLabel = isTls13 ? 'ENC' : 'KEX';
+
   return (
-    <TooltipProvider>
-      <div className="bg-card/70 rounded-xl p-6 border shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:shadow-[0_10px_28px_rgba(0,0,0,0.12)] transition-all duration-300 transform hover:-translate-y-1 backdrop-blur-sm group">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            {getSectionIcon(name)}
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest">
-              {getCategoryDisplayName(name)}
-            </div>
+    <div className={`border rounded-lg overflow-hidden transition-colors ${open ? 'border-border' : 'border-border/60'}`}>
+      <button onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors text-left">
+        {badgeGrade
+          ? <span className={`w-10 h-6 rounded border-2 flex items-center justify-center text-xs font-black flex-shrink-0 ${gradeBorder(badgeGrade)}`}>{badgeGrade}</span>
+          : <span className="w-10 h-6 rounded bg-muted flex items-center justify-center text-[9px] text-muted-foreground flex-shrink-0">{badgeLabel}</span>}
+        <code className="font-mono text-xs font-semibold flex-1 min-w-0 truncate">{cipher.name}</code>
+        <span className={`px-2 py-0.5 rounded text-[10px] font-bold flex-shrink-0 ${
+          cipher.protocol === 'TLS 1.3'
+            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+            : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+        }`}>{cipher.protocol}</span>
+        {cipher.encryption && <span className="text-xs text-muted-foreground flex-shrink-0 hidden md:block">{cipher.encryption}</span>}
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-3 pt-2 border-t bg-muted/10 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+          <div>
+            <p className="text-muted-foreground font-semibold uppercase tracking-wide mb-1">
+              {isTls13 ? 'ENC Grade' : 'KEX Grade'}
+            </p>
+            {isTls13
+              ? <p className={`font-black text-lg ${gradeColor(encGrade)}`}>{encGrade || '—'}</p>
+              : kexGrade
+                ? <p className={`font-black text-lg ${gradeColor(kexGrade)}`}>{kexGrade}</p>
+                : <p className="text-xs text-muted-foreground italic">See Curves</p>}
           </div>
-          <div className={`text-2xl font-bold ${getGradeColor(data.grade)} group-hover:scale-110 transition-transform`}>
-            {data.grade}
+          <div>
+            <p className="text-muted-foreground font-semibold uppercase tracking-wide mb-1">
+              {isTls13 ? 'KEX' : 'Enc Grade'}
+            </p>
+            {isTls13
+              ? <p className="text-xs text-muted-foreground italic">From Curves section</p>
+              : <p className={`font-black text-lg ${gradeColor(encGrade)}`}>{encGrade || '—'}</p>}
           </div>
+          {cipher.encryption && <div><p className="text-muted-foreground font-semibold uppercase tracking-wide mb-1">Encryption</p>
+            <p className="font-mono">{cipher.encryption}</p></div>}
+          {cipher.hash && <div><p className="text-muted-foreground font-semibold uppercase tracking-wide mb-1">Hash</p>
+            <p className="font-mono">{cipher.hash}</p></div>}
+          {isTls13 && <div className="col-span-2 sm:col-span-4">
+            <p className="text-[10px] text-muted-foreground/70 italic">TLS 1.3 separates cipher from key exchange — KEX grade is shown in the Elliptic Curves section below, based on your supported key share groups.</p>
+          </div>}
         </div>
-        
-        <div className={`text-5xl font-bold tracking-tight mb-4 ${getGradeColor(data.grade)}`}>
-          {data.grade}
-        </div>
-        
-        <div className="text-xs text-slate-600 dark:text-slate-400 space-y-2 font-medium">
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 dark:text-slate-500">PQC Percentage</span>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{data.pqc_percentage}%</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 dark:text-slate-500">Quantum-Safe Count</span>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{data.quantum_safe_count}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 dark:text-slate-500">Weighted Score</span>
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{data.weighted_average.toFixed(1)}/100</span>
-          </div>
-        </div>
-      </div>
-    </TooltipProvider>
+      )}
+    </div>
   );
 };
 
-// ============================================================================
-// DOMAIN DETAIL PAGE COMPONENT
-// ============================================================================
+// ── Domain Detail Page ────────────────────────────────────────────────────────
+const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = ({ result, onBack }) => {
+  const [tab, setTab] = useState<'summary' | 'findings' | 'details'>('summary');
+  const [cipherFilter, setCipherFilter] = useState<'all' | 'tls13' | 'tls12'>('all');
+  const [cipherSearch, setCipherSearch] = useState('');
+  const [detailSection, setDetailSection] = useState<'certificates' | 'compliance' | 'migration' | 'raw'>('certificates');
 
-const DomainDetailPage: React.FC<{
-  result: ScanResult;
-  onBack: () => void;
-}> = ({ result, onBack }) => {
-  const [activeModal, setActiveModal] = useState<string | null>(null);
-  const isSuccess = result.scan_status?.toLowerCase() === 'completed';
-  const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? result.quantum_score ?? 'N/A';
-  const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? result.quantum_grade ?? 'N/A';
-  const quantumReady = result.raw_response?.pqc_analysis?.quantum_ready ?? false;
-  const securityLevel = result.raw_response?.pqc_analysis?.security_level ?? 'unknown';
-  const hybridReady = result.raw_response?.pqc_analysis?.hybrid_ready ?? false;
-
+  const isSuccess = result.scan_status?.toLowerCase() === "completed";
   const rawData = result.raw_response || {};
+  const pqcAnalysis = rawData.pqc_analysis || {};
+  const pqcScore = pqcAnalysis.overall_score ?? result.quantum_score ?? null;
+  const pqcGrade = pqcAnalysis.overall_grade ?? result.quantum_grade ?? "F";
+  const quantumReady = pqcAnalysis.quantum_ready ?? false;
+  const securityLevel = pqcAnalysis.security_level ?? "unknown";
+  const hybridReady = pqcAnalysis.hybrid_ready ?? false;
+  const legacyProtocols: string[] = pqcAnalysis.quantum_readiness_detail?.legacy_protocols ?? [];
   const tlsConfig = rawData.tls_configuration || {};
   const certChain = rawData.certificate_chain || {};
   const leafCert = certChain.leaf_certificate || {};
   const signatureAlgorithms = rawData.signature_algorithms || {};
-  
-  const getHashFromCipherName = (name: string): string => {
-    const hashMatch = name.match(/SHA\d+/);
-    if (hashMatch) return hashMatch[0];
-    if (name.endsWith('_SHA')) return 'SHA1';
-    return 'N/A';
+  const secFeatures = pqcAnalysis.security_features || {};
+  const certAnalysis = pqcAnalysis.certificate_analysis || {};
+  const complianceStatus: Record<string, boolean> = pqcAnalysis.compliance_status || {};
+  const criticalVulns: string[] = pqcAnalysis.critical_vulnerabilities || [];
+  const components: Record<string, ComponentScore> | undefined = pqcAnalysis.components;
+  const serverIp: string = rawData.server_ip || "";
+  const serverPort: number | null = rawData.port || null;
+  const scoreNum = typeof pqcScore === "number" ? pqcScore : 0;
+
+  const tls13Suites: any[] = (tlsConfig["tls_1.3_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.3' }));
+  const tls12Suites: any[] = (tlsConfig["tls_1.2_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.2' }));
+  const allCiphers = [...tls13Suites, ...tls12Suites];
+
+  const filteredCiphers = useMemo(() => {
+    let list = cipherFilter === 'tls13' ? tls13Suites : cipherFilter === 'tls12' ? tls12Suites : allCiphers;
+    if (cipherSearch) { const q = cipherSearch.toLowerCase(); list = list.filter(c => c.name?.toLowerCase().includes(q) || c.encryption?.toLowerCase().includes(q)); }
+    return list;
+  }, [cipherFilter, cipherSearch, tls13Suites, tls12Suites, allCiphers]);
+
+  const riskLabel = scoreNum >= 90 ? "Low Risk" : scoreNum >= 80 ? "Med-Low Risk" : scoreNum >= 70 ? "Medium Risk" : scoreNum >= 60 ? "Med-High Risk" : "High Risk";
+  const riskColorClass = scoreNum >= 80 ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+    : scoreNum >= 60 ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+    : "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800";
+
+  const complianceDetails: Record<string, { desc: string; fails: string[] }> = {
+    'PCI DSS 4.0':        { desc: 'Payment Card Industry',           fails: ['TLS 1.0/1.1 in use', 'Weak ciphers (RC4, DES)', 'MD5 or SHA-1 signatures'] },
+    'NIST 800-52r2':      { desc: 'NIST TLS Guidelines',             fails: ['RSA key exchange (no PFS)', 'Weak hashes (MD5/SHA-1)', 'SSL or early TLS enabled'] },
+    'FIPS 140-3':         { desc: 'Federal Info Processing',         fails: ['Non-FIPS algorithms', 'RSA key < 2048 bits', 'Unapproved hash algorithms'] },
+    'CNSA 2.0 (Quantum-Ready)': { desc: 'NSA Quantum-Ready Suite',  fails: ['No PQC algorithms detected', 'Classical KEX only', 'No hybrid key exchange'] },
   };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <header className="bg-card border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-500/40">
-                <Shield className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                  Domain Security Analysis
-                </h1>
-                <div className="text-sm text-slate-600 dark:text-slate-400 font-medium">{result.url}</div>
-              </div>
-            </div>
-            <UnifiedBackButton onClick={onBack} label="Back to Results" />
+      {/* STICKY HEADER */}
+      <header className="sticky top-0 z-30 bg-card/95 backdrop-blur border-b border-border">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center gap-3 py-3">
+          <UnifiedBackButton onClick={onBack} label="Back" />
+          <div className="flex items-center gap-2 min-w-0 ml-1">
+            <Globe className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+            <code className="font-mono text-sm font-semibold truncate">{result.url}</code>
+            {result.tls_version && <><span className="text-muted-foreground/40 hidden sm:block">·</span><span className="text-xs text-muted-foreground hidden sm:block">{result.tls_version}</span></>}
           </div>
+          {pqcScore !== null && (
+            <div className="ml-auto flex-shrink-0">
+              <span className={`text-sm font-black ${gradeColor(pqcGrade as string)}`}>{pqcGrade}</span>
+              <span className="text-xs text-muted-foreground ml-1">{scoreNum.toFixed(1)}/100</span>
+            </div>
+          )}
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-10">
-        {isSuccess ? (
-          <div className="space-y-8">
-            {/* Domain Info Card */}
-            <div className="bg-card/70 text-card-foreground p-8 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.3)] border backdrop-blur-sm">
-              <div className="flex items-center gap-3 mb-4">
-                <Globe className="w-6 h-6 text-primary" />
-                <h2 className="text-xl font-bold">Domain Information</h2>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div>
-                  <strong>URL:</strong> <code className="bg-muted px-2 py-1 rounded text-xs ml-2">{result.url}</code>
-                </div>
-                <div>
-                  <strong>TLS Version:</strong> <span className="ml-2">{result.tls_version || 'N/A'}</span>
-                </div>
-                <div>
-                  <strong>Scan Status:</strong>{' '}
-                  <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-900 ml-2">
-                    ● Completed
-                  </span>
-                </div>
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+        {isSuccess ? (<>
+          {/* Critical vulns / legacy protocol alert */}
+          {(criticalVulns.length > 0 || legacyProtocols.length > 0) && (
+            <div className="flex gap-3 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl">
+              <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+              <div>
+                {legacyProtocols.length > 0 && (
+                  <p className="text-sm font-bold text-red-700 dark:text-red-300 mb-1">
+                    Deprecated TLS protocols accepted: {legacyProtocols.map(p => <code key={p} className="mx-1 px-1 py-0.5 bg-red-100 dark:bg-red-900/40 rounded text-xs">{p}</code>)}
+                  </p>
+                )}
+                {criticalVulns.map((v, i) => <p key={i} className="text-xs text-red-600 dark:text-red-400">• {v}</p>)}
               </div>
             </div>
+          )}
 
-            {/* Overall Security Assessment */}
-            <div className="bg-card/80 border rounded-2xl p-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-              <div className="mb-8 pb-6 border-b">
-                <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                    <Shield className="w-5 h-5 text-primary" />
+          {/* TAB BAR */}
+          <div className="flex gap-1 border-b border-border">
+            {(['summary', 'findings', 'details'] as const).map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`px-5 py-2.5 text-sm font-semibold capitalize transition-all border-b-2 -mb-px ${
+                  tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                }`}>{t}</button>
+            ))}
+          </div>
+
+          {/* ═══ SUMMARY TAB ═══ */}
+          {tab === 'summary' && (
+            <div className="space-y-5">
+              {/* Score hero */}
+              <div className="bg-card border border-border rounded-2xl p-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+                  <ScoreRing score={scoreNum} grade={pqcGrade as string} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-4">
+                      {result.tls_version && <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border">{result.tls_version}</span>}
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                        quantumReady ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                          : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'}`}>
+                        {quantumReady ? '⚡ Quantum Ready' : '⚠ Not Quantum Ready'}
+                      </span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                        hybridReady ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                          : 'bg-muted text-muted-foreground border-border'}`}>
+                        {hybridReady ? '🔗 Hybrid KEX' : 'No Hybrid KEX'}
+                      </span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${riskColorClass}`}>{riskLabel}</span>
+                      <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border capitalize">{securityLevel}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <StatPill label="Cipher Suites" value={allCiphers.length} />
+                      <StatPill label="TLS 1.3" value={tls13Suites.length} color="text-emerald-500" />
+                      <StatPill label="TLS 1.2" value={tls12Suites.length} color="text-blue-500" />
+                      <StatPill label="Elliptic Curves" value={tlsConfig.supported_elliptic_curves?.curves?.length ?? 0} />
+                    </div>
                   </div>
-                  Overall Security Assessment
-                </h3>
+                </div>
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                {/* PQC Score */}
-                <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                    PQC Score
-                  </div>
-                  <div className="flex items-end gap-3 mb-4">
-                    <div className="text-6xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                      {typeof pqcScore === 'number' ? pqcScore.toFixed(1) : pqcScore}
-                    </div>
-                    <div className={`text-3xl font-bold mb-2 ${getGradeColor(pqcGrade as string)}`}>
-                      {pqcGrade}
-                    </div>
-                  </div>
-                  <div className="h-3 bg-muted rounded-full overflow-hidden shadow-inner">
-                    <div 
-                      className={`h-full transition-all duration-700 ease-out shadow-sm ${getScoreBarColor(typeof pqcScore === 'number' ? pqcScore : 0)}`}
-                      style={{ 
-                        width: `${typeof pqcScore === 'number' ? pqcScore : 0}%`,
-                        boxShadow: '0 0 10px currentColor'
-                      }}
-                    />
-                  </div>
-                </div>
 
-                {/* Security Level */}
-                <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                    Security Level
-                  </div>
-                  <div className="text-3xl font-bold tracking-tight mb-4 capitalize text-slate-900 dark:text-slate-100">
-                    {securityLevel}
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-center gap-2">
-                      {quantumReady ? (
-                        <>
-                          <Check className="w-4 h-4 text-emerald-600" />
-                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Quantum Ready</span>
-                        </>
-                      ) : (
-                        <>
-                          <X className="w-4 h-4 text-rose-600" />
-                          <span className="text-rose-600 dark:text-rose-400 font-semibold">Not Quantum Ready</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {hybridReady ? (
-                        <>
-                          <Check className="w-4 h-4 text-blue-600" />
-                          <span className="text-blue-600 dark:text-blue-400 font-semibold">Hybrid Ready</span>
-                        </>
-                      ) : (
-                        <>
-                          <X className="w-4 h-4 text-slate-400" />
-                          <span className="text-slate-500 dark:text-slate-400">No Hybrid Support</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
+              {/* Component bars */}
+              {components && Object.keys(components).length > 0 && (
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-5">
+                    <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                      <Shield className="h-4 w-4" /> Component Scores
+                      <span className="ml-auto text-xs font-normal normal-case text-muted-foreground">Hover score for definition</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-5 space-y-3.5">
+                    {Object.entries(components).map(([k, v]) => <TLSComponentBar key={k} name={k} comp={v} />)}
+                    <p className="text-xs text-muted-foreground pt-1">A ≥ 80 · B ≥ 65 · C ≥ 50 · D ≥ 35 · F &lt; 35 &nbsp;| NIST PQC = ML-KEM/ML-DSA only (AES-256 is quantum-safe but not PQC)</p>
+                  </CardContent>
+                </Card>
+              )}
 
-                {/* Risk Level */}
-                <div className="bg-card/60 rounded-2xl p-6 shadow-[0_4px_14px_rgba(0,0,0,0.06)] border backdrop-blur-sm hover:shadow-[0_8px_24px_rgba(0,0,0,0.1)] hover:border-blue-500/30 transition-all duration-300 transform hover:-translate-y-1">
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">
-                    Risk Level
-                  </div>
-                  <div className={`text-3xl font-bold tracking-tight mb-4 ${getRiskLevelInfo(typeof pqcScore === 'number' ? pqcScore : 0).color}`}>
-                    {getRiskLevelInfo(typeof pqcScore === 'number' ? pqcScore : 0).label}
-                  </div>
-                  <div className={`inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border ${
-                    (typeof pqcScore === 'number' ? pqcScore : 0) >= 80 
-                      ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
-                      : (typeof pqcScore === 'number' ? pqcScore : 0) >= 60
-                      ? 'bg-warning/5 dark:bg-warning/30 border-warning/20 dark:border-warning/90 text-warning'
-                      : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
-                  }`}>
-                    {getRiskLevelInfo(typeof pqcScore === 'number' ? pqcScore : 0).description}
-                  </div>
-                </div>
+              {/* TLS config + Leaf cert */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-4">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2"><Lock className="h-4 w-4" /> TLS Configuration</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <Row label="Domain" value={<code className="font-mono text-xs">{rawData.domain || result.url || "N/A"}</code>} />
+                    {serverIp && <Row label="Server IP" value={<code className="font-mono text-xs">{serverIp}</code>} />}
+                    {serverPort && <Row label="Port" value={serverPort} />}
+                    <Row label="Protocols" value={(tlsConfig.supported_protocols || []).join(", ") || result.tls_version || "N/A"} mono />
+                    <Row label="Active Cipher" value={result.cipher_suite_name || "N/A"} mono />
+                    <Row label="PFS" value={<PassBadge pass={!!secFeatures.pfs_supported} yes={`Yes (${secFeatures.pfs_percentage?.toFixed(0) ?? "?"}% of suites)`} no="No" />} />
+                    <Row label="SNI" value={<PassBadge pass={!!secFeatures.sni_supported} yes="Supported" no="Not detected" />} />
+                    <Row label="HSTS" value={<PassBadge pass={!!secFeatures.hsts_enabled} yes={`Enabled${secFeatures.hsts_max_age ? ` (${secFeatures.hsts_max_age}s)` : ""}`} no="Disabled" />} />
+                  </CardContent>
+                </Card>
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-4">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2"><Shield className="h-4 w-4" /> Leaf Certificate</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <Row label="Subject" value={leafCert.subject || result.cert_subject || "N/A"} mono />
+                    <Row label="Issuer" value={leafCert.issuer || result.cert_issuer || "N/A"} mono />
+                    <Row label="Valid From" value={formatDate(leafCert.valid_from || result.cert_not_before)} />
+                    <Row label="Valid Until" value={formatDate(leafCert.valid_until || result.cert_not_after)} />
+                    <Row label="Public Key" value={`${leafCert.public_key_algorithm || result.public_key_algorithm || "N/A"} ${leafCert.public_key_size || result.public_key_size_bits ? `(${leafCert.public_key_size || result.public_key_size_bits} bits)` : ""}`} />
+                    <Row label="OCSP Stapling" value={<PassBadge pass={!!certAnalysis.ocsp_stapling} yes="Active" no="Inactive" />} />
+                    <Row label="Cert Transparency" value={<PassBadge pass={!!certAnalysis.cert_transparency} yes="Present" no="Not detected" />} />
+                    {leafCert.cert_pqc_grade && <Row label="PQC Grade" value={<span className={`font-bold ${gradeColor(leafCert.cert_pqc_grade)}`}>{leafCert.cert_pqc_grade}</span>} />}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Footer */}
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground px-1">
+                {serverIp && <span className="flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" /> {serverIp}{serverPort ? `:${serverPort}` : ''}</span>}
+                <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" /> Scanned {formatDate(result.requested_at)}</span>
               </div>
             </div>
+          )}
 
-            {/* Component Analysis */}
-            {result.raw_response?.pqc_analysis?.components && (
-              <div className="bg-card/80 border rounded-2xl p-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-                <div className="mb-8 pb-6 border-b">
-                  <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                      <Package className="w-5 h-5 text-primary" />
-                    </div>
-                    Component Security Analysis
-                  </h3>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {Object.entries(result.raw_response.pqc_analysis.components).map(([key, value]: [string, any]) => (
-                    <ComponentScoreCard key={key} name={key} data={value} />
+          {/* ═══ FINDINGS TAB ═══ */}
+          {tab === 'findings' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex flex-wrap gap-1.5">
+                  {([
+                    { id: 'all', label: `All (${allCiphers.length})` },
+                    { id: 'tls13', label: `TLS 1.3 (${tls13Suites.length})` },
+                    { id: 'tls12', label: `TLS 1.2 (${tls12Suites.length})` },
+                  ] as { id: 'all' | 'tls13' | 'tls12'; label: string }[]).map(f => (
+                    <button key={f.id} onClick={() => setCipherFilter(f.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                        cipherFilter === f.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/70'
+                      }`}>{f.label}</button>
                   ))}
                 </div>
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <input className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-muted/40 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    placeholder="Search cipher suites…" value={cipherSearch} onChange={e => setCipherSearch(e.target.value)} />
+                </div>
               </div>
-            )}
-
-            {/* Detailed Technical Information */}
-            <div className="bg-card/80 border rounded-2xl p-10 shadow-[0_4px_14px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)] backdrop-blur-sm">
-              <div className="mb-8 pb-6 border-b">
-                <h3 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 dark:bg-primary/40 flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-primary" />
-                  </div>
-                  Detailed Technical Information
-                </h3>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Click "View Details" on any card to expand and see more information
-                </p>
+              <div className="flex items-center text-xs text-muted-foreground px-1">
+                <span>Showing <span className="font-semibold text-foreground">{filteredCiphers.length}</span> cipher suites · Badge = KEX PQC grade</span>
+              </div>
+              <div className="space-y-1.5">
+                {filteredCiphers.length === 0
+                  ? <div className="py-12 text-center text-sm text-muted-foreground">No cipher suites match your filter.</div>
+                  : filteredCiphers.map((c, i) => <CipherRow key={`${c.name}-${i}`} cipher={c} />)}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* TLS/SSL Configuration Card */}
-                <TechnicalInfoCard
-                  title="TLS/SSL Configuration"
-                  description="Protocol versions and cipher information"
-                  icon={<Lock className="w-5 h-5 text-primary" />}
-                  onViewDetails={() => setActiveModal('tls-config')}
-                  itemCount={4}
-                />
-
-                {/* Elliptic Curves Card */}
-                {tlsConfig.supported_elliptic_curves?.curves && tlsConfig.supported_elliptic_curves.curves.length > 0 && (
-                  <TechnicalInfoCard
-                    title="Elliptic Curves"
-                    description="Supported key exchange curves"
-                    icon={<Key className="w-5 h-5 text-primary" />}
-                    onViewDetails={() => setActiveModal('elliptic-curves')}
-                    itemCount={tlsConfig.supported_elliptic_curves.curves.length}
-                  />
-                )}
-
-                {/* Certificate Chain Card */}
-                <TechnicalInfoCard
-                  title="Certificate Chain"
-                  description="Certificate hierarchy and validation"
-                  icon={<Shield className="w-5 h-5 text-primary" />}
-                  onViewDetails={() => setActiveModal('cert-chain')}
-                  itemCount={(certChain.intermediate_certificates || []).length + 1}
-                />
-
-                {/* Certificate Signatures Card */}
-                {signatureAlgorithms.certificate_signatures && signatureAlgorithms.certificate_signatures.length > 0 && (
-                  <TechnicalInfoCard
-                    title="Certificate Signatures"
-                    description="Signature algorithms in the certificate chain"
-                    icon={<FileText className="w-5 h-5 text-primary" />}
-                    onViewDetails={() => setActiveModal('cert-signatures')}
-                    itemCount={signatureAlgorithms.certificate_signatures.length}
-                  />
-                )}
-
-                {/* Handshake Signature Algorithms Card */}
-                <TechnicalInfoCard
-                  title="Handshake Signature Algorithms"
-                  description="Algorithms used during TLS handshake"
-                  icon={<Zap className="w-5 h-5 text-primary" />}
-                  onViewDetails={() => setActiveModal('handshake-signatures')}
-                  itemCount={signatureAlgorithms.handshake_signatures?.length || 0}
-                />
-
-                {/* Cipher Suites Card */}
-                <TechnicalInfoCard
-                  title="Cipher Suites"
-                  description="Supported TLS cipher suites and encryption methods"
-                  icon={<Lock className="w-5 h-5 text-primary" />}
-                  onViewDetails={() => setActiveModal('cipher-suites')}
-                  itemCount={(tlsConfig['tls_1.3_cipher_suites']?.suites?.length || 0) + (tlsConfig['tls_1.2_cipher_suites']?.suites?.length || 0)}
-                />
-
-                {/* Security Headers Card */}
-                <TechnicalInfoCard
-                  title="Security Headers"
-                  description="HTTP security headers configuration"
-                  icon={<Shield className="w-5 h-5 text-primary" />}
-                  onViewDetails={() => setActiveModal('security-headers')}
-                  itemCount={5}
-                />
-
-                {/* Raw Scan Data Card */}
-                {rawData && Object.keys(rawData).length > 0 && (
-                  <TechnicalInfoCard
-                    title="Raw Scan Data (JSON)"
-                    description="Complete unformatted scan response"
-                    icon={<FileText className="w-5 h-5 text-primary" />}
-                    onViewDetails={() => setActiveModal('raw-data')}
-                  />
-                )}
-              </div>
-
-              {/* MODALS */}
-              <TechnicalDetailModal
-                isOpen={activeModal === 'tls-config'}
-                onClose={() => setActiveModal(null)}
-                title="TLS/SSL Configuration"
-                icon={<Lock className="w-5 h-5 text-primary" />}
-              >
-                <DetailRow label="Supported Protocols" value={(tlsConfig.supported_protocols || []).join(', ') || 'N/A'} />
-                <DetailRow label="Cipher Protocol" value={result.cipher_protocol || 'N/A'} />
-                <DetailRow label="Cipher Suite" value={result.cipher_suite_name || 'N/A'} />
-                <DetailRow label="Cipher Strength" value={result.cipher_strength_bits ? `${result.cipher_strength_bits} bits` : 'N/A'} />
-              </TechnicalDetailModal>
-
-              <TechnicalDetailModal
-                isOpen={activeModal === 'elliptic-curves'}
-                onClose={() => setActiveModal(null)}
-                title="Elliptic Curves"
-                icon={<Key className="w-5 h-5 text-primary" />}
-              >
-                {(tlsConfig.supported_elliptic_curves?.curves || []).map((curve: any, idx: number) => (
-                  <div key={idx} className="p-4 bg-muted/50 rounded-xl">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="font-medium">{curve.name}</div>
-                      <div className="text-sm text-muted-foreground">{curve.type} ({curve.bits} bits)</div>
-                    </div>
-                    {curve.curve_pqc_score !== undefined && (
-                      <div className="mt-2 flex items-center justify-between">
-                        <PQCStatusBadges 
-                          is_pqc={curve.curve_is_pqc}
-                          is_hybrid={curve.curve_is_hybrid}
-                          quantum_safe={curve.curve_quantum_safe}
-                        />
-                        <div className={`text-sm font-semibold ${getGradeColor(curve.curve_pqc_grade)}`}>
-                          {curve.curve_pqc_grade} ({curve.curve_pqc_score})
-                        </div>
+              {/* Elliptic Curves */}
+              {(tlsConfig.supported_elliptic_curves?.curves?.length ?? 0) > 0 && (
+                <div className="pt-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5"><Key className="h-3.5 w-3.5" /> Elliptic Curves ({tlsConfig.supported_elliptic_curves.curves.length})</p>
+                  <div className="space-y-1.5">
+                    {tlsConfig.supported_elliptic_curves.curves.map((curve: any, i: number) => (
+                      <div key={i} className="flex items-center gap-3 px-4 py-2.5 border border-border/60 rounded-lg bg-card/50">
+                        {curve.curve_pqc_grade
+                          ? <span className={`w-10 h-6 rounded border-2 flex items-center justify-center text-xs font-black flex-shrink-0 ${gradeBorder(curve.curve_pqc_grade)}`}>{curve.curve_pqc_grade}</span>
+                          : <span className="w-10 h-6 rounded bg-muted flex-shrink-0" />}
+                        <code className="font-mono text-xs font-semibold flex-1">{curve.name}</code>
+                        <span className="text-xs text-muted-foreground">{curve.type}</span>
+                        <span className="text-xs text-muted-foreground">{curve.bits} bits</span>
                       </div>
-                    )}
+                    ))}
                   </div>
+                </div>
+              )}
+
+              {/* Handshake Signatures */}
+              {(signatureAlgorithms.handshake_signatures?.length ?? 0) > 0 && (
+                <div className="pt-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5"><Zap className="h-3.5 w-3.5" /> Handshake Signatures ({signatureAlgorithms.handshake_signatures.length})</p>
+                  <div className="space-y-1.5">
+                    {signatureAlgorithms.handshake_signatures.map((sig: any, i: number) => (
+                      <div key={i} className="flex items-center gap-3 px-4 py-2.5 border border-border/60 rounded-lg bg-card/50">
+                        {sig.sig_pqc_grade
+                          ? <span className={`w-10 h-6 rounded border-2 flex items-center justify-center text-xs font-black flex-shrink-0 ${gradeBorder(sig.sig_pqc_grade)}`}>{sig.sig_pqc_grade}</span>
+                          : <span className="w-10 h-6 rounded bg-muted flex-shrink-0" />}
+                        <code className="font-mono text-xs font-semibold flex-1 truncate">{sig.algorithm}</code>
+                        <span className="text-xs text-muted-foreground hidden sm:block">{sig.protocol}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ DETAILS TAB ═══ */}
+          {tab === 'details' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  { id: 'certificates', label: 'Certificates', icon: <Shield className="h-3.5 w-3.5" /> },
+                  { id: 'compliance', label: 'Compliance', icon: <CheckCircle className="h-3.5 w-3.5" /> },
+                  { id: 'migration', label: 'Migration Plan', icon: <Zap className="h-3.5 w-3.5" /> },
+                  { id: 'raw', label: 'Raw JSON', icon: <Database className="h-3.5 w-3.5" /> },
+                ] as { id: any; label: string; icon: React.ReactNode }[]).map(s => (
+                  <button key={s.id} onClick={() => setDetailSection(s.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      detailSection === s.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/70'
+                    }`}>{s.icon} {s.label}</button>
                 ))}
-              </TechnicalDetailModal>
+              </div>
 
-              <TechnicalDetailModal
-                isOpen={activeModal === 'cert-chain'}
-                onClose={() => setActiveModal(null)}
-                title="Certificate Chain"
-                icon={<Shield className="w-5 h-5 text-primary" />}
-              >
-                <div className="space-y-4">
-                  <div className="mb-4 p-5 bg-muted/50 rounded-xl">
-                  <div className="font-semibold mb-2">Leaf Certificate</div>
-                  <DetailRow label="Subject" value={result.cert_subject || 'N/A'} />
-                  <DetailRow label="Issuer" value={result.cert_issuer || 'N/A'} />
-                  <DetailRow label="Valid From" value={result.cert_not_before || 'N/A'} />
-                  <DetailRow label="Valid Until" value={result.cert_not_after || 'N/A'} />
-                  <DetailRow label="Public Key Algorithm" value={result.public_key_algorithm || 'N/A'} />
-                  <DetailRow label="Public Key Size" value={result.public_key_size_bits ? `${result.public_key_size_bits} bits` : 'N/A'} />
-                  <DetailRow label="Certificate Transparency" value={
-                    leafCert.certificate_transparency ? (
-                      <div className="flex items-center gap-2">
-                        <Check className="w-4 h-4 text-emerald-600" />
-                        <span className="text-emerald-600">Enabled</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <X className="w-4 h-4 text-rose-600" />
-                        <span className="text-rose-600">Disabled</span>
-                      </div>
-                    )
-                  } />
-                  {leafCert.cert_pqc_score !== undefined && (
-                    <div className="mt-3 pt-3 border-t">
-                      <DetailRow label="PQC Grade" value={
-                        <span className={`font-bold ${getGradeColor(leafCert.cert_pqc_grade)}`}>
-                          {leafCert.cert_pqc_grade} ({leafCert.cert_pqc_score})
-                        </span>
-                      } />
-                      <DetailRow label="Status" value={
-                        <PQCStatusBadges 
-                          is_pqc={leafCert.cert_is_pqc}
-                          is_hybrid={leafCert.cert_is_hybrid}
-                          quantum_safe={leafCert.cert_quantum_safe}
-                        />
-                      } />
-                    </div>
+              {/* Certificates */}
+              {detailSection === 'certificates' && (
+                <div className="space-y-3">
+                  <Card className="border">
+                    <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Leaf Certificate</CardTitle></CardHeader>
+                    <CardContent className="p-4">
+                      <Row label="Subject" value={leafCert.subject || result.cert_subject || "N/A"} mono />
+                      <Row label="Issuer" value={leafCert.issuer || result.cert_issuer || "N/A"} mono />
+                      <Row label="Valid From" value={formatDate(leafCert.valid_from || result.cert_not_before)} />
+                      <Row label="Valid Until" value={formatDate(leafCert.valid_until || result.cert_not_after)} />
+                      <Row label="Public Key" value={`${leafCert.public_key_algorithm || "N/A"} (${leafCert.public_key_size || result.public_key_size_bits || "?"} bits)`} />
+                      {(leafCert.subject_alternative_names?.length ?? 0) > 0 && (
+                        <Row label="SANs" value={<span className="font-mono text-xs">{leafCert.subject_alternative_names.join(", ")}</span>} />
+                      )}
+                      {leafCert.cert_pqc_grade && <Row label="PQC Grade" value={<span className={`font-bold text-base ${gradeColor(leafCert.cert_pqc_grade)}`}>{leafCert.cert_pqc_grade} ({leafCert.cert_pqc_score})</span>} />}
+                    </CardContent>
+                  </Card>
+                  {(certChain.intermediate_certificates ?? []).map((cert: any, i: number) => (
+                    <Card key={i} className="border">
+                      <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Intermediate Certificate {i + 1}</CardTitle></CardHeader>
+                      <CardContent className="p-4">
+                        <Row label="Public Key" value={`${cert.public_key_algorithm || "N/A"} (${cert.public_key_size || "?"} bits)`} />
+                        {cert.cert_pqc_grade && <Row label="PQC Grade" value={<span className={`font-bold ${gradeColor(cert.cert_pqc_grade)}`}>{cert.cert_pqc_grade} ({cert.cert_pqc_score})</span>} />}
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {(signatureAlgorithms.certificate_signatures?.length ?? 0) > 0 && (
+                    <Card className="border">
+                      <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Certificate Signature Algorithms ({signatureAlgorithms.certificate_signatures.length})</CardTitle></CardHeader>
+                      <CardContent className="p-0 divide-y divide-border">
+                        {signatureAlgorithms.certificate_signatures.map((sig: any, i: number) => (
+                          <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                            {sig.sig_pqc_grade && <span className={`text-xs font-bold px-1.5 py-0.5 rounded border flex-shrink-0 ${gradeBorder(sig.sig_pqc_grade)}`}>{sig.sig_pqc_grade}</span>}
+                            <code className="font-mono text-xs flex-1">{sig.signature_algorithm}</code>
+                            <span className="text-xs text-muted-foreground hidden sm:block">{sig.public_key_type} · {sig.public_key_size} bits · {sig.hash_algorithm}</span>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
                   )}
                 </div>
+              )}
 
-                  {(certChain.intermediate_certificates || []).map((cert: any, index: number) => (
-                  <div key={`intermediate-${index}`} className="mb-4 p-5 bg-muted/50 rounded-xl">
-                    <div className="font-semibold mb-2">Intermediate Certificate {index + 1}</div>
-                    <DetailRow label="Public Key Algorithm" value={cert.public_key_algorithm || 'N/A'} />
-                    <DetailRow label="Public Key Size" value={`${cert.public_key_size || 'N/A'} bits`} />
-                    {cert.cert_pqc_score !== undefined && (
-                      <div className="mt-2 pt-2 border-t">
-                        <DetailRow label="PQC Grade" value={
-                          <span className={`font-bold ${getGradeColor(cert.cert_pqc_grade)}`}>
-                            {cert.cert_pqc_grade} ({cert.cert_pqc_score})
-                          </span>
-                        } />
-                        <DetailRow label="Status" value={
-                          <PQCStatusBadges 
-                            is_pqc={cert.cert_is_pqc}
-                            is_hybrid={cert.cert_is_hybrid}
-                            quantum_safe={cert.cert_quantum_safe}
-                          />
-                        } />
-                      </div>
-                    )}
-                  </div>
-                ))}
-                </div>
-              </TechnicalDetailModal>
-
-              <TechnicalDetailModal
-                isOpen={activeModal === 'cert-signatures'}
-                onClose={() => setActiveModal(null)}
-                title="Certificate Signatures"
-                icon={<FileText className="w-5 h-5 text-primary" />}
-              >
+              {/* Compliance */}
+              {detailSection === 'compliance' && (
                 <div className="space-y-3">
-                  {signatureAlgorithms.certificate_signatures.map((sig: any, idx: number) => (
-                    <div key={idx} className="p-5 bg-muted/50 rounded-xl">
-                      <div className="font-semibold mb-2">Position {sig.position}: {sig.certificate_subject}</div>
-                      <DetailRow label="Signature Algorithm" value={sig.signature_algorithm} />
-                      <DetailRow label="Hash Algorithm" value={sig.hash_algorithm} />
-                      <DetailRow label="Public Key" value={`${sig.public_key_type} (${sig.public_key_size} bits)`} />
-                      {sig.sig_pqc_score !== undefined && (
-                        <div className="mt-2 pt-2 border-t">
-                          <DetailRow label="PQC Grade" value={
-                            <span className={`font-bold ${getGradeColor(sig.sig_pqc_grade)}`}>
-                              {sig.sig_pqc_grade} ({sig.sig_pqc_score})
-                            </span>
-                          } />
-                          <DetailRow label="Status" value={
-                            <PQCStatusBadges 
-                              is_pqc={sig.sig_is_pqc}
-                              is_hybrid={sig.sig_is_hybrid}
-                              quantum_safe={sig.sig_quantum_safe}
-                            />
-                          } />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                  {Object.keys(complianceStatus).length > 0
+                    ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {Object.entries(complianceStatus).map(([std, passed]) => {
+                          const detail = complianceDetails[std] || { desc: 'Security standard', fails: [] };
+                          return (
+                            <div key={std} className={`rounded-xl p-4 border ${passed ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'}`}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-semibold text-sm">{std}</p>
+                                  <p className="text-xs text-muted-foreground mt-0.5">{detail.desc}</p>
+                                </div>
+                                {passed ? <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0" /> : <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />}
+                              </div>
+                              {!passed && detail.fails.length > 0 && (
+                                <ul className="mt-2 space-y-0.5">
+                                  {detail.fails.map((r, i) => <li key={i} className="text-xs text-red-600 dark:text-red-400 flex items-start gap-1"><span>•</span><span>{r}</span></li>)}
+                                </ul>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    : <div className="py-12 text-center text-sm text-muted-foreground flex flex-col items-center gap-2"><Info className="h-8 w-8 opacity-40" />No compliance data available.</div>}
+                  {criticalVulns.length > 0 && (
+                    <Card className="border-red-200 dark:border-red-800">
+                      <CardHeader className="border-b py-3 px-4 bg-red-50 dark:bg-red-950/20"><CardTitle className="text-sm font-semibold text-red-700 dark:text-red-300">Critical Findings</CardTitle></CardHeader>
+                      <CardContent className="p-4 space-y-2">
+                        {criticalVulns.map((v, i) => (
+                          <div key={i} className="flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
+                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />{v}
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
-              </TechnicalDetailModal>
+              )}
 
-              <TechnicalDetailModal
-                isOpen={activeModal === 'handshake-signatures'}
-                onClose={() => setActiveModal(null)}
-                title="Handshake Signature Algorithms"
-                icon={<Zap className="w-5 h-5 text-primary" />}
-              >
-                {signatureAlgorithms.handshake_signatures && signatureAlgorithms.handshake_signatures.length > 0 ? (
-                  <div className="space-y-3">
-                    {signatureAlgorithms.handshake_signatures.map((sig: any, idx: number) => (
-                      <div key={idx} className="p-4 bg-muted/50 rounded-xl">
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="font-medium">{sig.algorithm}</div>
-                          <div className="text-sm text-muted-foreground">{sig.protocol}</div>
-                        </div>
-                        {sig.sig_pqc_score !== undefined && (
-                          <div className="mt-2 flex items-center justify-between">
-                            <PQCStatusBadges 
-                              is_pqc={sig.sig_is_pqc}
-                              is_hybrid={sig.sig_is_hybrid}
-                              quantum_safe={sig.sig_quantum_safe}
-                            />
-                            <div className={`text-sm font-semibold ${getGradeColor(sig.sig_pqc_grade)}`}>
-                              {sig.sig_pqc_grade} ({sig.sig_pqc_score})
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground text-sm">No handshake signature algorithms available</p>
-                )}
-              </TechnicalDetailModal>
+              {/* Migration */}
+              {detailSection === 'migration' && (
+                result.raw_response?.pqc_analysis
+                  ? <SuggestionsPanel pqcAnalysis={result.raw_response.pqc_analysis} domain={result.url} />
+                  : <div className="py-12 text-center text-sm text-muted-foreground flex flex-col items-center gap-2"><Info className="h-8 w-8 opacity-40" />No migration plan available.</div>
+              )}
 
-              <TechnicalDetailModal
-                isOpen={activeModal === 'cipher-suites'}
-                onClose={() => setActiveModal(null)}
-                title="Cipher Suites"
-                icon={<Lock className="w-5 h-5 text-primary" />}
-              >
-                {tlsConfig['tls_1.3_cipher_suites'] && (
-                  <div className="mb-6">
-                    <div className="font-semibold mb-2 flex justify-between items-center">
-                      <span>TLS 1.3 Cipher Suites</span>
-                      {tlsConfig['tls_1.3_cipher_suites'].component_kex_score !== undefined && (
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">KEX Score: </span>
-                          <span className={`font-bold ${getGradeColor(tlsConfig['tls_1.3_cipher_suites'].component_kex_grade)}`}>
-                            {tlsConfig['tls_1.3_cipher_suites'].component_kex_grade} ({tlsConfig['tls_1.3_cipher_suites'].component_kex_score})
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    {(tlsConfig['tls_1.3_cipher_suites'].suites || []).map((cipher: any, idx: number) => (
-                      <div key={idx} className="border-b border-border last:border-0 py-3">
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex-1">
-                            <div className="font-medium text-sm">{cipher.name}</div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              Encryption: {cipher.encryption} | Hash: {getHashFromCipherName(cipher.name)}
-                            </div>
-                          </div>
-                          <div className="text-sm text-muted-foreground ml-4">
-                            {cipher.key_exchange} {cipher.curve_bits ? `(${cipher.curve_bits} bits)` : ''}
-                          </div>
-                        </div>
-                        {cipher.kex_pqc_score !== undefined && (
-                          <div className="flex gap-4 text-xs mt-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">KEX:</span>
-                              <span className={`font-semibold ${getGradeColor(cipher.kex_pqc_grade)}`}>
-                                {cipher.kex_pqc_grade} ({cipher.kex_pqc_score})
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {tlsConfig['tls_1.2_cipher_suites'] && (
-                  <div>
-                    <div className="font-semibold mb-2 flex justify-between items-center">
-                      <span>TLS 1.2 Cipher Suites</span>
-                      {tlsConfig['tls_1.2_cipher_suites'].component_kex_score !== undefined && (
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">KEX Score: </span>
-                          <span className={`font-bold ${getGradeColor(tlsConfig['tls_1.2_cipher_suites'].component_kex_grade)}`}>
-                            {tlsConfig['tls_1.2_cipher_suites'].component_kex_grade} ({tlsConfig['tls_1.2_cipher_suites'].component_kex_score})
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    {(tlsConfig['tls_1.2_cipher_suites'].suites || []).map((cipher: any, idx: number) => (
-                      <div key={idx} className="border-b border-border last:border-0 py-3">
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex-1">
-                            <div className="font-medium text-sm">{cipher.name}</div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              Encryption: {cipher.encryption} | Hash: {getHashFromCipherName(cipher.name)}
-                            </div>
-                          </div>
-                          <div className="text-sm text-muted-foreground ml-4">
-                            {cipher.key_exchange} {cipher.curve_bits ? `(${cipher.curve_bits} bits)` : ''}
-                          </div>
-                        </div>
-                        {cipher.kex_pqc_score !== undefined && (
-                          <div className="flex gap-4 text-xs mt-2 flex-wrap">
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">KEX:</span>
-                              <span className={`font-semibold ${getGradeColor(cipher.kex_pqc_grade)}`}>
-                                {cipher.kex_pqc_grade} ({cipher.kex_pqc_score})
-                              </span>
-                              <PQCStatusBadges 
-                                is_pqc={cipher.kex_is_pqc}
-                                is_hybrid={cipher.kex_is_hybrid}
-                                quantum_safe={cipher.kex_quantum_safe}
-                              />
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">Encryption:</span>
-                              <span className={`font-semibold ${getGradeColor(cipher.encryption_pqc_grade)}`}>
-                                {cipher.encryption_pqc_grade} ({cipher.encryption_pqc_score})
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TechnicalDetailModal>
-
-              <TechnicalDetailModal
-                isOpen={activeModal === 'security-headers'}
-                onClose={() => setActiveModal(null)}
-                title="Security Headers"
-                icon={<Shield className="w-5 h-5 text-primary" />}
-              >
-                <DetailRow label="HSTS Enabled" value={
-                  result.hsts_enabled ? (
-                    <span className="text-emerald-600 font-semibold">✓ Enabled</span>
-                  ) : (
-                    <span className="text-rose-600 font-semibold">✗ Disabled</span>
-                  )
-                } />
-                <DetailRow label="CSP Enabled" value={
-                  result.csp_enabled ? (
-                    <span className="text-emerald-600 font-semibold">✓ Enabled</span>
-                  ) : (
-                    <span className="text-rose-600 font-semibold">✗ Disabled</span>
-                  )
-                } />
-                <DetailRow label="X-Frame-Options" value={
-                  result.x_frame_options_enabled ? (
-                    <span className="text-emerald-600 font-semibold">✓ Enabled</span>
-                  ) : (
-                    <span className="text-rose-600 font-semibold">✗ Disabled</span>
-                  )
-                } />
-                <DetailRow label="OCSP Stapling" value={
-                  result.ocsp_stapling_active ? (
-                    <span className="text-emerald-600 font-semibold">✓ Active</span>
-                  ) : (
-                    <span className="text-rose-600 font-semibold">✗ Inactive</span>
-                  )
-                } />
-              </TechnicalDetailModal>
-
-              <TechnicalDetailModal
-                isOpen={activeModal === 'raw-data'}
-                onClose={() => setActiveModal(null)}
-                title="Raw Scan Data (JSON)"
-                icon={<FileText className="w-5 h-5 text-primary" />}
-              >
-                <div className="bg-slate-900 dark:bg-slate-950 p-6 rounded-xl overflow-auto max-h-96">
-                  <pre className="text-xs font-mono text-slate-100 whitespace-pre-wrap break-words">
-                    {JSON.stringify(rawData, null, 2)}
-                  </pre>
-                </div>
-              </TechnicalDetailModal>
+              {/* Raw JSON */}
+              {detailSection === 'raw' && (
+                <Card className="border">
+                  <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Raw JSON</CardTitle></CardHeader>
+                  <CardContent className="p-0">
+                    <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-muted/30">{JSON.stringify(result, null, 2)}</pre>
+                  </CardContent>
+                </Card>
+              )}
             </div>
-          </div>
-        ) : (
-          // Failed/HTTP Scan View
-          <div className="max-w-2xl mx-auto">
-            <div className={`p-8 rounded-2xl ${
-              result.scan_status === 'http_skipped' 
-                ? 'bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-200 dark:border-amber-900' 
-                : 'bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-200 dark:border-rose-900'
-            }`}>
-              {result.scan_status === 'http_skipped' ? (
+          )}
+        </>) : (
+          /* Failed / HTTP skipped */
+          <div className="max-w-xl mx-auto pt-6">
+            <div className={`p-5 rounded-xl border ${result.scan_status === "http_skipped" ? "border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10" : "border-red-300 dark:border-red-800 bg-red-50/40 dark:bg-red-950/10"}`}>
+              {result.scan_status === "http_skipped" ? (
                 <>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/40 rounded-2xl flex items-center justify-center">
-                      <AlertTriangle className="w-8 h-8 text-amber-600" />
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-bold text-amber-900 dark:text-amber-100">
-                        HTTP Domain - Cannot Scan
-                      </h2>
-                      <p className="text-sm text-amber-700 dark:text-amber-300">
-                        This domain uses unsecured HTTP protocol
-                      </p>
-                    </div>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <div><div className="text-sm font-bold text-amber-800 dark:text-amber-100">HTTP Domain — Cannot Scan</div>
+                      <div className="text-xs text-amber-600 dark:text-amber-300">No TLS/SSL encryption present</div></div>
                   </div>
-                  <p className="text-amber-800 dark:text-amber-200 mb-4 leading-relaxed">
-                    {result.error_message || 'This domain uses HTTP instead of HTTPS. We can only analyze TLS/SSL encrypted connections (HTTPS).'}
-                  </p>
-                  <div className="bg-amber-100 dark:bg-amber-900/40 rounded-xl p-6">
-                    <p className="font-semibold text-amber-900 dark:text-amber-100 mb-3">Why can't we scan this domain?</p>
-                    <ul className="list-disc list-inside space-y-2 text-amber-800 dark:text-amber-200 text-sm">
-                      <li>HTTP domains don't use encryption</li>
-                      <li>No cryptographic data is available to analyze</li>
-                      <li>TLS/SSL certificates are only present on HTTPS connections</li>
-                      <li>Post-quantum cryptography analysis requires encrypted traffic</li>
-                    </ul>
-                  </div>
+                  <p className="text-xs text-amber-700 dark:text-amber-200 leading-relaxed">{result.error_message || "PQC analysis requires an encrypted HTTPS connection."}</p>
                 </>
               ) : (
                 <>
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/40 rounded-2xl flex items-center justify-center">
-                      <ShieldAlert className="w-8 h-8 text-rose-600" />
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-bold text-rose-900 dark:text-rose-100">
-                        Scan Failed
-                      </h2>
-                      <p className="text-sm text-rose-700 dark:text-rose-300">
-                        Unable to complete security analysis
-                      </p>
-                    </div>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <ShieldAlert className="w-4 h-4 text-red-600 flex-shrink-0" />
+                    <div><div className="text-sm font-bold text-red-800 dark:text-red-100">Scan Failed</div>
+                      <div className="text-xs text-red-600 dark:text-red-300">Unable to complete security analysis</div></div>
                   </div>
-                  <p className="text-rose-800 dark:text-rose-200 leading-relaxed">
-                    {result.error_message || 'An unknown error occurred during the scan. Please try again or contact support if the issue persists.'}
-                  </p>
+                  <p className="text-xs text-red-700 dark:text-red-200 leading-relaxed">{result.error_message || "An unknown error occurred. Please retry."}</p>
                 </>
               )}
             </div>
@@ -982,275 +694,122 @@ const DomainDetailPage: React.FC<{
   );
 };
 
-// ============================================================================
-// DOMAIN CARD COMPONENT FOR LIST VIEW
-// ============================================================================
-
-const DomainCard: React.FC<{
-  result: ScanResult;
-  onViewDetails: () => void;
-}> = ({ result, onViewDetails }) => {
-  const isSuccess = result.scan_status === 'completed';
-  const isHttpSkipped = result.scan_status === 'http_skipped';
-  const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? 'N/A';
-  const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? 'N/A';
+// ── Domain Card (list view) ───────────────────────────────────────────────────
+const DomainCard: React.FC<{ result: ScanResult; onViewDetails: () => void }> = ({ result, onViewDetails }) => {
+  const isSuccess = result.scan_status === "completed";
+  const isHttpSkipped = result.scan_status === "http_skipped";
+  const pqcScore = result.raw_response?.pqc_analysis?.overall_score ?? null;
+  const pqcGrade = result.raw_response?.pqc_analysis?.overall_grade ?? "—";
   const quantumReady = result.raw_response?.pqc_analysis?.quantum_ready ?? false;
+  const scoreNum = typeof pqcScore === "number" ? pqcScore : 0;
 
   return (
-    <Card 
-      className="cursor-pointer transition-all duration-300 ease-out hover:scale-[1.02] hover:shadow-2xl hover:-translate-y-1 shadow-md"
-      onClick={onViewDetails}
-    >
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 px-6 pt-6">
-        <div className="flex-1 min-w-0">
-          <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-            <Shield className="h-4 w-4" />
-            Domain Scan
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-1 truncate">{result.url}</p>
-        </div>
-        <div>
-          {isSuccess ? (
-            <span className="px-2 py-1 text-xs rounded-full bg-success/10 text-success font-semibold">
-              ● Completed
-            </span>
-          ) : isHttpSkipped ? (
-            <span className="px-2 py-1 text-xs rounded-full bg-amber-500/10 text-amber-600 font-semibold">
-              ● HTTP
-            </span>
-          ) : (
-            <span className="px-2 py-1 text-xs rounded-full bg-destructive/10 text-destructive font-semibold">
-              ● Failed
-            </span>
-          )}
-        </div>
-      </CardHeader>
-
-      <CardContent className="px-6 pb-6">
-        <div className="space-y-4">
-          <div>
-            <h5 className="font-semibold truncate text-base mb-1">{result.url}</h5>
-            <div className="text-xs text-muted-foreground">
-              {isSuccess ? (
-                <span className="text-success">Scan successful</span>
-              ) : isHttpSkipped ? (
-                <span className="text-amber-600">HTTP - Not scannable</span>
-              ) : (
-                <span className="text-destructive">Scan failed</span>
-              )}
+    <button onClick={onViewDetails}
+      className="w-full text-left bg-card border border-border rounded-xl p-5 hover:border-primary/40 hover:shadow-md transition-all duration-200">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <code className="text-sm font-mono font-semibold text-foreground truncate flex-1">{result.url}</code>
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 border ${
+          isSuccess ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+          : isHttpSkipped ? "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+          : "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+        }`}>{isSuccess ? "Completed" : isHttpSkipped ? "HTTP" : "Failed"}</span>
+      </div>
+      {isSuccess && pqcScore !== null ? (
+        <div className="flex items-center gap-4">
+          <span className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-black flex-shrink-0 border-2 ${gradeBorder(pqcGrade as string)}`}>{pqcGrade}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2 mb-1.5">
+              <span className="text-xl font-black tabular-nums text-foreground">{scoreNum.toFixed(1)}</span>
+              <span className="text-xs text-muted-foreground">/100</span>
+              {quantumReady && <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 ml-1">⚡ Quantum Ready</span>}
+            </div>
+            <div className={`h-1.5 rounded-full overflow-hidden ${scoreBarBg(scoreNum)}`}>
+              <div className={`h-full rounded-full ${scoreBg(scoreNum)}`} style={{ width: `${scoreNum}%` }} />
             </div>
           </div>
-
-          {isSuccess && (
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">PQC Score</div>
-                <div className="font-bold text-sm">{typeof pqcScore === 'number' ? pqcScore.toFixed(1) : 'N/A'}</div>
-              </div>
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Grade</div>
-                <div className={`font-bold text-sm ${getGradeColor(pqcGrade as string)}`}>
-                  {pqcGrade}
-                </div>
-              </div>
-              <div className="bg-muted/30 p-3 rounded-lg text-center">
-                <div className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Status</div>
-                <div className={`font-bold text-sm ${quantumReady ? 'text-success' : 'text-destructive'}`}>
-                  {quantumReady ? 'Ready' : 'Not Ready'}
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {isHttpSkipped && (
-            <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg text-xs text-amber-800 dark:text-amber-200">
-              <p className="font-medium">Cannot analyze HTTP domains. HTTPS required.</p>
-            </div>
-          )}
         </div>
-      </CardContent>
-    </Card>
+      ) : isHttpSkipped ? (
+        <p className="text-xs text-amber-700 dark:text-amber-400">HTTP protocol — no TLS to analyze</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">Scan did not complete</p>
+      )}
+    </button>
   );
 };
 
-// ============================================================================
-// MAIN RESULTS DETAIL PAGE COMPONENT
-// ============================================================================
-
+// ── Results Detail Page (router) ──────────────────────────────────────────────
 const ResultsDetailPage: React.FC<ResultsDetailPageProps> = ({ scan, onBack, targetDomain }) => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedDomain, setSelectedDomain] = useState<ScanResult | null>(null);
 
-  // If a target domain is provided (e.g., from Applications page), pre-filter to it
+  const isSingleScan = !scan.detailedResults || scan.detailedResults.length === 0;
+  if (isSingleScan && scan.url && !scan.url.startsWith("Scanning")) {
+    return <DomainDetailPage result={scan} onBack={onBack} />;
+  }
+
   useEffect(() => {
-    if (targetDomain) {
+    if (targetDomain && scan.detailedResults) {
       setSearchQuery(targetDomain);
-      // Auto-select the domain if found
-      const matchingResult = scan.detailedResults?.find(
-        result => result.url.toLowerCase() === targetDomain.toLowerCase()
-      );
-      if (matchingResult) {
-        setSelectedDomain(matchingResult);
-      }
+      const match = scan.detailedResults?.find(r => r.url.toLowerCase() === targetDomain.toLowerCase());
+      if (match) setSelectedDomain(match);
     }
   }, [targetDomain, scan.detailedResults]);
 
-  // Filter results based on search query
   const filteredResults = useMemo(() => {
     if (!scan.detailedResults) return [];
-    return scan.detailedResults.filter(result =>
-      result.url.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    return scan.detailedResults.filter(r => r.url.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [scan.detailedResults, searchQuery]);
 
-  // Calculate summary stats
   const stats = useMemo(() => {
-    if (!scan.detailedResults) return { successful: 0, failed: 0 };
+    if (!scan.detailedResults) return { successful: 0, failed: 0, total: 0 };
     return {
-      successful: scan.detailedResults.filter(r => r.scan_status === 'completed').length,
-      failed: scan.detailedResults.filter(r => r.scan_status !== 'completed').length,
+      successful: scan.detailedResults.filter(r => r.scan_status === "completed").length,
+      failed: scan.detailedResults.filter(r => r.scan_status !== "completed").length,
+      total: scan.detailedResults.length,
     };
   }, [scan.detailedResults]);
 
-  const cardVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -20 },
-  };
+  if (selectedDomain) return <DomainDetailPage result={selectedDomain} onBack={() => setSelectedDomain(null)} />;
 
-  // If a domain is selected, show the detail page
-  if (selectedDomain) {
-    return (
-      <DomainDetailPage 
-        result={selectedDomain} 
-        onBack={() => setSelectedDomain(null)} 
-      />
-    );
-  }
-
-  // Otherwise, show the list view
   return (
-    <motion.div
-      variants={cardVariants}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-      transition={{ duration: 0.3 }}
-      className="p-4 sm:p-6 max-w-7xl mx-auto"
-    >
-      {/* Header */}
-      <div className="mb-8">
-        <UnifiedBackButton 
-          onClick={onBack}
-          label="Back to Scan History"
-          className="mb-4"
-        />
-        
-        <div>
-          <h2 className="text-3xl sm:text-4xl font-bold">
-            Scan Results
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Request ID: {scan.request_id}
-          </p>
-        </div>
-
-        {/* Stats Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-          <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Successful</p>
-                <h3 className="text-2xl font-bold mt-2">{stats.successful}</h3>
-              </div>
-              <div className="p-3 rounded-full bg-success/10 dark:bg-success/20">
-                <CheckCircle className="w-6 h-6 text-success" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Failed</p>
-                <h3 className="text-2xl font-bold mt-2">{stats.failed}</h3>
-              </div>
-              <div className="p-3 rounded-full bg-destructive/10 dark:bg-destructive/20">
-                <ShieldAlert className="w-6 h-6 text-destructive" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total</p>
-                <h3 className="text-2xl font-bold mt-2">{scan.detailedResults?.length ?? 0}</h3>
-              </div>
-              <div className="p-3 rounded-full bg-primary/10 dark:bg-primary/20">
-                <Globe className="w-6 h-6 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="shadow-md hover:shadow-lg hover:scale-[1.01] transition duration-200">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Duration</p>
-                <h3 className="text-2xl font-bold mt-2">{scan.execution_time_seconds?.toFixed(2) ?? 'N/A'}s</h3>
-              </div>
-              <div className="p-3 rounded-full bg-muted/10 dark:bg-muted/20">
-                <Clock className="w-6 h-6 text-muted-foreground" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+      <div className="mb-6">
+        <UnifiedBackButton onClick={onBack} label="Back to Scan History" className="mb-4" />
+        <h2 className="text-sm font-bold text-foreground">Scan Results</h2>
+        <p className="text-xs text-muted-foreground mt-0.5 font-mono">{scan.request_id}</p>
       </div>
-
-      {/* Search Bar */}
-      <div className="mb-8 relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by domain name..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10 h-12 border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/20 transition-all"
-        />
-        <p className="text-xs text-muted-foreground mt-2">
-          Showing {filteredResults.length} of {scan.detailedResults?.length ?? 0} domains
-        </p>
+      <div className="grid grid-cols-4 gap-2 mb-5">
+        {[
+          { label: "Completed", value: stats.successful, color: "text-emerald-600 dark:text-emerald-400" },
+          { label: "Failed",    value: stats.failed,     color: "text-red-600 dark:text-red-400" },
+          { label: "Total",     value: stats.total,      color: "text-foreground" },
+          { label: "Duration",  value: scan.execution_time_seconds ? `${scan.execution_time_seconds.toFixed(1)}s` : "—", color: "text-muted-foreground" },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="bg-card border border-border rounded px-3 py-3">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">{label}</div>
+            <div className={`text-xl font-bold tabular-nums ${color}`}>{value}</div>
+          </div>
+        ))}
       </div>
-
-      {/* Domain Cards Grid */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <Input placeholder="Filter domains..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 h-8 text-xs" />
+        {searchQuery && <p className="text-xs text-muted-foreground mt-1">{filteredResults.length} of {stats.total} domains</p>}
+      </div>
       {filteredResults.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           {filteredResults.map((result, index) => (
-            <motion.div
-              key={result.url}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05, duration: 0.4 }}
-            >
-              <DomainCard
-                result={result}
-                onViewDetails={() => setSelectedDomain(result)}
-              />
-            </motion.div>
+            <DomainCard key={result.id || `${result.url}-${index}`} result={result} onViewDetails={() => setSelectedDomain(result)} />
           ))}
         </div>
       ) : (
-        <Card className="bg-card">
-          <CardContent className="flex flex-col items-center justify-center py-16">
-            <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-              <Search className="w-8 h-8 text-slate-400" />
-            </div>
-            <p className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">
-              {searchQuery ? 'No domains found' : 'No results available'}
-            </p>
-            <p className="text-sm text-slate-500">
-              {searchQuery ? 'Try adjusting your search' : 'Start by running a scan'}
-            </p>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Globe className="w-7 h-7 text-muted-foreground/30 mb-2" />
+          <p className="text-sm font-medium text-muted-foreground">{searchQuery ? "No matching domains" : "No results available"}</p>
+          <p className="text-xs text-muted-foreground/60 mt-0.5">{searchQuery ? "Try a different filter" : "Run a scan to see results here"}</p>
+        </div>
       )}
-    </motion.div>
+    </div>
   );
 };
 
