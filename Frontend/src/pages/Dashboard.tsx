@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { getAllDashboards, updateAppStatus, getPQCTrend } from "@/api/dashboard";
+import { computeProfileAdjustmentFactor } from "@/data/algorithmLibrary";
 import {
   BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -119,13 +120,52 @@ export default function Dashboard() {
     if (dashboards && dashboards.length > 0 && !selectedOrg) setSelectedOrg(dashboards[0]);
   }, [dashboards, selectedOrg]);
 
-  // ── computed ─────────────────────────────────────────────────────────────
+  // ── Org profile adjustment (from localStorage) ────────────────────────────
+  const profileAdjustment = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('org_algorithm_profile');
+      if (!saved) return 1;
+      return computeProfileAdjustmentFactor(JSON.parse(saved));
+    } catch { return 1; }
+  }, []);
+
+  // ── computed (must come before suborgAdjustments) ────────────────────────
   const apps = useMemo(() => selectedOrg?.applications ?? [], [selectedOrg]);
   const dist = useMemo(() => selectedOrg?.risk_distribution ?? { Low: 0, Medium: 0, High: 0, "Very High": 0 }, [selectedOrg]);
-  const summary = useMemo(() => selectedOrg?.summary ?? { total_applications: 0, total_vulnerabilities: 0, secure_applications: 0, pqc_readiness_percent: 0 }, [selectedOrg]);
+  const rawSummary = useMemo(() => selectedOrg?.summary ?? { total_applications: 0, total_vulnerabilities: 0, secure_applications: 0, pqc_readiness_percent: 0 }, [selectedOrg]);
+
+  // Per-sub-org adjustment factors (sub-org profile → org-wide profile → 1)
+  const suborgAdjustments = useMemo(() => {
+    const map: Record<string, number> = {};
+    apps.forEach(a => {
+      const id = a["Sub Org ID"];
+      if (id in map) return;
+      try {
+        const raw = localStorage.getItem(`suborg_algorithm_profile_${id}`);
+        if (raw) { map[id] = computeProfileAdjustmentFactor(JSON.parse(raw)); return; }
+      } catch {}
+      map[id] = profileAdjustment; // fall back to org-wide
+    });
+    return map;
+  }, [apps, profileAdjustment]);
+
+  // Apps with per-sub-org adjusted PQC score
+  const adjustedApps = useMemo(() => apps.map(a => ({
+    ...a,
+    _adjPQC: Math.min(100, Math.round(a.pqc_ready * (suborgAdjustments[a["Sub Org ID"]] ?? profileAdjustment) * 10) / 10),
+  })), [apps, suborgAdjustments, profileAdjustment]);
+
+  const hasCustomProfile = profileAdjustment !== 1 || Object.values(suborgAdjustments).some(f => f !== 1);
+
+  // Summary uses average of per-sub-org adjusted PQC scores
+  const summary = useMemo(() => {
+    if (!adjustedApps.length) return rawSummary;
+    const avgPQC = adjustedApps.reduce((s, a) => s + a._adjPQC, 0) / adjustedApps.length;
+    return { ...rawSummary, pqc_readiness_percent: Math.min(100, Math.round(avgPQC * 10) / 10) };
+  }, [rawSummary, adjustedApps]);
   const orgName = selectedOrg?.organization_name ?? "Organization";
 
-  // build trend data — use combined PQC readiness for current month (not raw domain-only score)
+  // build trend data \u2014 use adjusted combined PQC readiness for current month
   const trendData = useMemo(() => {
     if (!trendRaw) return [];
     const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -133,7 +173,7 @@ export default function Dashboard() {
     const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     return trendRaw.map((t: { month: string; pqc: number | null }) => {
       const [, m] = t.month.split("-");
-      // Override current month with the actual combined PQC readiness from dashboard
+      // Override current month with the adjusted combined PQC readiness from dashboard
       const pqcValue = t.month === currentKey && summary.pqc_readiness_percent > 0
         ? summary.pqc_readiness_percent
         : t.pqc;
@@ -141,21 +181,21 @@ export default function Dashboard() {
     });
   }, [trendRaw, summary.pqc_readiness_percent]);
 
-  // sub-org aggregation
+  // sub-org aggregation — uses per-sub-org adjusted PQC
   const subOrgData = useMemo(() => {
     const map: Record<string, { name: string; id: string; apps: number; vulns: number; pqcScores: number[] }> = {};
-    apps.forEach(a => {
+    adjustedApps.forEach(a => {
       const id = a["Sub Org ID"]; const name = a["Sub Org"];
       if (!map[id]) map[id] = { name, id, apps: 0, vulns: 0, pqcScores: [] };
       map[id].apps++;
       map[id].vulns += a.vulnerabilities || 0;
-      map[id].pqcScores.push(a.pqc_ready);
+      map[id].pqcScores.push(a._adjPQC);
     });
     return Object.values(map).map(o => ({
       ...o,
       avgPQC: o.pqcScores.length ? Math.round(o.pqcScores.reduce((a, b) => a + b, 0) / o.pqcScores.length) : 0,
     })).sort((a, b) => b.vulns - a.vulns);
-  }, [apps]);
+  }, [adjustedApps]);
 
   // risk distribution pie
   const pieData = [
@@ -183,13 +223,13 @@ export default function Dashboard() {
     }));
   }, [subOrgData]);
 
-  // per-app PQC comparison (real data, not simulated)
+  // per-app PQC comparison — per-sub-org adjusted
   const appPQCData = useMemo(() =>
-    [...apps].sort((a, b) => a.pqc_ready - b.pqc_ready).map(a => ({
+    [...adjustedApps].sort((a, b) => a._adjPQC - b._adjPQC).map(a => ({
       name: a.application.length > 16 ? a.application.slice(0, 16) + "…" : a.application,
-      pqc: Math.round(a.pqc_ready * 10) / 10,
+      pqc: a._adjPQC,
       vulns: a.vulnerabilities,
-    })), [apps]);
+    })), [adjustedApps]);
 
   // overall scan coverage for the banner
   const overallCoverage = useMemo(() => {
@@ -258,6 +298,25 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* ── custom org profile banner ── */}
+      {hasCustomProfile && (() => {
+        const customSuborgs = Object.entries(suborgAdjustments).filter(([, f]) => f !== 1);
+        return (
+          <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl px-5 py-3 flex items-center gap-3">
+            <Shield className="w-5 h-5 text-blue-500 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Custom Algorithm Profile Active</p>
+              <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
+                {customSuborgs.length > 0
+                  ? `${customSuborgs.length} sub-org${customSuborgs.length > 1 ? 's' : ''} have custom scoring. Per-sub-org PQC scores are adjusted independently.`
+                  : `Org-wide scoring adjustment: ${profileAdjustment > 1 ? "+" : ""}${Math.round((profileAdjustment - 1) * 100)}%.`
+                } To reset, go to Profile → Reset All.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── scan coverage banner ── */}
       {overallCoverage.total > 0 && overallCoverage.scanned < overallCoverage.total && (
@@ -519,7 +578,7 @@ export default function Dashboard() {
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-foreground">All Applications</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{apps.length} total — click to view detail</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{adjustedApps.length} total — click to view detail</p>
           </div>
           <Code2 className="w-5 h-5 text-muted-foreground" />
         </div>
@@ -533,7 +592,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {apps.map((app, i) => (
+              {adjustedApps.map((app, i) => (
                 <motion.tr key={app["Application ID"]}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.03 }}
@@ -548,9 +607,9 @@ export default function Dashboard() {
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
                         <div className="h-full rounded-full"
-                          style={{ width: `${app.pqc_ready}%`, background: app.pqc_ready >= 80 ? "#10b981" : app.pqc_ready >= 60 ? "#f59e0b" : "#ef4444" }} />
+                          style={{ width: `${(app as any)._adjPQC ?? app.pqc_ready}%`, background: ((app as any)._adjPQC ?? app.pqc_ready) >= 80 ? "#10b981" : ((app as any)._adjPQC ?? app.pqc_ready) >= 60 ? "#f59e0b" : "#ef4444" }} />
                       </div>
-                      <span className={`font-semibold tabular-nums ${getScoreTextClass(app.pqc_ready)}`}>{app.pqc_ready}%</span>
+                      <span className={`font-semibold tabular-nums ${getScoreTextClass((app as any)._adjPQC ?? app.pqc_ready)}`}>{(app as any)._adjPQC ?? app.pqc_ready}%</span>
                     </div>
                   </td>
                   <td className="px-5 py-3.5">

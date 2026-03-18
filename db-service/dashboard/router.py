@@ -68,3 +68,73 @@ def pqc_trend(db: Session = Depends(get_db)):
         key = f"{year:04d}-{month:02d}"
         months.append({"month": key, "pqc": real_data.get(key)})
     return months
+
+
+# ─────────────────────────── Org Algorithm Profile ───────────────────────────
+
+class AlgorithmEntry(BaseModel):
+    id: str
+    algorithm_name: str
+    variant: str = ""
+    purpose: str = ""
+    usage_context: list[str] = []
+    status_today: str = ""
+    pqc_status: str = ""
+    priority: str = ""
+    classical_recommended: str = ""
+    quantum_recommended: str = ""
+    nist_reference: list[str] = []
+    notes: str = ""
+    section: str = ""
+    visible: bool = True
+
+class AlgorithmProfilePayload(BaseModel):
+    symmetric: list[AlgorithmEntry] = []
+    asymmetric: list[AlgorithmEntry] = []
+    hash: list[AlgorithmEntry] = []
+    mac_kdf: list[AlgorithmEntry] = []
+    pqc: list[AlgorithmEntry] = []
+
+import json as _json
+
+@router.post("/org/algorithm-profile")
+def save_algorithm_profile(payload: AlgorithmProfilePayload, db: Session = Depends(get_db)):
+    """
+    Persist the organisation's custom algorithm scoring profile.
+    Each algorithm's pqc_status / status_today overrides the built-in engine
+    scores when the dashboard re-calculates PQC readiness.
+    The profile is stored as a single JSONB row in org_algorithm_profile.
+    """
+    # Ensure the table exists (idempotent)
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS org_algorithm_profile (
+            id          SERIAL PRIMARY KEY,
+            profile     JSONB NOT NULL,
+            saved_at    TIMESTAMP DEFAULT NOW()
+        )
+    """))
+
+    profile_json = _json.dumps(payload.dict())
+
+    # Upsert: keep only the latest profile (single-row table)
+    db.execute(text("DELETE FROM org_algorithm_profile"))
+    db.execute(
+        text("INSERT INTO org_algorithm_profile (profile, saved_at) VALUES (:p::jsonb, NOW())"),
+        {"p": profile_json}
+    )
+    db.commit()
+    return {"saved": True}
+
+
+@router.get("/org/algorithm-profile")
+def get_algorithm_profile(db: Session = Depends(get_db)):
+    """Return the saved custom algorithm profile, or null if none saved yet."""
+    try:
+        row = db.execute(
+            text("SELECT profile FROM org_algorithm_profile ORDER BY saved_at DESC LIMIT 1")
+        ).fetchone()
+        if row:
+            return {"profile": row.profile}
+    except Exception:
+        pass
+    return {"profile": None}
