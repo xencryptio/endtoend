@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Save, RotateCcw, ArrowLeft, Library, LayoutGrid, ArrowRight } from "lucide-react";
+import { Save, RotateCcw, ArrowLeft, Library, LayoutGrid, ArrowRight, CheckCircle } from "lucide-react";
 import { CryptoTable, CryptoAlgorithm, ColumnDef } from "@/components/profile/crypto table";
 import {
   Card,
@@ -12,111 +12,12 @@ import {
 } from "@/components/ui/card";
 import Applications from "@/components/profile/applications";
 import { UnifiedBackButton } from "@/components/ui/unified";
+import { DEFAULT_ALGORITHM_LIBRARY, ALGORITHM_SECTIONS } from "@/data/algorithmLibrary";
 
-// Types for API data
-interface ApiCryptoAlgorithm {
-  Section: string;
-  Algorithm_Name: string;
-  Variant: string;
-  Purpose: string;
-  Usage_Context: string;
-  Status_Today: string;
-  PQC_Status: string;
-  Priority: string;
-  Classical_Recommended: string;
-  Quantum_Recommended: string;
-  NIST_Reference: string;
-  Notes: string;
-}
+// ─── Backend config (only used for saving custom profiles & applications) ───
+const DB_API = "http://localhost:8001";
 
-// API configuration - centralized backend URLs
-const API_CONFIG = {
-  cryptoApi: "https://backend-1-v77y.onrender.com/api",
-};
-
-// API fetching and data processing
-const fetchDataFromAPI = async (): Promise<ApiCryptoAlgorithm[]> => {
-  try {
-    const response = await fetch(`${API_CONFIG.cryptoApi}/apps3`);
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
-    }
-    const result = await response.json();
-    console.log('✅ API data fetched successfully');
-    return result.data || [];
-  } catch (error) {
-    console.error('❌ Failed to fetch data from API:', error);
-    return [];
-  }
-};
-
-const transformApiData = (apiData: ApiCryptoAlgorithm[]): CryptoAlgorithm[] => {
-  return apiData.map((item, index) => ({
-    id: `${item.Algorithm_Name}-${index}`,
-    algorithm_name: item.Algorithm_Name,
-    variant: item.Variant,
-    purpose: item.Purpose,
-    usage_context: item.Usage_Context ? item.Usage_Context.split(',').map(s => s.trim()) : [],
-    status_today: item.Status_Today,
-    pqc_status: item.PQC_Status,
-    priority: item.Priority,
-    classical_recommended: item.Classical_Recommended,
-    quantum_recommended: item.Quantum_Recommended,
-    nist_reference: item.NIST_Reference ? item.NIST_Reference.split(',').map(s => s.trim()) : [],
-    notes: item.Notes,
-    section: item.Section,
-    visible: false,
-  }));
-};
-
-const categorizeApiData = (transformedData: CryptoAlgorithm[]) => {
-  const categories: { [key: string]: CryptoAlgorithm[] } = {
-    symmetric: [],
-    asymmetric: [],
-    hash: [],
-    mac_kdf: [],
-    pqc: [],
-  };
-  
-  const keywordMap = {
-    pqc: ['kyber', 'dilithium', 'falcon', 'sphincs', 'ntru', 'bike'],
-    mac_kdf: ['hmac', 'cmac', 'pbkdf2', 'hkdf', 'argon', 'bcrypt', 'scrypt', 'gcm', 'ccm', 'chacha20', 'poly1305'],
-    asymmetric: ['rsa', 'ecc', 'dsa', 'diffie-hellman', 'x25519', 'ed25519'],
-    hash: ['sha', 'md5'],
-    symmetric: ['aes', 'des', 'rc4', 'rc5', 'blowfish', 'camellia', 'seed'],
-  };  
-
-  transformedData.forEach(item => {
-    const section = item.section?.toLowerCase() || '';
-    if (section.includes('asymmetric')) {
-      categories.asymmetric.push(item);
-    } else if (section.includes('symmetric')) {
-      categories.symmetric.push(item);
-    } else if (section.includes('hash')) {
-      categories.hash.push(item);
-    } else if (section.includes('mac') || section.includes('kdf')) {
-      categories.mac_kdf.push(item);
-    } else if (section.includes('post-quantum')) {
-      categories.pqc.push(item);
-    } else {
-      const name = item.algorithm_name.toLowerCase();
-      let found = false;
-      for (const category in keywordMap) {
-        if (keywordMap[category].some(keyword => name.includes(keyword))) {
-          categories[category as keyof typeof categories].push(item);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        console.warn(`Could not categorize: ${item.algorithm_name}`);
-      }
-    }
-  });
-
-  return categories;
-};
-
+// ─── Column definitions (shared across all tables) ───────────────────────────
 const commonColumns: ColumnDef[] = [
   { key: "algorithm_name", header: "Algorithm" },
   { key: "variant", header: "Variant" },
@@ -128,22 +29,29 @@ const commonColumns: ColumnDef[] = [
   { key: "notes", header: "Notes" },
 ];
 
-const fetchCryptographicProfiles = async () => {
-  const response = await fetch(`${API_CONFIG.cryptoApi}/apps4`);
-  if (!response.ok) throw new Error('Network response was not ok');
-  return response.json();
-};
+/** Pull algorithms for a given section from the local library. */
+const sectionData = (section: string): CryptoAlgorithm[] =>
+  DEFAULT_ALGORITHM_LIBRARY.filter(a => a.section === section) as CryptoAlgorithm[];
 
 type ViewType = 'dashboard' | 'tables' | 'applications';
+type SaveStatus = 'idle' | 'saving' | 'success';
 
 const Profile = () => {
-  const [symmetricData, setSymmetricData] = useState<CryptoAlgorithm[]>([]);
-  const [asymmetricData, setAsymmetricData] = useState<CryptoAlgorithm[]>([]);
-  const [hashData, setHashData] = useState<CryptoAlgorithm[]>([]);
-  const [macKdfData, setMacKdfData] = useState<CryptoAlgorithm[]>([]);
-  const [pqcData, setPqcData] = useState<CryptoAlgorithm[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [view, setView] = useState<ViewType>('dashboard');
+  // ── Local-library state (one state slice per table section) ──────────────
+  const [symmetricData, setSymmetricData] = useState<CryptoAlgorithm[]>(() => sectionData('Symmetric Algorithms'));
+  const [asymmetricData, setAsymmetricData] = useState<CryptoAlgorithm[]>(() => sectionData('Asymmetric Algorithms'));
+  const [hashData, setHashData] = useState<CryptoAlgorithm[]>(() => sectionData('Hash Functions'));
+  const [macKdfData, setMacKdfData] = useState<CryptoAlgorithm[]>(() => sectionData('MACs & KDFs'));
+  const [pqcData, setPqcData] = useState<CryptoAlgorithm[]>(() => sectionData('Post-Quantum Cryptography'));
+
+  // Original snapshots for reset
+  const initialCategorizedData = useRef({
+    symmetric: sectionData('Symmetric Algorithms'),
+    asymmetric: sectionData('Asymmetric Algorithms'),
+    hash: sectionData('Hash Functions'),
+    mac_kdf: sectionData('MACs & KDFs'),
+    pqc: sectionData('Post-Quantum Cryptography'),
+  });
 
   const [isSymmetricEdited, setIsSymmetricEdited] = useState(false);
   const [isAsymmetricEdited, setIsAsymmetricEdited] = useState(false);
@@ -151,175 +59,121 @@ const Profile = () => {
   const [isMacKdfEdited, setIsMacKdfEdited] = useState(false);
   const [isPqcEdited, setIsPqcEdited] = useState(false);
 
-  const initialCategorizedData = useRef<{ [key: string]: CryptoAlgorithm[] }>({});
-  const [showApplications, setShowApplications] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+
+  const [view, setView] = useState<ViewType>('dashboard');
+
+  // ── Load persisted profile from localStorage (instant, no network) ────────
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('org_algorithm_profile');
+      if (!saved) return;
+      const profile = JSON.parse(saved);
+      if (profile.symmetric?.length)  { setSymmetricData(profile.symmetric);  setIsSymmetricEdited(true); }
+      if (profile.asymmetric?.length) { setAsymmetricData(profile.asymmetric); setIsAsymmetricEdited(true); }
+      if (profile.hash?.length)       { setHashData(profile.hash);             setIsHashEdited(true); }
+      if (profile.mac_kdf?.length)    { setMacKdfData(profile.mac_kdf);        setIsMacKdfEdited(true); }
+      if (profile.pqc?.length)        { setPqcData(profile.pqc);               setIsPqcEdited(true); }
+    } catch {
+      // Corrupted localStorage — ignore and use defaults
+    }
+  }, []);
+
+  // ── Applications section state ───────────────────────────────────────────
   const [applicationsData, setApplicationsData] = useState<any>(null);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [applicationsError, setApplicationsError] = useState<string | null>(null);
   const [applicationsRefreshing, setApplicationsRefreshing] = useState(false);
-  const [allAlgorithms, setAllAlgorithms] = useState<any[]>([]);
-  const [allAlgorithmsLoading, setAllAlgorithmsLoading] = useState(true);
-  const [allAlgorithmsError, setAllAlgorithmsError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const initializeData = async () => {
-      try {
-        const apiData = await fetchDataFromAPI();
-        const transformedData = transformApiData(apiData);
-        const categorizedData = categorizeApiData(transformedData);
+  // allAlgorithms for the applications sub-panel "Add from library" modal
+  const allAlgorithms = DEFAULT_ALGORITHM_LIBRARY;
 
-        const withVisible = (data: CryptoAlgorithm[], count: number) =>
-          data.map((item, index) => ({ ...item, visible: index < count }));
-
-        const initialSymmetric = withVisible(categorizedData.symmetric || [], 3);
-        const initialAsymmetric = withVisible(categorizedData.asymmetric || [], 3);
-        const initialHash = withVisible(categorizedData.hash || [], 3);
-        const initialMacKdf = withVisible(categorizedData.mac_kdf || [], 3);
-        const initialPqc = withVisible(categorizedData.pqc || [], 3);
-
-        initialCategorizedData.current = { symmetric: initialSymmetric, asymmetric: initialAsymmetric, hash: initialHash, mac_kdf: initialMacKdf, pqc: initialPqc };
-
-        setSymmetricData(initialSymmetric);
-        setAsymmetricData(initialAsymmetric);
-        setHashData(initialHash);
-        setMacKdfData(initialMacKdf);
-        setPqcData(initialPqc);
-
-      } catch (error) {
-        console.error('❌ Error initializing profile data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initializeData();
-  }, []);
-
-  // Fetch applications data when view changes to 'applications'
+  // ── Fetch applications profile only when that view is opened ─────────────
   useEffect(() => {
     if (view !== 'applications') return;
     setApplicationsLoading(true);
     setApplicationsError(null);
-    fetchCryptographicProfiles()
-      .then((data) => {
-        console.log('Applications data fetched:', data);
+    fetch(`${DB_API}/api/dashboard`)
+      .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); })
+      .then(data => {
+        // Build app crypto-profile from dashboard data so no Render.com call needed
         setApplicationsData(data);
         setApplicationsLoading(false);
       })
-      .catch((err) => {
-        console.error('Error fetching applications:', err);
-        setApplicationsError(err.message || "Failed to fetch applications");
+      .catch(err => {
+        setApplicationsError(err.message || 'Failed to fetch applications');
         setApplicationsLoading(false);
       });
   }, [view]);
 
-  const fetchAllAlgorithms = async () => {
-    try {
-      const response = await fetch(`${API_CONFIG.cryptoApi}/apps3`);
-      if (!response.ok) throw new Error("Failed to fetch algorithms");
-      const result = await response.json();
-      setAllAlgorithms(result.data || []);
-    } catch (err: any) {
-      setAllAlgorithmsError(err.message || "Failed to fetch algorithms");
-    } finally {
-      setAllAlgorithmsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAllAlgorithms();
-  }, []);
-
   const handleApplicationsRefresh = () => {
     setApplicationsRefreshing(true);
-    fetchCryptographicProfiles()
-      .then((data) => {
-        setApplicationsData(data);
-        setApplicationsRefreshing(false);
-      })
-      .catch((err) => {
-        setApplicationsError(err.message || "Failed to fetch applications");
-        setApplicationsRefreshing(false);
-      });
+    fetch(`${DB_API}/api/dashboard`)
+      .then(r => r.json())
+      .then(data => { setApplicationsData(data); setApplicationsRefreshing(false); })
+      .catch(err => { setApplicationsError(err.message); setApplicationsRefreshing(false); });
   };
 
-  const handleSaveChanges = () => {
-    console.log("Saving all changes...");
-    console.log("Symmetric:", symmetricData);
-    console.log("Asymmetric:", asymmetricData);
-    console.log("Hash:", hashData);
-    console.log("MAC/KDF:", macKdfData);
-    console.log("PQC:", pqcData);
+  // ── Save custom profile (localStorage primary, backend background sync) ──
+  const handleSaveChanges = async () => {
+    setSaveStatus('saving');
+    const payload = {
+      symmetric: symmetricData,
+      asymmetric: asymmetricData,
+      hash: hashData,
+      mac_kdf: macKdfData,
+      pqc: pqcData,
+    };
+
+    // 1. Always save to localStorage — instant, no CORS, survives page refresh
+    try {
+      localStorage.setItem('org_algorithm_profile', JSON.stringify(payload));
+    } catch (e) {
+      console.warn('localStorage unavailable:', e);
+    }
+
+    // 2. Background sync to backend (silent — doesn't affect UI on failure)
+    fetch(`${DB_API}/api/org/algorithm-profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => { /* backend not yet available — localStorage is the fallback */ });
+
+    setSaveStatus('success');
+    setIsSymmetricEdited(false);
+    setIsAsymmetricEdited(false);
+    setIsHashEdited(false);
+    setIsMacKdfEdited(false);
+    setIsPqcEdited(false);
+    setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
+  // ── Reset all tables to the built-in defaults ─────────────────────────────
   const handleReset = () => {
-    setSymmetricData([...(initialCategorizedData.current.symmetric || [])]);
-    setAsymmetricData([...(initialCategorizedData.current.asymmetric || [])]);
-    setHashData([...(initialCategorizedData.current.hash || [])]);
-    setMacKdfData([...(initialCategorizedData.current.mac_kdf || [])]);
-    setPqcData([...(initialCategorizedData.current.pqc || [])]);
+    setSymmetricData([...initialCategorizedData.current.symmetric]);
+    setAsymmetricData([...initialCategorizedData.current.asymmetric]);
+    setHashData([...initialCategorizedData.current.hash]);
+    setMacKdfData([...initialCategorizedData.current.mac_kdf]);
+    setPqcData([...initialCategorizedData.current.pqc]);
     setIsSymmetricEdited(false);
     setIsAsymmetricEdited(false);
     setIsHashEdited(false);
     setIsMacKdfEdited(false);
     setIsPqcEdited(false);
-    console.log("All tables reset to original state.");
+    localStorage.removeItem('org_algorithm_profile');
   };
 
-  const onSymmetricUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setSymmetricData(d);
-    setIsSymmetricEdited(true);
-  }, []);
-  const onSymmetricReset = useCallback(() => {
-    setSymmetricData([...(initialCategorizedData.current.symmetric || [])]);
-    setIsSymmetricEdited(false);
-  }, []);
-
-  const onAsymmetricUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setAsymmetricData(d);
-    setIsAsymmetricEdited(true);
-  }, []);
-  const onAsymmetricReset = useCallback(() => {
-    setAsymmetricData([...(initialCategorizedData.current.asymmetric || [])]);
-    setIsAsymmetricEdited(false);
-  }, []);
-
-  const onHashUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setHashData(d);
-    setIsHashEdited(true);
-  }, []);
-  const onHashReset = useCallback(() => {
-    setHashData([...(initialCategorizedData.current.hash || [])]);
-    setIsHashEdited(false);
-  }, []);
-
-  const onMacKdfUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setMacKdfData(d);
-    setIsMacKdfEdited(true);
-  }, []);
-  const onMacKdfReset = useCallback(() => {
-    setMacKdfData([...(initialCategorizedData.current.mac_kdf || [])]);
-    setIsMacKdfEdited(false);
-  }, []);
-
-  const onPqcUpdate = useCallback((d: CryptoAlgorithm[]) => {
-    setPqcData(d);
-    setIsPqcEdited(true);
-  }, []);
-  const onPqcReset = useCallback(() => {
-    setPqcData([...(initialCategorizedData.current.pqc || [])]);
-    setIsPqcEdited(false);
-  }, []);
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <p>Loading Admin Page...</p>
-        </div>
-      </div>
-    );
-  }
+  // ── Per-table update/reset callbacks ─────────────────────────────────────
+  const onSymmetricUpdate = useCallback((d: CryptoAlgorithm[]) => { setSymmetricData(d); setIsSymmetricEdited(true); }, []);
+  const onSymmetricReset  = useCallback(() => { setSymmetricData([...initialCategorizedData.current.symmetric]);  setIsSymmetricEdited(false); }, []);
+  const onAsymmetricUpdate = useCallback((d: CryptoAlgorithm[]) => { setAsymmetricData(d); setIsAsymmetricEdited(true); }, []);
+  const onAsymmetricReset  = useCallback(() => { setAsymmetricData([...initialCategorizedData.current.asymmetric]); setIsAsymmetricEdited(false); }, []);
+  const onHashUpdate = useCallback((d: CryptoAlgorithm[]) => { setHashData(d); setIsHashEdited(true); }, []);
+  const onHashReset  = useCallback(() => { setHashData([...initialCategorizedData.current.hash]); setIsHashEdited(false); }, []);
+  const onMacKdfUpdate = useCallback((d: CryptoAlgorithm[]) => { setMacKdfData(d); setIsMacKdfEdited(true); }, []);
+  const onMacKdfReset  = useCallback(() => { setMacKdfData([...initialCategorizedData.current.mac_kdf]); setIsMacKdfEdited(false); }, []);
+  const onPqcUpdate = useCallback((d: CryptoAlgorithm[]) => { setPqcData(d); setIsPqcEdited(true); }, []);
+  const onPqcReset  = useCallback(() => { setPqcData([...initialCategorizedData.current.pqc]); setIsPqcEdited(false); }, []);
 
   const cardVariants = {
     hidden: { opacity: 0, y: 20 },
@@ -332,8 +186,8 @@ const Profile = () => {
       {view === 'applications' ? (
         <Applications
           data={applicationsData}
-          isLoading={applicationsLoading || allAlgorithmsLoading}
-          error={applicationsError || allAlgorithmsError}
+          isLoading={applicationsLoading}
+          error={applicationsError}
           onRefresh={handleApplicationsRefresh}
           isRefreshing={applicationsRefreshing}
           onBack={() => setView('dashboard')}
@@ -471,9 +325,19 @@ const Profile = () => {
               />
             </div>
 
-            <div className="mt-8 flex justify-end gap-4">
-              <Button onClick={handleSaveChanges}><Save className="h-4 w-4 mr-2" /> Save Changes</Button>
-              <Button variant="outline" onClick={handleReset}><RotateCcw className="h-4 w-4 mr-2" /> Reset All</Button>
+            <div className="mt-8 flex items-center justify-end gap-4">
+              {saveStatus === 'success' && (
+                <span className="flex items-center gap-1 text-sm text-success">
+                  <CheckCircle className="h-4 w-4" /> Profile saved. Dashboard scores updated automatically.
+                </span>
+              )}
+              <Button onClick={handleSaveChanges} disabled={saveStatus === 'saving'}>
+                <Save className="h-4 w-4 mr-2" />
+                {saveStatus === 'saving' ? 'Saving…' : 'Save Changes'}
+              </Button>
+              <Button variant="outline" onClick={handleReset}>
+                <RotateCcw className="h-4 w-4 mr-2" /> Reset All
+              </Button>
             </div>
           </motion.div>
         )

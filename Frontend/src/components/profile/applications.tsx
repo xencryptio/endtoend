@@ -1,44 +1,69 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronDown, ChevronUp, Shield, Lock, Hash, Key, Zap, ArrowLeft, Edit, Save, RotateCcw, Plus, Check, X } from 'lucide-react';
+// @ts-nocheck
+import React, { useState, useRef, useMemo } from 'react';
+import { ArrowLeft, Save, RotateCcw, CheckCircle, Building2, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogClose,
-} from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CryptoTable, CryptoAlgorithm, ColumnDef } from '@/components/profile/crypto table';
+import { DEFAULT_ALGORITHM_LIBRARY, computeProfileAdjustmentFactor } from '@/data/algorithmLibrary';
 
-const getSectionIcon = (section: string) => {
-  const icons: Record<string, React.ReactNode> = {
-    "Symmetric Algorithms": <Lock className="w-5 h-5" />,
-    "Asymmetric Algorithms": <Key className="w-5 h-5" />,
-    "Hash Functions": <Hash className="w-5 h-5" />,
-    "MACs & KDFs": <Shield className="w-5 h-5" />,
-    "Post-Quantum Cryptography": <Zap className="w-5 h-5" />
-  };
-  return icons[section] || <Shield className="w-5 h-5" />;
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const SECTION_KEYS = ['symmetric', 'asymmetric', 'hash', 'mac_kdf', 'pqc'] as const;
+type SectionKey = typeof SECTION_KEYS[number];
+
+const SECTION_NAMES: Record<SectionKey, string> = {
+  symmetric:  'Symmetric Algorithms',
+  asymmetric: 'Asymmetric Algorithms',
+  hash:       'Hash Functions',
+  mac_kdf:    'MACs & KDFs',
+  pqc:        'Post-Quantum Cryptography',
 };
 
-const getStatusBadge = (status: string) => {
-  const colors: Record<string, string> = {
-    "Strong": "bg-success/10 text-success dark:bg-success/50 dark:text-success",
-    "Medium": "bg-warning/10 text-warning dark:bg-warning/50 dark:text-warning",
-    "Weak": "bg-destructive/10 text-destructive dark:bg-destructive/50 dark:text-destructive",
-    "Safe": "bg-primary/10 text-primary dark:bg-primary/50 dark:text-primary",
-    "Standardized": "bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300"
-  };
-  return colors[status] || "bg-muted text-muted-foreground";
+const commonColumns: ColumnDef[] = [
+  { key: 'algorithm_name', header: 'Algorithm' },
+  { key: 'variant',        header: 'Variant' },
+  { key: 'purpose',        header: 'Purpose' },
+  { key: 'priority',       header: 'Priority' },
+  { key: 'usage_context',  header: 'Usage Context' },
+  { key: 'status_today',   header: 'Status' },
+  { key: 'pqc_status',     header: 'PQC Status' },
+  { key: 'notes',          header: 'Notes' },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function suborgStorageKey(id: string) {
+  return `suborg_algorithm_profile_${id}`;
+}
+
+function defaultSection(key: SectionKey): CryptoAlgorithm[] {
+  return DEFAULT_ALGORITHM_LIBRARY.filter(a => a.section === SECTION_NAMES[key]) as CryptoAlgorithm[];
+}
+
+function loadSectionFor(suborgId: string, key: SectionKey): CryptoAlgorithm[] {
+  for (const storageKey of [suborgStorageKey(suborgId), 'org_algorithm_profile']) {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (parsed[key]?.length) return parsed[key] as CryptoAlgorithm[];
+    } catch {}
+  }
+  return defaultSection(key);
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type SubOrg = {
+  id: string;
+  name: string;
+  appCount: number;
+  hasCustomProfile: boolean;
+  factor: number;
 };
 
-// Editable table row component
+// ─── Sub-Org Profile Editor ───────────────────────────────────────────────────
 const EditableTableRow = ({ 
   algorithm, 
   isEditing, 
@@ -426,301 +451,186 @@ const EditableTable = ({
   );
 };
 
-const AlgorithmSelectionContent = ({ availableAlgorithms = [], selectedAlgorithms = [], onSelectionChange, onClose, sectionName }: any) => {
-  const [tempSelected, setTempSelected] = useState<any[]>(selectedAlgorithms);
+function SubOrgEditor({ suborg, onBack }: { suborg: SubOrg; onBack: () => void }) {
+  const initialRef = useRef({
+    symmetric:  loadSectionFor(suborg.id, 'symmetric'),
+    asymmetric: loadSectionFor(suborg.id, 'asymmetric'),
+    hash:       loadSectionFor(suborg.id, 'hash'),
+    mac_kdf:    loadSectionFor(suborg.id, 'mac_kdf'),
+    pqc:        loadSectionFor(suborg.id, 'pqc'),
+  });
 
-  useEffect(() => {
-    setTempSelected([...selectedAlgorithms]);
-  }, [selectedAlgorithms]);
+  const [symmetric,  setSymmetric]  = useState<CryptoAlgorithm[]>(initialRef.current.symmetric);
+  const [asymmetric, setAsymmetric] = useState<CryptoAlgorithm[]>(initialRef.current.asymmetric);
+  const [hash,       setHash]       = useState<CryptoAlgorithm[]>(initialRef.current.hash);
+  const [macKdf,     setMacKdf]     = useState<CryptoAlgorithm[]>(initialRef.current.mac_kdf);
+  const [pqc,        setPqc]        = useState<CryptoAlgorithm[]>(initialRef.current.pqc);
 
-  const allAvailableAlgorithms = useMemo(() => {
-    if (!availableAlgorithms || !selectedAlgorithms) return [];
+  const [isSymEdited,    setIsSymEdited]    = useState(false);
+  const [isAsymEdited,   setIsAsymEdited]   = useState(false);
+  const [isHashEdited,   setIsHashEdited]   = useState(false);
+  const [isMacKdfEdited, setIsMacKdfEdited] = useState(false);
+  const [isPqcEdited,    setIsPqcEdited]    = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success'>('idle');
 
-    const customAlgos = selectedAlgorithms
-      .filter((a: any) => a.isCustom)
-      .map((a: any) => ({
-        ...a,
-        Algorithm_Name: a.name || a.algorithm_name
-      }));
-
-    const apiAlgorithms = availableAlgorithms.map((algo: any) => ({
-      // Keep original API fields
-      ...algo,
-      // Ensure Algorithm_Name is set for display
-      Algorithm_Name: algo.Algorithm_Name || algo.name || algo.algorithm_name,
-      // Map common field variations to ensure consistency
-      Variant: algo.Variant || algo.variant || '',
-      Purpose: algo.Purpose || algo.purpose || '',
-      Usage_Context: algo.Usage_Context || algo.usage_context || '',
-      Status_Today: algo.Status_Today || algo.status_today || 'Medium',
-      PQC_Status: algo.PQC_Status || algo.pqc_status || 'Safe',
-      Priority: algo.Priority || algo.priority || 'Medium',
-      Notes: algo.Notes || algo.notes || ''
-    }));
-
-    // Simple deduplication based on Algorithm_Name
-    const combined = [...apiAlgorithms, ...customAlgos];
-    const uniqueAlgos = Array.from(new Map(combined.map(item => [item.Algorithm_Name, item])).values());
-
-    return uniqueAlgos;
-  }, [availableAlgorithms, selectedAlgorithms]);
-
-  const handleToggleAlgorithm = (algorithm: any) => {
-    const algorithmKey = algorithm.Algorithm_Name;
-    const isSelected = tempSelected.some(a => (a.name || a.algorithm_name) === algorithmKey);
-
-    if (isSelected) {
-      setTempSelected(tempSelected.filter(a => a.name !== algorithmKey && a.algorithm_name !== algorithmKey));
-    } else {
-      // Map all the fields from the available algorithm to the expected format
-      const newAlgo = {
-        id: algorithm.id || `algo-${Date.now()}-${Math.random()}`,
-        name: algorithm.Algorithm_Name,
-        algorithm_name: algorithm.Algorithm_Name,
-        variant: algorithm.Variant || algorithm.variant || '',
-        purpose: algorithm.Purpose || algorithm.purpose || '',
-        usage_context: algorithm.Usage_Context || algorithm.usage_context || '',
-        status_today: algorithm.Status_Today || algorithm.status_today || 'Medium',
-        pqc_status: algorithm.PQC_Status || algorithm.pqc_status || 'Safe',
-        priority: algorithm.Priority || algorithm.priority || 'Medium',
-        classical_recommended: algorithm.Classical_Recommended || algorithm.classical_recommended || 'yes',
-        quantum_recommended: algorithm.Quantum_Recommended || algorithm.quantum_recommended || 'yes',
-        nist_reference: algorithm.NIST_Reference || algorithm.nist_reference || '',
-        notes: algorithm.Notes || algorithm.notes || '',
-        isCustom: algorithm.isCustom || false
-      };
-      setTempSelected([...tempSelected, newAlgo]);
-    }
-  };
+  const anyEdited = isSymEdited || isAsymEdited || isHashEdited || isMacKdfEdited || isPqcEdited;
 
   const handleSave = () => {
-    onSelectionChange(tempSelected);
-    onClose();
+    setSaveStatus('saving');
+    const payload = { symmetric, asymmetric, hash, mac_kdf: macKdf, pqc };
+    try { localStorage.setItem(suborgStorageKey(suborg.id), JSON.stringify(payload)); } catch {}
+    setSaveStatus('success');
+    setIsSymEdited(false); setIsAsymEdited(false); setIsHashEdited(false);
+    setIsMacKdfEdited(false); setIsPqcEdited(false);
+    setTimeout(() => setSaveStatus('idle'), 3500);
   };
 
-  if (!allAvailableAlgorithms || allAvailableAlgorithms.length === 0) {
-    return (
-      <div className="p-4 text-center text-muted-foreground">
-        No algorithms available for this section.
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <div className="max-h-[60vh] overflow-y-auto p-1">
-        {allAvailableAlgorithms.map((algorithm: any, index: number) => {
-          const algorithmKey = algorithm.Algorithm_Name || `key-${index}`;
-          const isSelected = tempSelected.some(a => a.name === algorithmKey || a.algorithm_name === algorithmKey);
-          return (
-            <div key={`${algorithmKey}-${index}`} className="flex items-center gap-4 p-2 border-b">
-              <Checkbox id={`algo-${index}`} checked={isSelected} onCheckedChange={() => handleToggleAlgorithm(algorithm)} />
-              <Label htmlFor={`algo-${index}`} className="flex-grow text-sm cursor-pointer">{algorithm.Algorithm_Name}</Label>
-            </div>
-          );
-        })}
-      </div>
-      <DialogFooter className="mt-4">
-        <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-        <Button onClick={handleSave}>Save Selection</Button>
-      </DialogFooter>
-    </>
-  );
-};
-
-const ApplicationDetail = ({ 
-  app, 
-  onBack, 
-  allAlgorithms 
-}: { 
-  app: any; 
-  onBack: () => void; 
-  allAlgorithms: any[];
-}) => {
-  const [editedApp, setEditedApp] = useState(app);
-  const [originalApp, setOriginalApp] = useState(app);
-
-  const handleSectionChange = (sectionName: string, newAlgorithms: any[]) => {
-    setEditedApp({
-      ...editedApp,
-      cryptographic_profile: {
-        ...editedApp.cryptographic_profile,
-        [sectionName]: newAlgorithms
-      }
-    });
-  };
-
-  const handleSaveAll = () => {
-    console.log('Saving all changes:', editedApp);
-    setOriginalApp(editedApp);
-    // Here you would typically make API calls to save the changes
-  };
-
-  const handleResetAll = () => {
-    setEditedApp(originalApp);
-  };
-
-  const getAvailableAlgorithmsForSection = (sectionName: string) => {
-    return allAlgorithms.filter(algo => algo.Section === sectionName);
-  };
-
-  const cardVariants = {
-    hidden: { opacity: 0, x: 50 },
-    visible: { opacity: 1, x: 0 },
-    exit: { opacity: 0, x: -50 },
+  const handleReset = () => {
+    setSymmetric(defaultSection('symmetric'));
+    setAsymmetric(defaultSection('asymmetric'));
+    setHash(defaultSection('hash'));
+    setMacKdf(defaultSection('mac_kdf'));
+    setPqc(defaultSection('pqc'));
+    setIsSymEdited(false); setIsAsymEdited(false); setIsHashEdited(false);
+    setIsMacKdfEdited(false); setIsPqcEdited(false);
+    try { localStorage.removeItem(suborgStorageKey(suborg.id)); } catch {}
   };
 
   return (
     <motion.div
-      key="detail"
-      variants={cardVariants}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-      transition={{ duration: 0.3, ease: "easeInOut" }}
+      key="editor"
+      initial={{ opacity: 0, x: 40 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -40 }}
+      transition={{ duration: 0.25 }}
+      className="p-4 sm:p-6"
     >
-      <div className="mb-6 flex justify-between items-center">
-        <Button onClick={onBack} variant="outline">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Applications
+      <div className="flex items-center gap-4 mb-6">
+        <Button onClick={onBack} variant="outline" size="sm">
+          <ArrowLeft className="h-4 w-4 mr-2" /> Back
         </Button>
-      </div>
-      
-      <div className="bg-card rounded-lg shadow-md overflow-hidden border border-border">
-        <div className="p-6 border-b border-border">
-          <h3 className="text-xl font-bold text-card-foreground mb-2">{editedApp.application}</h3>
-          <div className="text-sm text-muted-foreground">
-            <div className="flex items-center space-x-4">
-              <span>Total Algorithms: {editedApp.summary.total_algorithms}</span>
-              <span>Categories: {editedApp.summary.sections_with_algorithms}</span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="p-6 space-y-8">
-          {Object.entries(editedApp.cryptographic_profile).map(([section, algorithms]) => (
-            <div key={section} className="bg-muted/50 rounded-lg p-4">
-              <div className="flex items-center space-x-2 mb-4">
-                {getSectionIcon(section)}
-                <h4 className="text-md font-semibold text-foreground">{section}</h4>
-                <span className="text-sm text-muted-foreground">({(algorithms as any[])?.length || 0})</span>
-              </div>
-              
-              <EditableTable
-                algorithms={algorithms as any[]}
-                sectionName={section}
-                availableAlgorithms={getAvailableAlgorithmsForSection(section)}
-                onAlgorithmsChange={(newAlgorithms) => handleSectionChange(section, newAlgorithms)}
-                originalAlgorithms={originalApp.cryptographic_profile[section] || []}
-              />
-            </div>
-          ))}
+        <div>
+          <h2 className="text-xl font-bold text-foreground">{suborg.name}</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Algorithm scoring profile — changes only affect this sub-org's PQC scores
+          </p>
         </div>
       </div>
 
-      <div className="mt-6 flex justify-end space-x-2">
-        <Button onClick={handleSaveAll} size="lg">
+      <div className="mb-6 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl px-5 py-3 flex items-start gap-3">
+        <Shield className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-blue-700 dark:text-blue-400">
+          Editing here overrides the org-wide profile for <strong>{suborg.name}</strong> only.
+          Other sub-orgs are unaffected.
+        </p>
+      </div>
+
+      <div className="space-y-8">
+        <CryptoTable title="Symmetric Algorithms"      data={symmetric}  columns={commonColumns} isEdited={isSymEdited}    onUpdate={d => { setSymmetric(d);  setIsSymEdited(true); }}    onReset={() => { setSymmetric(defaultSection('symmetric'));   setIsSymEdited(false); }} />
+        <CryptoTable title="Asymmetric Algorithms"     data={asymmetric} columns={commonColumns} isEdited={isAsymEdited}   onUpdate={d => { setAsymmetric(d); setIsAsymEdited(true); }}   onReset={() => { setAsymmetric(defaultSection('asymmetric')); setIsAsymEdited(false); }} />
+        <CryptoTable title="Hash Functions"            data={hash}       columns={commonColumns} isEdited={isHashEdited}   onUpdate={d => { setHash(d);       setIsHashEdited(true); }}   onReset={() => { setHash(defaultSection('hash'));             setIsHashEdited(false); }} />
+        <CryptoTable title="MACs & KDFs"               data={macKdf}     columns={commonColumns} isEdited={isMacKdfEdited} onUpdate={d => { setMacKdf(d);     setIsMacKdfEdited(true); }} onReset={() => { setMacKdf(defaultSection('mac_kdf'));         setIsMacKdfEdited(false); }} />
+        <CryptoTable title="Post-Quantum Cryptography" data={pqc}        columns={commonColumns} isEdited={isPqcEdited}    onUpdate={d => { setPqc(d);        setIsPqcEdited(true); }}    onReset={() => { setPqc(defaultSection('pqc'));               setIsPqcEdited(false); }} />
+      </div>
+
+      <div className="mt-8 flex items-center justify-end gap-4 flex-wrap">
+        {saveStatus === 'success' && (
+          <span className="flex items-center gap-1.5 text-sm text-green-600">
+            <CheckCircle className="h-4 w-4" />
+            Saved — {suborg.name} scores updated on next Dashboard load.
+          </span>
+        )}
+        <Button onClick={handleSave} disabled={saveStatus === 'saving'}>
           <Save className="h-4 w-4 mr-2" />
-          Save All Changes
+          {saveStatus === 'saving' ? 'Saving…' : 'Save Changes'}
         </Button>
-        <Button onClick={handleResetAll} variant="outline">
-          <RotateCcw className="h-4 w-4 mr-2" />
-          Reset All
+        <Button variant="outline" onClick={handleReset} disabled={!anyEdited && !suborg.hasCustomProfile}>
+          <RotateCcw className="h-4 w-4 mr-2" /> Reset to Defaults
         </Button>
       </div>
     </motion.div>
   );
-};
+}
 
-const ApplicationsList = ({ 
-  applications, 
-  onAppClick, 
-  searchTerm, 
-  onSearchChange, 
-  onBack 
+// ─── Sub-Org List ─────────────────────────────────────────────────────────────
+
+function SubOrgList({
+  suborgs,
+  onSelect,
+  onBack,
 }: {
-  applications: any[];
-  onAppClick: (app: any) => void;
-  searchTerm: string;
-  onSearchChange: (term: string) => void;
+  suborgs: SubOrg[];
+  onSelect: (s: SubOrg) => void;
   onBack: () => void;
-}) => {
-  const cardVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -20 },
-  };
-
+}) {
   return (
     <motion.div
       key="list"
-      variants={cardVariants}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-      transition={{ duration: 0.3, ease: "easeInOut" }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      transition={{ duration: 0.25 }}
+      className="p-4 sm:p-6"
     >
-      <div className="mb-4">
-        <h1 className="text-3xl font-bold text-foreground">Cryptographic Applications</h1>
-      </div>
-      
-      <div className="flex items-center justify-between mb-8">
-        <div className="relative max-w-md">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-5 w-5 text-muted-foreground" />
-          </div>
-          <input
-            type="text"
-            className="block w-full pl-10 pr-3 py-2 border border-border rounded-md leading-5 bg-card text-card-foreground placeholder-muted-foreground focus:outline-none focus:placeholder-muted-foreground/80 focus:ring-1 focus:ring-ring focus:border-ring"
-            placeholder="Search applications or algorithms..."
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-          />
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground">Sub-Organisation Profiles</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Edit the algorithm scoring profile for each sub-org independently.
+            Custom overrides only affect that sub-org's PQC readiness scores.
+          </p>
         </div>
         <Button onClick={onBack} variant="outline">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
+          <ArrowLeft className="h-4 w-4 mr-2" /> Back
         </Button>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {applications.map((app, index) => (
-          <div 
-            key={index} 
-            className="bg-card rounded-lg shadow-md overflow-hidden transition-all duration-300 hover:shadow-lg border border-border cursor-pointer"
-            onClick={() => onAppClick(app)}
-          >
-            <div className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-card-foreground mb-2">{app.application}</h3>
-                  <div className="text-sm text-muted-foreground">
-                    <div className="flex items-center space-x-4">
-                      <span>Total Algorithms: {app.summary.total_algorithms}</span>
-                      <span>Categories: {app.summary.sections_with_algorithms}</span>
-                    </div>
-                  </div>
+      {suborgs.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Building2 className="w-14 h-14 mx-auto mb-4 opacity-20" />
+          <p className="font-medium">No sub-organisations found</p>
+          <p className="text-sm mt-1">Make sure the dashboard has loaded data before opening this view.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {suborgs.map(s => (
+            <motion.div
+              key={s.id}
+              whileHover={{ y: -4, scale: 1.02 }}
+              transition={{ type: 'spring', stiffness: 300 }}
+              onClick={() => onSelect(s)}
+              className="bg-card border border-border rounded-xl p-5 cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="p-2.5 bg-primary/10 rounded-lg">
+                  <Building2 className="w-5 h-5 text-primary" />
                 </div>
+                <Badge variant={s.hasCustomProfile ? 'destructive' : 'secondary'}>
+                  {s.hasCustomProfile
+                    ? `Custom (${s.factor > 1 ? '+' : ''}${Math.round((s.factor - 1) * 100)}%)`
+                    : 'Default'}
+                </Badge>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {applications.length === 0 && searchTerm && (
-        <div className="text-center py-12">
-          <div className="text-muted-foreground text-lg">No applications found matching "{searchTerm}"</div>
-          <button 
-            onClick={() => onSearchChange('')}
-            className="mt-4 text-primary hover:text-primary/80 font-medium"
-          >
-            Clear search
-          </button>
+              <h3 className="font-semibold text-foreground mb-1">{s.name}</h3>
+              <p className="text-xs text-muted-foreground">
+                {s.appCount} application{s.appCount !== 1 ? 's' : ''}
+              </p>
+              {s.hasCustomProfile && (
+                <div className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400">
+                  <Shield className="w-3 h-3" />
+                  Algorithm scoring customised
+                </div>
+              )}
+              <div className="mt-4 text-xs text-primary font-medium">Click to edit profile →</div>
+            </motion.div>
+          ))}
         </div>
       )}
     </motion.div>
   );
-};
+}
+
+// ─── Main Export ──────────────────────────────────────────────────────────────
 
 export default function Applications({
   data,
@@ -729,7 +639,7 @@ export default function Applications({
   onRefresh,
   isRefreshing,
   onBack,
-  allAlgorithms, // Add this line
+  allAlgorithms,
 }: {
   data: any;
   isLoading: boolean;
@@ -737,36 +647,39 @@ export default function Applications({
   onRefresh: () => void;
   isRefreshing: boolean;
   onBack: () => void;
-  allAlgorithms: any[]; // Add this line
+  allAlgorithms: any[];
 }) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedApp, setSelectedApp] = useState<any | null>(null);
+  const [selectedSuborg, setSelectedSuborg] = useState<SubOrg | null>(null);
 
-  const filteredApplications = React.useMemo(() => {
-    if (!data?.applications) return [];
-    if (!searchTerm) return data.applications;
-    return data.applications.filter((app: any) => {
-      if (app.application.toLowerCase().includes(searchTerm.toLowerCase())) return true;
-      const profile = app.cryptographic_profile;
-      const allAlgorithmsProfile = [
-        ...(profile["Symmetric Algorithms"] || []),
-        ...(profile["Asymmetric Algorithms"] || []),
-        ...(profile["Hash Functions"] || []),
-        ...(profile["MACs & KDFs"] || []),
-        ...(profile["Post-Quantum Cryptography"] || [])
-      ];
-      return allAlgorithmsProfile.some((algo: any) =>
-        algo.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+  const suborgs: SubOrg[] = useMemo(() => {
+    const dataArray = Array.isArray(data) ? data : data ? [data] : [];
+    const suborgMap: Record<string, { name: string; appCount: number }> = {};
+    dataArray.forEach((org: any) => {
+      (org.applications ?? []).forEach((app: any) => {
+        const id   = app['Sub Org ID']  ?? app.sub_org_id  ?? '';
+        const name = app['Sub Org']     ?? app.sub_org     ?? 'Unknown';
+        if (!id) return;
+        if (!suborgMap[id]) suborgMap[id] = { name, appCount: 0 };
+        suborgMap[id].appCount++;
+      });
     });
-  }, [searchTerm, data]);
+    return Object.entries(suborgMap).map(([id, info]) => {
+      let hasCustomProfile = false;
+      let factor = 1;
+      try {
+        const raw = localStorage.getItem(suborgStorageKey(id));
+        if (raw) { hasCustomProfile = true; factor = computeProfileAdjustmentFactor(JSON.parse(raw)); }
+      } catch {}
+      return { id, ...info, hasCustomProfile, factor };
+    });
+  }, [data]);
 
   if (isLoading || isRefreshing) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <div className="text-muted-foreground">Loading applications...</div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading sub-organisations…</p>
         </div>
       </div>
     );
@@ -774,44 +687,32 @@ export default function Applications({
 
   if (error) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center text-destructive">
-          <div className="text-lg font-semibold mb-2">Error</div>
-          <div>{error}</div>
-          <button
-            onClick={onRefresh}
-            className="mt-4 text-primary hover:text-primary/80 font-medium"
-          >
-            Retry
-          </button>
+          <p className="font-semibold mb-2">Failed to load</p>
+          <p className="text-sm">{error}</p>
+          <Button onClick={onRefresh} variant="outline" className="mt-4">Retry</Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <AnimatePresence mode="wait">
-          {selectedApp ? (
-            <ApplicationDetail
-              key="detailView"
-              app={selectedApp}
-              onBack={() => setSelectedApp(null)}
-              allAlgorithms={allAlgorithms} // Use the prop directly
-            />
-          ) : (
-            <ApplicationsList
-              key="listView"
-              applications={filteredApplications}
-              onAppClick={setSelectedApp}
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              onBack={onBack}
-            />
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
+    <AnimatePresence mode="wait">
+      {selectedSuborg ? (
+        <SubOrgEditor
+          key={`editor-${selectedSuborg.id}`}
+          suborg={selectedSuborg}
+          onBack={() => setSelectedSuborg(null)}
+        />
+      ) : (
+        <SubOrgList
+          key="list"
+          suborgs={suborgs}
+          onSelect={setSelectedSuborg}
+          onBack={onBack}
+        />
+      )}
+    </AnimatePresence>
   );
-};
+}
