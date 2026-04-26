@@ -1,4 +1,5 @@
 export interface CSVData {
+  application_id?: string;
   application: string;
   sub_org: string;
   risk_level: string;

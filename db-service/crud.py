@@ -15,7 +15,7 @@ def create_scan_result(
     db: Session,
     scan: schemas.ScanResultCreate
 ) -> models.ScanResult:
-    """Create a new scan result (standalone - no batch)."""
+    """Create or update a scan result by request_id (standalone - no batch)."""
     scan_data = scan.model_dump()
     log = logging.getLogger(__name__)
 
@@ -51,6 +51,26 @@ def create_scan_result(
         del scan_data['quantum_grade']
 
     try:
+        existing = None
+        request_id = scan_data.get("request_id")
+        if request_id:
+            existing = get_scan_result_by_request_id(db, request_id)
+
+        if existing:
+            for key, value in scan_data.items():
+                if hasattr(existing, key) and value is not None:
+                    setattr(existing, key, value)
+
+            db.commit()
+            db.refresh(existing)
+
+            log.info(
+                f"Updated existing scan result ID: {existing.id}. "
+                f"Stored PQC Score: {existing.pqc_overall_score}, "
+                f"Stored PQC Grade: {existing.pqc_overall_grade}"
+            )
+            return existing
+
         db_scan = models.ScanResult(**scan_data)
         db.add(db_scan)
         db.commit()

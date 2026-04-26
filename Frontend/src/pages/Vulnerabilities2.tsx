@@ -182,6 +182,8 @@ interface SystemAgent {
   };
 }
 
+type VulnerabilitySource = "domain" | "repo" | "system";
+
 // Processed vulnerability type
 interface ProcessedVulnerability {
   vulnerability_id: string;
@@ -220,6 +222,10 @@ interface ProcessedVulnerability {
     preferred_algorithms: string[];
     migration_type: string;
     priority: string;
+  };
+  origin: {
+    source: VulnerabilitySource;
+    reference: string;
   };
 }
 
@@ -318,6 +324,39 @@ const getRiskGradeColor = (grade: string) => {
   if (grade.startsWith("C")) return "text-warning";
   if (grade.startsWith("D")) return "text-warning";
   return "text-destructive";
+};
+
+const SOURCE_META: Record<VulnerabilitySource, { label: string; icon: ElementType; chipClass: string }> = {
+  domain: {
+    label: "Domain Scan",
+    icon: Globe,
+    chipClass: "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:border-blue-800",
+  },
+  repo: {
+    label: "Repository Scan",
+    icon: GitBranch,
+    chipClass: "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:border-violet-800",
+  },
+  system: {
+    label: "System Agent",
+    icon: Server,
+    chipClass: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800",
+  },
+};
+
+const formatSourceReference = (source: VulnerabilitySource, reference: string): string => {
+  const raw = (reference || "unknown").trim();
+  if (!raw) return "unknown";
+
+  if (source === "domain") {
+    return raw.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+  }
+
+  if (source === "repo") {
+    return raw.replace(/^https?:\/\//i, "").replace(/\.git$/i, "");
+  }
+
+  return raw;
 };
 
 // ============================================================================
@@ -555,7 +594,11 @@ const buildVulnerabilityList = (
               preferred_algorithms: algo.recommended_replacement || [],
               migration_type: algo.is_hybrid ? "hybrid" : "full_replacement",
               priority: algo.security_level === "critical" ? "immediate" : "high"
-            }
+            },
+            origin: {
+              source: "domain",
+              reference: domain.url || "unknown-domain",
+            },
           });
         }
       });
@@ -596,7 +639,11 @@ const buildVulnerabilityList = (
             preferred_algorithms: [],
             migration_type: "code_refactor",
             priority: "high"
-          }
+          },
+          origin: {
+            source: "repo",
+            reference: repo.repo_url || `repo-${repoIndex + 1}`,
+          },
         });
       }
     });
@@ -635,7 +682,11 @@ const buildVulnerabilityList = (
               preferred_algorithms: [],
               migration_type: "system_upgrade",
               priority: "medium"
-            }
+            },
+            origin: {
+              source: "system",
+              reference: agent.agent_id || "unknown-agent",
+            },
           });
         }
       });
@@ -718,21 +769,52 @@ const calculateCategories = (
 // API FETCH FUNCTIONS
 // ============================================================================
 
+const DB_API_BASE = (import.meta.env.VITE_DB_API_URL as string | undefined) || "http://localhost:8001";
+
+const getErrorMessage = async (response: Response): Promise<string> => {
+  try {
+    const bodyText = await response.text();
+    if (!bodyText) return "";
+
+    try {
+      const parsed = JSON.parse(bodyText);
+      if (typeof parsed?.detail === "string") return parsed.detail;
+      if (typeof parsed?.message === "string") return parsed.message;
+      if (typeof parsed?.detail?.message === "string") return parsed.detail.message;
+    } catch {
+      // Fall back to raw response text when body is not JSON
+    }
+
+    return bodyText.slice(0, 240);
+  } catch {
+    return "";
+  }
+};
+
 const fetchNetworkVulnerabilities = async (): Promise<NetworkDomain[]> => {
-  const response = await fetch("http://localhost:8001/vulnerabilities/network");
-  if (!response.ok) throw new Error(`Network API Error: ${response.status}`);
+  const response = await fetch(`${DB_API_BASE}/vulnerabilities/network`);
+  if (!response.ok) {
+    const details = await getErrorMessage(response);
+    throw new Error(`Network API Error: ${response.status}${details ? ` - ${details}` : ""}`);
+  }
   return await response.json();
 };
 
 const fetchCodeVulnerabilities = async (): Promise<CodeRepository[]> => {
-  const response = await fetch("http://localhost:8001/vulnerabilities/code");
-  if (!response.ok) throw new Error(`Code API Error: ${response.status}`);
+  const response = await fetch(`${DB_API_BASE}/vulnerabilities/code`);
+  if (!response.ok) {
+    const details = await getErrorMessage(response);
+    throw new Error(`Code API Error: ${response.status}${details ? ` - ${details}` : ""}`);
+  }
   return await response.json();
 };
 
 const fetchSystemVulnerabilities = async (): Promise<SystemAgent[]> => {
-  const response = await fetch("http://localhost:8001/vulnerabilities/system");
-  if (!response.ok) throw new Error(`System API Error: ${response.status}`);
+  const response = await fetch(`${DB_API_BASE}/vulnerabilities/system`);
+  if (!response.ok) {
+    const details = await getErrorMessage(response);
+    throw new Error(`System API Error: ${response.status}${details ? ` - ${details}` : ""}`);
+  }
   return await response.json();
 };
 
@@ -752,19 +834,26 @@ const MetricCard = ({
   variant?: "default" | "critical" | "success" | "warning";
 }) => {
   const variants = {
-    default: "",
-    critical: "",
-    success: "",
-    warning: "",
+    default: "bg-card border-border shadow-sm",
+    critical: "bg-red-50/80 border-red-200 dark:bg-red-950/20 dark:border-red-800/70 shadow-sm",
+    success: "bg-emerald-50/80 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800/70 shadow-sm",
+    warning: "bg-amber-50/80 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800/70 shadow-sm",
+  };
+
+  const iconColors = {
+    default: "text-muted-foreground",
+    critical: "text-red-500",
+    success: "text-emerald-500",
+    warning: "text-amber-500",
   };
 
   return (
-    <div className={`border border-border rounded-md p-3 bg-card ${variants[variant]}`}>
-      <div className="mb-1 flex items-center gap-2">
-        {Icon && <Icon className="w-4 h-4 text-muted-foreground" />}
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
+    <div className={`border rounded-xl p-4 ${variants[variant]}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+        {Icon && <Icon className={`w-4 h-4 ${iconColors[variant]}`} />}
       </div>
-      <p className="text-2xl font-bold text-foreground">{value}</p>
+      <p className="text-2xl font-bold text-foreground leading-none">{value}</p>
     </div>
   );
 }
@@ -932,10 +1021,31 @@ const DataSourceBadge = ({
   count: number;
 }) => {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border border-border bg-card rounded-md text-sm font-medium">
-      <Icon className="w-4 h-4 text-muted-foreground" />
-      <span className="text-foreground">{label}:</span>
-      <span className="font-bold text-primary">{count}</span>
+    <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-border/70 bg-background/80 rounded-full text-xs font-medium">
+      <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-bold text-foreground">{count}</span>
+    </div>
+  );
+};
+
+const SourcePill = ({ source, reference, compact = false }: { source: VulnerabilitySource; reference: string; compact?: boolean }) => {
+  const sourceMeta = SOURCE_META[source];
+  const SourceIcon = sourceMeta.icon;
+  const normalizedRef = formatSourceReference(source, reference);
+
+  return (
+    <div className={compact ? "space-y-1" : "space-y-1.5"}>
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border ${sourceMeta.chipClass}`}>
+        <SourceIcon className="w-3 h-3" />
+        {sourceMeta.label}
+      </span>
+      <div
+        className={`text-xs text-muted-foreground ${compact ? "max-w-[220px] truncate" : "font-mono break-all"}`}
+        title={normalizedRef}
+      >
+        {normalizedRef}
+      </div>
     </div>
   );
 };
@@ -948,26 +1058,39 @@ export default function PQCDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string>("");
   const [pqcStatusFilter, setPqcStatusFilter] = useState<string>("");
-  const [layerFilter, setLayerFilter] = useState<string>("");
+  const [sourceFilter, setSourceFilter] = useState<string>("");
   const [selectedVuln, setSelectedVuln] = useState<ProcessedVulnerability | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "algorithms" | "usage">("overview");
   const [currentPage, setCurrentPage] = useState<number>(1);
   const PAGE_SIZE = 25;
 
+  const clearFilters = () => {
+    setSearchTerm("");
+    setSeverityFilter("");
+    setPqcStatusFilter("");
+    setSourceFilter("");
+    setCurrentPage(1);
+  };
+
   // Fetch all three endpoints
-  const { data: networkData, isLoading: networkLoading } = useQuery({
+  const { data: networkData, isLoading: networkLoading, error: networkError, refetch: refetchNetwork } = useQuery<NetworkDomain[], Error>({
     queryKey: ["vulnerabilities-network"],
     queryFn: fetchNetworkVulnerabilities,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 
-  const { data: codeData, isLoading: codeLoading } = useQuery({
+  const { data: codeData, isLoading: codeLoading, error: codeError, refetch: refetchCode } = useQuery<CodeRepository[], Error>({
     queryKey: ["vulnerabilities-code"],
     queryFn: fetchCodeVulnerabilities,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 
-  const { data: systemData, isLoading: systemLoading } = useQuery({
+  const { data: systemData, isLoading: systemLoading, error: systemError, refetch: refetchSystem } = useQuery<SystemAgent[], Error>({
     queryKey: ["vulnerabilities-system"],
     queryFn: fetchSystemVulnerabilities,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 
   // Process combined data
@@ -1002,7 +1125,8 @@ export default function PQCDashboard() {
         searchTerm === "" ||
         vuln.algorithm.toLowerCase().includes(searchTerm.toLowerCase()) ||
         vuln.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        vuln.quantum_risk.toLowerCase().includes(searchTerm.toLowerCase());
+        vuln.quantum_risk.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        vuln.origin.reference.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesSeverity =
         severityFilter === "" || vuln.severity.toLowerCase() === severityFilter.toLowerCase();
@@ -1010,14 +1134,46 @@ export default function PQCDashboard() {
       const matchesPQC =
         pqcStatusFilter === "" || vuln.pqc_status.toLowerCase() === pqcStatusFilter.toLowerCase();
 
-      const matchesLayer =
-        layerFilter === "" || vuln.affected_layers.some(layer => layer.toLowerCase() === layerFilter.toLowerCase());
+      const matchesSource =
+        sourceFilter === "" || vuln.origin.source === sourceFilter;
 
-      return matchesSearch && matchesSeverity && matchesPQC && matchesLayer;
+      return matchesSearch && matchesSeverity && matchesPQC && matchesSource;
     });
-  }, [processedData, searchTerm, severityFilter, pqcStatusFilter, layerFilter]);
+  }, [processedData, searchTerm, severityFilter, pqcStatusFilter, sourceFilter]);
+
+  const sourceBreakdown = useMemo(() => {
+    const totals = { domain: 0, repo: 0, system: 0 };
+    filteredVulnerabilities.forEach((vuln) => {
+      totals[vuln.origin.source] += 1;
+    });
+    return totals;
+  }, [filteredVulnerabilities]);
+
+  const pagedVulnerabilities = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredVulnerabilities.slice(start, start + PAGE_SIZE);
+  }, [filteredVulnerabilities, currentPage]);
+
+  const activeFilterCount = [
+    searchTerm.trim() !== "",
+    severityFilter !== "",
+    pqcStatusFilter !== "",
+    sourceFilter !== "",
+  ].filter(Boolean).length;
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(filteredVulnerabilities.length / PAGE_SIZE));
+    if (currentPage > maxPage) setCurrentPage(maxPage);
+  }, [filteredVulnerabilities.length, currentPage]);
 
   const isLoading = networkLoading || codeLoading || systemLoading;
+  const hasError = networkError || codeError || systemError;
+
+  const combinedErrorMessage = [
+    networkError?.message,
+    codeError?.message,
+    systemError?.message,
+  ].filter(Boolean).join(" | ");
 
   if (isLoading) {
     return (
@@ -1030,6 +1186,28 @@ export default function PQCDashboard() {
           />
           <h2 className="text-2xl font-bold text-foreground mb-2">Initializing Scan...</h2>
           <p className="text-sm text-muted-foreground">Aggregating network, code, and system data</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasError) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="max-w-2xl w-full text-center border border-destructive/50 bg-destructive/5 rounded-lg p-8 space-y-4">
+          <ShieldAlert className="w-16 h-16 text-destructive mx-auto" />
+          <h2 className="text-2xl font-bold text-foreground">Vulnerabilities Data Unavailable</h2>
+          <p className="text-sm text-muted-foreground">
+            {combinedErrorMessage || "One or more vulnerability data sources could not be loaded."}
+          </p>
+          <button
+            onClick={() => {
+              void Promise.all([refetchNetwork(), refetchCode(), refetchSystem()]);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90"
+          >
+            <RefreshCw className="w-4 h-4" /> Retry
+          </button>
         </div>
       </div>
     );
@@ -1070,20 +1248,21 @@ export default function PQCDashboard() {
         }
       `}</style>
 
-      <div>
+      <div className="relative">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-primary/10 via-emerald-500/5 to-transparent" />
         {/* Header */}
-        <div className="border-b bg-card">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+        <div className="relative z-10 border-b bg-card/80 backdrop-blur-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5">
+            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground">
               Post-Quantum Cryptography Dashboard
             </h1>
-            <p className="text-muted-foreground text-sm sm:text-base mt-1">
+            <p className="text-muted-foreground text-sm sm:text-base mt-2">
               Multi-source vulnerability assessment
             </p>
           </div>
 
-          <div className="border-t bg-muted/30">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-4">
+          <div className="border-t bg-muted/20">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3">
               <DataSourceBadge icon={Globe} label="Network" count={processedData.metadata.network_scans} />
               <DataSourceBadge icon={GitBranch} label="Repos" count={processedData.metadata.code_repos} />
               <DataSourceBadge icon={Server} label="Agents" count={processedData.metadata.system_agents} />
@@ -1096,18 +1275,36 @@ export default function PQCDashboard() {
         </div>
 
         {/* Main Content */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
           {/* Risk Score Hero */}
-          <div className="border border-border bg-card rounded-lg p-8">
-            <div>
-              <div className="text-sm font-medium text-muted-foreground mb-3">
-                Overall Quantum Risk Assessment
+          <div className="relative overflow-hidden border border-border bg-gradient-to-r from-primary/10 via-card to-emerald-500/10 rounded-2xl p-8">
+            <div className="absolute -right-12 -top-12 w-40 h-40 bg-primary/20 blur-3xl rounded-full pointer-events-none" />
+            <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <div className="text-sm font-medium text-muted-foreground mb-3">
+                  Overall Quantum Risk Assessment
+                </div>
+                <div className="text-6xl sm:text-7xl font-bold text-foreground mb-3">
+                  {processedData.overallRisk.grade}
+                </div>
+                <div className="text-muted-foreground text-sm">
+                  Risk Score: <span className="text-foreground font-bold">{processedData.overallRisk.score}</span>/100
+                </div>
               </div>
-              <div className="text-7xl font-bold text-foreground mb-3">
-                {processedData.overallRisk.grade}
-              </div>
-              <div className="text-muted-foreground text-sm">
-                Risk Score: <span className="text-foreground font-bold">{processedData.overallRisk.score}</span>/100
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-border bg-background/70 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Critical</div>
+                  <div className="text-xl font-bold text-red-500">{processedData.severityCounts.critical}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-background/70 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">High</div>
+                  <div className="text-xl font-bold text-amber-500">{processedData.severityCounts.high}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-background/70 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Total</div>
+                  <div className="text-xl font-bold text-foreground">{processedData.vulnerabilities.length}</div>
+                </div>
               </div>
             </div>
           </div>
@@ -1170,7 +1367,7 @@ export default function PQCDashboard() {
 
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="border border-border bg-card rounded-lg p-6">
+            <div className="border border-border bg-card/95 rounded-2xl p-6 shadow-sm">
               <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-primary" />
                 <span>Algorithm Type Distribution</span>
@@ -1178,7 +1375,7 @@ export default function PQCDashboard() {
               <DistributionChart distribution={processedData.typeDistribution} />
             </div>
 
-            <div className="border border-border bg-card rounded-lg p-6">
+            <div className="border border-border bg-card/95 rounded-2xl p-6 shadow-sm">
               <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
                 <Activity className="w-5 h-5 text-primary" />
                 <span>Usage Heatmap</span>
@@ -1189,91 +1386,113 @@ export default function PQCDashboard() {
 
           {/* Vulnerabilities Section */}
           <div>
-            <div className="mb-6">
-              <h2 className="text-3xl font-bold mb-4 flex items-center gap-3">
-                <Database className="w-7 h-7 text-primary" />
-                <span>Multi-Source Vulnerabilities</span>
-              </h2>
+            <div className="mb-6 space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <h2 className="text-3xl font-bold flex items-center gap-3">
+                  <Database className="w-7 h-7 text-primary" />
+                  <span>Multi-Source Vulnerabilities</span>
+                </h2>
 
-              {/* Filters */}
-              <div className="space-y-4 mb-6">
-                <div className="relative max-w-xl">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search algorithms, types, risks..."
-                    className="w-full pl-12 pr-12 py-3 bg-background border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary transition-colors text-sm rounded-md"
-                  />
-                  {searchTerm && (
-                    <button
-                      onClick={() => setSearchTerm("")}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <DataSourceBadge icon={Globe} label="Domain" count={sourceBreakdown.domain} />
+                  <DataSourceBadge icon={GitBranch} label="Repo" count={sourceBreakdown.repo} />
+                  <DataSourceBadge icon={Server} label="System" count={sourceBreakdown.system} />
+                  {activeFilterCount > 0 && (
+                    <span className="inline-flex items-center px-2.5 py-1 text-[11px] font-semibold rounded-full border border-primary/40 bg-primary/10 text-primary">
+                      {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""} active
+                    </span>
                   )}
                 </div>
+              </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground font-medium">Severity:</span>
+              <div className="rounded-2xl border border-border bg-card/95 p-4 sm:p-5 shadow-sm space-y-4">
+                <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search algorithm, risk, source reference..."
+                      className="w-full pl-11 pr-11 py-2.5 bg-background border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-sm rounded-xl"
+                    />
+                    {searchTerm && (
+                      <button
+                        onClick={() => setSearchTerm("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={clearFilters}
+                    className="px-3.5 py-2.5 text-sm rounded-xl border border-border bg-background hover:bg-muted/40 text-foreground transition-colors"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 mr-1 text-xs text-muted-foreground font-semibold uppercase tracking-wide">
+                    <Filter className="w-3.5 h-3.5" />
+                    Filters
                   </div>
 
                   <select
                     value={severityFilter}
                     onChange={(e) => { setSeverityFilter(e.target.value); setCurrentPage(1); }}
-                    className="px-3 py-2 text-sm bg-background border border-border rounded-md text-foreground"
+                    className="px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground"
                   >
-                    <option value="">All</option>
+                    <option value="">All Severity</option>
                     <option value="critical">Critical</option>
                     <option value="high">High</option>
                     <option value="medium">Medium</option>
                     <option value="low">Low</option>
                   </select>
 
-                  <div className="text-xs text-muted-foreground font-medium">PQC Status:</div>
                   <select
                     value={pqcStatusFilter}
                     onChange={(e) => { setPqcStatusFilter(e.target.value); setCurrentPage(1); }}
-                    className="px-3 py-2 text-sm bg-background border border-border rounded-md text-foreground"
+                    className="px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground"
                   >
-                    <option value="">All</option>
+                    <option value="">All PQC Status</option>
                     <option value="quantum-vulnerable">Quantum Vulnerable</option>
                     <option value="hybrid-compatible">Hybrid Compatible</option>
                     <option value="post-quantum-ready">Post-Quantum Ready</option>
                   </select>
 
-                  <div className="text-xs text-muted-foreground font-medium">Layer:</div>
                   <select
-                    value={layerFilter}
-                    onChange={(e) => { setLayerFilter(e.target.value); setCurrentPage(1); }}
-                    className="px-3 py-2 text-sm bg-background border border-border rounded-md text-foreground"
+                    value={sourceFilter}
+                    onChange={(e) => { setSourceFilter(e.target.value); setCurrentPage(1); }}
+                    className="px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground"
                   >
-                    <option value="">All</option>
-                    <option value="network">Network</option>
-                    <option value="source_code">Source Code</option>
-                    <option value="system">System</option>
+                    <option value="">All Sources</option>
+                    <option value="domain">Domain Scan</option>
+                    <option value="repo">Repository Scan</option>
+                    <option value="system">System Agent</option>
                   </select>
                 </div>
               </div>
 
-              <div className="text-sm text-gray-600 font-mono mb-4">
-                SHOWING <span className="text-cyan-400 font-bold">{filteredVulnerabilities.length}</span> OF{" "}
-                <span className="text-cyan-400 font-bold">{processedData.vulnerabilities.length}</span> VULNERABILITIES
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2">
+                <div className="text-sm text-muted-foreground">
+                  Showing <span className="font-bold text-foreground">{filteredVulnerabilities.length}</span> of{" "}
+                  <span className="font-bold text-foreground">{processedData.vulnerabilities.length}</span> vulnerabilities
+                </div>
+                <div className="text-xs text-muted-foreground">Select a row to open detailed evidence and remediation</div>
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-border bg-card rounded-lg">
+            <div className="overflow-x-auto border border-border bg-card rounded-2xl shadow-sm">
               <table className="w-full table-auto text-sm">
                 <thead className="bg-muted/50">
                   <tr>
                     <th className="text-left p-3">Algorithm</th>
                     <th className="text-left p-3">Severity</th>
                     <th className="text-left p-3">PQC Status</th>
-                    <th className="text-left p-3">Layer</th>
+                    <th className="text-left p-3">Source</th>
                     <th className="text-right p-3">Instances</th>
                     <th className="text-center p-3"> </th>
                   </tr>
@@ -1300,7 +1519,21 @@ export default function PQCDashboard() {
                         </span>
                       </td>
                       <td className="p-3 align-top">
-                        <div className="text-xs text-muted-foreground">{vuln.affected_layers.join(", ")}</div>
+                        {(() => {
+                          const sourceMeta = SOURCE_META[vuln.origin.source];
+                          const SourceIcon = sourceMeta.icon;
+                          return (
+                            <div className="space-y-1">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border ${sourceMeta.chipClass}`}>
+                                <SourceIcon className="w-3 h-3" />
+                                {sourceMeta.label}
+                              </span>
+                              <div className="text-xs text-muted-foreground max-w-[250px] truncate" title={vuln.origin.reference}>
+                                {formatSourceReference(vuln.origin.source, vuln.origin.reference)}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="p-3 align-top text-right">
                         <div className="font-bold text-foreground">{vuln.usage.total_instances}</div>
@@ -1361,6 +1594,23 @@ export default function PQCDashboard() {
                         <div>
                           <h3 className="text-2xl font-bold text-foreground">{selectedVuln.algorithm}</h3>
                           <div className="text-xs text-muted-foreground mt-1">{selectedVuln.type}</div>
+                          <div className="mt-2">
+                            {(() => {
+                              const sourceMeta = SOURCE_META[selectedVuln.origin.source];
+                              const SourceIcon = sourceMeta.icon;
+                              return (
+                                <div className="space-y-1">
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border ${sourceMeta.chipClass}`}>
+                                    <SourceIcon className="w-3 h-3" />
+                                    {sourceMeta.label}
+                                  </span>
+                                  <div className="text-xs text-muted-foreground font-mono break-all">
+                                    {formatSourceReference(selectedVuln.origin.source, selectedVuln.origin.reference)}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <button onClick={() => setSelectedVuln(null)} className="text-muted-foreground hover:text-foreground">

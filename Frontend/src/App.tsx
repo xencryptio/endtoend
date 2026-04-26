@@ -46,9 +46,11 @@ const AnimatedRoutes = () => {
 
         {/* Existing routes */}
         <Route path="/applications" element={<Applications />} />
-        <Route path="/vulnerabilities" element={<Vulnerabilities />} />
+        <Route path="/vulnerabilities" element={<Vulnerabilities2 />} />
+        <Route path="/vulnerabilities2" element={<Vulnerabilities2 />} />
         <Route path="/Vulnerabilities2" element={<Vulnerabilities2 />} />
         <Route path="/vulnerabilities-new" element={<VulnerabilitiesNew />} />
+        <Route path="/vulnerabilities-legacy" element={<Vulnerabilities />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/scans" element={<Scan />} />
         <Route path="/assets-scans" element={<SystemScan />} />

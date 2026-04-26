@@ -15,7 +15,7 @@ import {
   AlertOctagon, Globe, GitBranch, Cpu, ChevronRight, Wifi, WifiOff
 } from "lucide-react";
 import type { OrganizationDashboard, ApplicationSummary } from "@/types/dashboardTypes";
-import { getRiskBadgeClass, getScoreTextClass } from "@/utils/dashboardUtils";
+import { dedupeApplications, getRiskBadgeClass, getScoreTextClass } from "@/utils/dashboardUtils";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const RISK_COLORS: Record<string, string> = {
@@ -130,8 +130,14 @@ export default function Dashboard() {
   }, []);
 
   // ── computed (must come before suborgAdjustments) ────────────────────────
-  const apps = useMemo(() => selectedOrg?.applications ?? [], [selectedOrg]);
-  const dist = useMemo(() => selectedOrg?.risk_distribution ?? { Low: 0, Medium: 0, High: 0, "Very High": 0 }, [selectedOrg]);
+  const apps = useMemo(() => dedupeApplications(selectedOrg?.applications ?? []), [selectedOrg]);
+  const dist = useMemo(() => {
+    const counts = { Low: 0, Medium: 0, High: 0, "Very High": 0 };
+    apps.forEach(app => {
+      if (app.risk_level in counts) counts[app.risk_level as keyof typeof counts] += 1;
+    });
+    return counts;
+  }, [apps]);
   const rawSummary = useMemo(() => selectedOrg?.summary ?? { total_applications: 0, total_vulnerabilities: 0, secure_applications: 0, pqc_readiness_percent: 0 }, [selectedOrg]);
 
   // Per-sub-org adjustment factors (sub-org profile → org-wide profile → 1)
@@ -160,8 +166,17 @@ export default function Dashboard() {
   // Summary uses average of per-sub-org adjusted PQC scores
   const summary = useMemo(() => {
     if (!adjustedApps.length) return rawSummary;
-    const avgPQC = adjustedApps.reduce((s, a) => s + a._adjPQC, 0) / adjustedApps.length;
-    return { ...rawSummary, pqc_readiness_percent: Math.min(100, Math.round(avgPQC * 10) / 10) };
+    const totalApplications = adjustedApps.length;
+    const totalVulnerabilities = adjustedApps.reduce((sum, app) => sum + (app.vulnerabilities || 0), 0);
+    const secureApplications = adjustedApps.filter(app => app._adjPQC >= 80).length;
+    const avgPQC = adjustedApps.reduce((sum, app) => sum + app._adjPQC, 0) / totalApplications;
+
+    return {
+      total_applications: totalApplications,
+      total_vulnerabilities: totalVulnerabilities,
+      secure_applications: secureApplications,
+      pqc_readiness_percent: Math.min(100, Math.round(avgPQC * 10) / 10),
+    };
   }, [rawSummary, adjustedApps]);
   const orgName = selectedOrg?.organization_name ?? "Organization";
 

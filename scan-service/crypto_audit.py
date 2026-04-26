@@ -5,7 +5,6 @@ import sys
 import asyncio
 import base64
 import requests
-import subprocess
 import contextlib
 import uuid
 from urllib.parse import urlparse
@@ -1136,7 +1135,15 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
         "execution_time_seconds": 0  # Will be set by caller if needed, or default to 0
     }
 
-def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout: int, progress_tracker=None, max_backoff_retries: int = 3) -> Dict[str, Any]:
+def handle_scan_with_backoff(
+    domain: str,
+    use_cache: bool,
+    attempt: int,
+    timeout: int,
+    save_to_db: bool = False,
+    progress_tracker=None,
+    max_backoff_retries: int = 3
+) -> Dict[str, Any]:
     """
     Wrapper that handles rate limiting with exponential backoff.
     This runs in a separate thread, so it needs its own event loop.
@@ -1146,7 +1153,16 @@ def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout
         asyncio.set_event_loop(loop)
         for retry in range(max_backoff_retries):
             try:
-                return loop.run_until_complete(process_single_domain(domain, use_cache, attempt, timeout, progress_tracker=progress_tracker))
+                return loop.run_until_complete(
+                    process_single_domain(
+                        domain,
+                        use_cache,
+                        attempt,
+                        timeout,
+                        save_to_db=save_to_db,
+                        progress_tracker=progress_tracker,
+                    )
+                )
             except RateLimitException:
                 if retry < max_backoff_retries - 1:
                     wait_time = (2 ** retry) * 5  # 5s, 10s, 20s
@@ -1220,6 +1236,15 @@ def quick_domain_check(domain: str, timeout: int = 2) -> tuple[bool, str]:
     except Exception as e:
         return False, f"An unexpected error occurred during DNS check for {domain}: {e}"
 
+
+def generate_scan_request_id(domain: str) -> str:
+    """Generate a stable, unique request_id for one scan lifecycle."""
+    try:
+        host = extract_hostname(domain).replace(".", "_").replace(":", "_")
+    except Exception:
+        host = "scan"
+    return f"{host}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
+
 async def process_single_domain(
     domain: str, 
     use_cache: bool = True, 
@@ -1229,6 +1254,7 @@ async def process_single_domain(
     progress_tracker=None  # ADD THIS PARAMETER
 ) -> Dict[str, Any]:
     """Process a single domain scan, with HTTP/HTTPS logic. Each scan is independent."""
+    request_id = generate_scan_request_id(domain)
     
     # Register domain with tracker
     if progress_tracker:
@@ -1239,6 +1265,12 @@ async def process_single_domain(
 
     # 1. Protocol Detection
     protocol = detect_protocol(domain)
+
+    if save_to_db:
+        try:
+            await db_handler.save_pending_scan(domain, request_id)
+        except Exception as pending_error:
+            logger.warning(f"Failed to create pending scan record for {domain}: {pending_error}")
     
     if progress_tracker:
         progress_tracker.complete_phase(domain, "protocol_check")
@@ -1246,15 +1278,21 @@ async def process_single_domain(
     if protocol != "https":
         error_message = f"Domain is {protocol.upper()} and cannot be scanned (TLS/SSL only)."
         logger.warning(f"Skipping {domain}: {error_message}")
-        
-        request_id = f"{domain}_{int(datetime.now().timestamp())}"
-        
+
         transformed_result = {
             "domain": domain,
             "scan_status": "http_skipped",
             "error_detail": error_message,
         }
-        return format_result_for_frontend(transformed_result, request_id)
+        result = format_result_for_frontend(transformed_result, request_id)
+        if save_to_db:
+            try:
+                await db_handler.save_scan_result(result)
+            except Exception as save_error:
+                logger.error(f"Failed to save http_skipped result for {domain}: {save_error}")
+        if progress_tracker:
+            progress_tracker.mark_domain_completed(domain)
+        return result
 
     # 2. Proceed with HTTPS scan
     scan_start_time = datetime.now()
@@ -1290,7 +1328,6 @@ async def process_single_domain(
         }
         transformed_result["scan_status"] = "completed"
         
-        request_id = f"{domain}_{int(datetime.now().timestamp())}"
         result = format_result_for_frontend(transformed_result, request_id)
         
         # Calculate execution time
@@ -1313,9 +1350,20 @@ async def process_single_domain(
 
         return result
     
-    except APIError:
+    except APIError as e:
+        if save_to_db:
+            try:
+                error_message = e.detail.get("message") if isinstance(e.detail, dict) else str(e)
+                await db_handler.save_failed_scan(domain, error_message, request_id)
+            except Exception as save_error:
+                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
         raise
     except Exception as e:
+        if save_to_db:
+            try:
+                await db_handler.save_failed_scan(domain, str(e), request_id)
+            except Exception as save_error:
+                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
         logger.exception(f"❌ Unexpected error scanning {domain}")
         raise APIError(
             status_code=500, 
@@ -1387,7 +1435,14 @@ async def scan_domain(request: ScanRequest):
             
             with ThreadPoolExecutor(max_workers=min(request.max_concurrent, len(domains_to_scan))) as executor:
                 future_to_domain = {
-                    executor.submit(handle_scan_with_backoff, domain, use_cache, round_num, current_timeout): domain 
+                    executor.submit(
+                        handle_scan_with_backoff,
+                        domain,
+                        use_cache,
+                        round_num,
+                        current_timeout,
+                        request.save_to_db,
+                    ): domain 
                     for domain in domains_to_scan
                 }
                 
@@ -1404,42 +1459,18 @@ async def scan_domain(request: ScanRequest):
                         retry_state.add_success(result)
                         retry_state.remove_success(domain)
                         logger.info(f"[{round_num}] Success: {domain}")
-                        
-                        # Save each result independently to database
-                        if request.save_to_db:
-                            try:
-                                await db_handler.save_scan_result(result)
-                                logger.info(f"✅ Saved result for {domain}")
-                            except Exception as save_error:
-                                logger.error(f"Failed to save result for {domain}: {save_error}")
-                        
+
                         time.sleep(5)  # Delay between scans
                         
                     except HTTPException as e:
                         if e.status_code == 429:
                             logger.warning(f"[{round_num}] Rate Limited: {domain} - will retry with backoff")
                         retry_state.add_failure(domain, e.detail, round_num)
-                        logger.error(f"[{round_num} Failed: {domain} - {e.detail}")
-                        
-                        # Save failed scan to database
-                        if request.save_to_db:
-                            request_id = f"{domain}_{int(datetime.now().timestamp())}"
-                            try:
-                                await db_handler.save_failed_scan(domain, e.detail, request_id)
-                            except Exception as save_error:
-                                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
+                        logger.error(f"[{round_num}] Failed: {domain} - {e.detail}")
                         
                     except Exception as e:
                         retry_state.add_failure(domain, str(e), round_num)
                         logger.error(f"[{round_num}] Failed: {domain} - {str(e)}")
-                        
-                        # Save failed scan to database
-                        if request.save_to_db:
-                            request_id = f"{domain}_{int(datetime.now().timestamp())}"
-                            try:
-                                await db_handler.save_failed_scan(domain, str(e), request_id)
-                            except Exception as save_error:
-                                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
             
             # Update domains to scan for next round
             domains_to_scan = retry_state.get_failed_domains()
@@ -1521,6 +1552,7 @@ async def scan_with_progress(request: ScanRequest):
                         use_cache,
                         round_num,
                         current_timeout,
+                        request.save_to_db,
                         tracker
                     ): domain
                     for domain in domains_to_scan
@@ -1530,14 +1562,7 @@ async def scan_with_progress(request: ScanRequest):
                     domain = future_to_domain[future]
                     try:
                         result = future.result()
-                        
-                        # Save each result independently
-                        if request.save_to_db:
-                            try:
-                                await db_handler.save_scan_result(result)
-                            except Exception as save_error:
-                                logger.error(f"Failed to save result for {domain}: {save_error}")
-                        
+
                         # SEND PROGRESS UPDATE
                         yield f"data: {json.dumps(tracker.get_progress_snapshot())}\n\n"
                         
@@ -1614,21 +1639,15 @@ async def cancel_scan(request_id: str):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint for internal scanner mode."""
     logger.info("Health check called")
     try:
-        subprocess.run(
-            ["ssllabs-scan", "--help"],
-            capture_output=True,
-            timeout=5
-        )
         return {
             "status": "healthy",
-            "ssllabs_cli": "available",
+            "scanner_mode": "internal",
+            "ssllabs_cli": "not_required",
             "version": "4.0"
         }
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        raise APIError(status_code=503, error_code="cli_not_available", message="ssllabs-scan CLI not available or timed out")
     except Exception as e:
         logger.exception(f"Health check failed: {str(e)}")
         raise APIError(status_code=500, error_code="health_check_failed", message=f"Health check failed: {str(e)}")

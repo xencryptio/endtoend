@@ -13,7 +13,7 @@ WORKDIR /app
 
 # --- Prepare requirements.txt and install dependencies ---
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
 # Copy the wait-for-db.sh script and make it executable
 COPY wait-for-db.sh /usr/local/bin/wait-for-db.sh
