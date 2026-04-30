@@ -1,0 +1,33 @@
+# Git metadata
+**/.git
+**/.gitignore
+**/.gitattributes
+
+# Build artifacts
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+**/.pytest_cache
+**/.coverage
+
+# IDE
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+*~
+
+# Documentation
+**/README.md
+**/LICENSE
+**/CONTRIBUTING.md
+**/*.md
+
+# CI/CD
+**/.github
+**/.gitlab-ci.yml
+**/azure-pipelines.yml
+
+# Note: Keep tests directories - CMake references them even with BUILD_TESTING=OFF

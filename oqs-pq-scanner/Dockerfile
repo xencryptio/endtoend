@@ -1,4 +1,5 @@
 # OQS-OpenSSL PQ Scanner - Proper PQ hybrid detection
+# Dependencies stored locally to avoid reliance on external GitHub repos
 FROM python:3.11-bookworm
 
 # Install build dependencies
@@ -12,23 +13,33 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Build liboqs (Open Quantum Safe library)
-WORKDIR /tmp
-RUN git clone --depth 1 --branch main https://github.com/open-quantum-safe/liboqs.git && \
-    cd liboqs && \
-    mkdir build && cd build && \
-    cmake -GNinja -DCMAKE_INSTALL_PREFIX=/opt/oqs .. && \
+# Copy local OQS dependencies (no external GitHub dependency!)
+WORKDIR /opt/oqs-build
+COPY oqs-dependencies/liboqs ./liboqs
+COPY oqs-dependencies/oqs-provider ./oqs-provider
+
+# Build liboqs (Open Quantum Safe library) from local copy
+WORKDIR /opt/oqs-build/liboqs
+RUN mkdir build && cd build && \
+    cmake -GNinja \
+        -DCMAKE_INSTALL_PREFIX=/opt/oqs \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_SHARED_LIBS=ON \
+        .. && \
     ninja && ninja install
 
-# Build OQS-OpenSSL provider
-RUN git clone --depth 1 --branch main https://github.com/open-quantum-safe/oqs-provider.git && \
-    cd oqs-provider && \
-    cmake -GNinja \
+# Build OQS-OpenSSL provider from local copy
+WORKDIR /opt/oqs-build/oqs-provider
+RUN cmake -GNinja \
         -DCMAKE_PREFIX_PATH=/opt/oqs \
         -DCMAKE_INSTALL_PREFIX=/opt/oqs \
+        -DBUILD_TESTING=OFF \
         -S . -B _build && \
     cmake --build _build && \
     cmake --install _build
+
+# Clean up build directory to reduce image size
+RUN rm -rf /opt/oqs-build
 
 # Set up environment for OQS
 ENV LD_LIBRARY_PATH=/opt/oqs/lib:$LD_LIBRARY_PATH
