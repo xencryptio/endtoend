@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, Trash2, RotateCcw } from 'lucide-react';
+import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, Trash2, RotateCcw, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -64,7 +64,8 @@ interface ScanRowProps {
   deletingId: number | null;
 }
 
-const ITEMS_PER_PAGE = 20;
+const PAGE_SIZE_OPTIONS = [5, 10, 20, 50];
+const DEFAULT_PAGE_SIZE = 10;
 
 const ScanRow = React.memo<ScanRowProps>(({ scan, onView, onRetry, onDelete, retryingId, deletingId }) => {
   const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
@@ -150,9 +151,14 @@ const ScanRow = React.memo<ScanRowProps>(({ scan, onView, onRetry, onDelete, ret
         }
       ]}
     >
-      {scan.current_status && (
+      {scan.scan_status === 'failed' && scan.error_detail ? (
+        <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2 mb-2">
+          <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{scan.error_detail}</span>
+        </div>
+      ) : scan.current_status ? (
         <div className="text-sm text-muted-foreground mb-2">{scan.current_status}</div>
-      )}
+      ) : null}
     </UnifiedResultCard>
   );
 });
@@ -203,6 +209,9 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
   const [retryingId, setRetryingId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'onboarded'>('scan');
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [historySearch, setHistorySearch] = useState('');
+  const [jumpPage, setJumpPage] = useState('');
   // Ref to detect unchanged polls and skip re-renders
   const scansSignatureRef = useRef('');
 
@@ -218,6 +227,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
         scansSignatureRef.current = newSig;
         setScans(data);
         setCurrentPage(1);
+        setHistorySearch('');
       }
       setIsLoading(false);
     } catch (error) {
@@ -484,7 +494,14 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
       const data = await response.json();
   
       if (!response.ok) {
-        throw new Error(data.detail || 'Scan failed');
+        throw new Error(data.detail?.message || data.detail || 'Scan failed');
+      }
+
+      // Backend now returns a failed record (HTTP 200) instead of throwing 4xx
+      if (data.scan_status === 'failed') {
+        showStatusMessage(`Scan failed: ${data.error_detail || data.current_status || 'Unknown error'}`, 'error');
+        await loadHistory();
+        return;
       }
   
       if (data.cached) {
@@ -595,12 +612,47 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     setCurrentView('detail');
   }, []);
 
-  // Pagination helpers (ScanRow defined above as React.memo)
-  const totalPages = Math.ceil(scans.length / ITEMS_PER_PAGE);
+  // Pagination + search helpers
+  const filteredScans = useMemo(() => {
+    if (!historySearch.trim()) return scans;
+    const q = historySearch.toLowerCase();
+    return scans.filter(s =>
+      s.repo_url?.toLowerCase().includes(q) ||
+      s.branch_name?.toLowerCase().includes(q) ||
+      s.scan_status?.toLowerCase().includes(q) ||
+      s.overall_grade?.toLowerCase().includes(q)
+    );
+  }, [scans, historySearch]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredScans.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
   const paginatedScans = useMemo(
-    () => scans.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
-    [scans, currentPage]
+    () => filteredScans.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filteredScans, safePage, pageSize]
   );
+
+  // Page number buttons with ellipsis (e.g. 1 … 4 5 6 … 12)
+  const pageButtons = useMemo(() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages: (number | '...')[] = [1];
+    if (safePage > 3) pages.push('...');
+    for (let p = Math.max(2, safePage - 1); p <= Math.min(totalPages - 1, safePage + 1); p++) pages.push(p);
+    if (safePage < totalPages - 2) pages.push('...');
+    pages.push(totalPages);
+    return pages;
+  }, [totalPages, safePage]);
+
+  const handlePageSizeChange = (val: string) => {
+    setPageSize(Number(val));
+    setCurrentPage(1);
+  };
+  const handleJumpPage = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const n = parseInt(jumpPage);
+      if (!isNaN(n)) setCurrentPage(Math.max(1, Math.min(totalPages, n)));
+      setJumpPage('');
+    }
+  };
 
   if (currentView === 'detail' && selectedScanId) {
     return (
@@ -802,31 +854,64 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
         {activeTab === 'history' && (
         <UnifiedCard>
           <div className="p-8">
-            <div className="flex justify-between items-center mb-6 pb-5 border-b">
-              <div>
-                <h2 className="text-2xl font-bold text-foreground tracking-tight">Scan History</h2>
-                <UnifiedInlineRefresh
-                  isRefreshing={isRefreshing && !autoRefresh}
-                  label=""
-                  size="md"
-                />
+            <div className="flex flex-col gap-4 mb-6 pb-5 border-b">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground tracking-tight">Scan History</h2>
+                  <p className="text-sm text-muted-foreground mt-0.5">{filteredScans.length} of {scans.length} repositories</p>
+                  <UnifiedInlineRefresh
+                    isRefreshing={isRefreshing && !autoRefresh}
+                    label=""
+                    size="md"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={deleteAllScans}
+                    disabled={deletingAll || isLoading}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    {deletingAll ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                    Clear All
+                  </Button>
+                  <UnifiedRefreshButton
+                    onClick={refreshHistory}
+                    isRefreshing={isRefreshing}
+                    autoRefresh={autoRefresh}
+                  />
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={deleteAllScans}
-                  disabled={deletingAll || isLoading}
-                  className="text-destructive hover:text-destructive"
-                >
-                  {deletingAll ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
-                  Clear All
-                </Button>
-                <UnifiedRefreshButton
-                  onClick={refreshHistory}
-                  isRefreshing={isRefreshing}
-                  autoRefresh={autoRefresh}
-                />
+
+              {/* Search + per-page controls */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={historySearch}
+                    onChange={e => { setHistorySearch(e.target.value); setCurrentPage(1); }}
+                    placeholder="Filter by URL, branch, status, grade…"
+                    className="w-full pl-9 pr-4 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                  {historySearch && (
+                    <button onClick={() => { setHistorySearch(''); setCurrentPage(1); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                      <XCircle className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground shrink-0">
+                  <span>Show</span>
+                  <select
+                    value={pageSize}
+                    onChange={e => handlePageSizeChange(e.target.value)}
+                    className="border rounded-md px-2 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  >
+                    {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <span>per page</span>
+                </div>
               </div>
             </div>
 
@@ -846,6 +931,14 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
                     <p className="text-sm text-muted-foreground">Start by scanning your first repository above</p>
                   </div>
                 </div>
+              ) : filteredScans.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="flex flex-col items-center justify-center space-y-4">
+                    <Search className="w-12 h-12 text-muted-foreground" />
+                    <p className="text-base font-medium text-foreground">No results for "{historySearch}"</p>
+                    <button onClick={() => setHistorySearch('')} className="text-sm text-primary hover:underline">Clear filter</button>
+                  </div>
+                </div>
               ) : (
                 <>
                   <div className="space-y-4">
@@ -863,32 +956,65 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
                   </div>
 
                   {/* Pagination controls */}
-                  {totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-6 pt-4 border-t">
+                  {totalPages >= 1 && filteredScans.length > 0 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6 pt-4 border-t">
                       <p className="text-sm text-muted-foreground">
-                        Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, scans.length)} of {scans.length} scans
+                        Showing {filteredScans.length === 0 ? 0 : (safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, filteredScans.length)} of {filteredScans.length} {historySearch ? 'filtered' : ''} scans
                       </p>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                          disabled={currentPage === 1}
-                        >
-                          Previous
+
+                      <div className="flex items-center gap-1">
+                        {/* First page */}
+                        <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setCurrentPage(1)} disabled={safePage === 1}>
+                          <ChevronsLeft className="w-4 h-4" />
                         </Button>
-                        <span className="text-sm font-medium px-2">
-                          Page {currentPage} / {totalPages}
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                          disabled={currentPage === totalPages}
-                        >
-                          Next
+                        {/* Prev */}
+                        <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={safePage === 1}>
+                          <ChevronLeft className="w-4 h-4" />
+                        </Button>
+
+                        {/* Page number buttons */}
+                        {pageButtons.map((p, i) =>
+                          p === '...' ? (
+                            <span key={`ellipsis-${i}`} className="h-8 w-8 flex items-center justify-center text-sm text-muted-foreground">…</span>
+                          ) : (
+                            <Button
+                              key={p}
+                              variant={p === safePage ? 'default' : 'outline'}
+                              size="sm"
+                              className="h-8 w-8 p-0 text-xs"
+                              onClick={() => setCurrentPage(p as number)}
+                            >
+                              {p}
+                            </Button>
+                          )
+                        )}
+
+                        {/* Next */}
+                        <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
+                        {/* Last page */}
+                        <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setCurrentPage(totalPages)} disabled={safePage === totalPages}>
+                          <ChevronsRight className="w-4 h-4" />
                         </Button>
                       </div>
+
+                      {/* Jump to page */}
+                      {totalPages > 5 && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground shrink-0">
+                          <span>Go to</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={totalPages}
+                            value={jumpPage}
+                            onChange={e => setJumpPage(e.target.value)}
+                            onKeyDown={handleJumpPage}
+                            placeholder={String(safePage)}
+                            className="w-14 border rounded-md px-2 py-1 text-sm text-center bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
