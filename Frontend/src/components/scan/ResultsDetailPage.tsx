@@ -294,6 +294,7 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
 
   const isSuccess = result.scan_status?.toLowerCase() === "completed";
   const rawData = result.raw_response || {};
+  const scannerReport = rawData.scanner_report || null;
   const pqcAnalysis = rawData.pqc_analysis || {};
   const pqcScore = pqcAnalysis.overall_score ?? result.quantum_score ?? null;
   const pqcGrade = pqcAnalysis.overall_grade ?? result.quantum_grade ?? "F";
@@ -312,6 +313,9 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
   const components: Record<string, ComponentScore> | undefined = pqcAnalysis.components;
   const serverIp: string = rawData.server_ip || "";
   const serverPort: number | null = rawData.port || null;
+  const sslGrade = scannerReport?.endpoints?.[0]?.grade
+    || scannerReport?.endpoints?.[0]?.gradeTrustIgnored
+    || "";
   const scoreNum = typeof pqcScore === "number" ? pqcScore : 0;
 
   const tls13Suites: any[] = (tlsConfig["tls_1.3_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.3' }));
@@ -348,9 +352,14 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
             {result.tls_version && <><span className="text-muted-foreground/40 hidden sm:block">·</span><span className="text-xs text-muted-foreground hidden sm:block">{result.tls_version}</span></>}
           </div>
           {pqcScore !== null && (
-            <div className="ml-auto flex-shrink-0">
+            <div className="ml-auto flex-shrink-0 flex items-center gap-2">
               <span className={`text-sm font-black ${gradeColor(pqcGrade as string)}`}>{pqcGrade}</span>
-              <span className="text-xs text-muted-foreground ml-1">{scoreNum.toFixed(1)}/100</span>
+              <span className="text-xs text-muted-foreground">{scoreNum.toFixed(1)}/100</span>
+              {sslGrade && (
+                <span className={`px-2 py-0.5 rounded border text-[10px] font-bold bg-muted/30 ${gradeBorder(sslGrade)}`}>
+                  SSL {sslGrade}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -393,6 +402,11 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-4">
                       {result.tls_version && <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border">{result.tls_version}</span>}
+                      {sslGrade && (
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold border bg-muted/40 ${gradeBorder(sslGrade)}`}>
+                          SSL Grade {sslGrade}
+                        </span>
+                      )}
                       <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
                         quantumReady ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
                           : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'}`}>
@@ -657,7 +671,14 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 <Card className="border">
                   <CardHeader className="border-b py-3 px-4"><CardTitle className="text-sm font-semibold">Raw JSON</CardTitle></CardHeader>
                   <CardContent className="p-0">
-                    <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-muted/30">{JSON.stringify(result, null, 2)}</pre>
+                    <div className="border-b border-border/60">
+                      <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">Scanner Report (raw)</div>
+                      <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-muted/30">{JSON.stringify(scannerReport || rawData, null, 2)}</pre>
+                    </div>
+                    <div>
+                      <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">Stored Scan Record</div>
+                      <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-muted/30">{JSON.stringify(result, null, 2)}</pre>
+                    </div>
                   </CardContent>
                 </Card>
               )}

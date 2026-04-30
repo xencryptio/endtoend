@@ -1227,6 +1227,48 @@ export default function PQCDashboard() {
     );
   }
 
+  // Check if all data sources are empty
+  const hasNoData = 
+    (!networkData || networkData.length === 0) &&
+    (!codeData || codeData.length === 0) &&
+    (!systemData || systemData.length === 0);
+
+  if (hasNoData) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="max-w-md w-full text-center border border-border bg-card rounded-xl p-10 space-y-4">
+          <div className="relative">
+            <Shield className="w-20 h-20 text-muted-foreground/30 mx-auto" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 border-4 border-dashed border-muted-foreground/20 rounded-full" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-foreground">No Vulnerability Data</h2>
+          <p className="text-sm text-muted-foreground">
+            No scans, repositories, or system agents have been analyzed yet.
+            Start by scanning a domain, analyzing code, or collecting system data.
+          </p>
+          <div className="flex gap-3 justify-center pt-2">
+            <button
+              onClick={() => window.location.href = "/scan"}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90"
+            >
+              <Globe className="w-4 h-4" /> Scan Domain
+            </button>
+            <button
+              onClick={() => {
+                void Promise.all([refetchNetwork(), refetchCode(), refetchSystem()]);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-muted text-foreground hover:bg-muted/80"
+            >
+              <RefreshCw className="w-4 h-4" /> Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <style>{`
