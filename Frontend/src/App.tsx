@@ -8,9 +8,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { AnimatePresence } from "framer-motion";
 import Dashboard from "./pages/Dashboard";
 import Applications from "./pages/Applications";
-import Vulnerabilities from "./pages/Vulnerabilities";
 import Vulnerabilities2 from "./pages/Vulnerabilities2";
-import VulnerabilitiesNew from "./pages/VulnerabilitiesNew";
 import Profile from "./pages/Profile";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
@@ -47,10 +45,6 @@ const AnimatedRoutes = () => {
         {/* Existing routes */}
         <Route path="/applications" element={<Applications />} />
         <Route path="/vulnerabilities" element={<Vulnerabilities2 />} />
-        <Route path="/vulnerabilities2" element={<Vulnerabilities2 />} />
-        <Route path="/Vulnerabilities2" element={<Vulnerabilities2 />} />
-        <Route path="/vulnerabilities-new" element={<VulnerabilitiesNew />} />
-        <Route path="/vulnerabilities-legacy" element={<Vulnerabilities />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/scans" element={<Scan />} />
         <Route path="/assets-scans" element={<SystemScan />} />

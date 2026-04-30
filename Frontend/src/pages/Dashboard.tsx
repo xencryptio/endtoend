@@ -16,6 +16,13 @@ import {
 } from "lucide-react";
 import type { OrganizationDashboard, ApplicationSummary } from "@/types/dashboardTypes";
 import { dedupeApplications, getRiskBadgeClass, getScoreTextClass } from "@/utils/dashboardUtils";
+import {
+  QDayCountdown,
+  HybridCryptoGauge,
+  PQCScoreBreakdown,
+  AlgorithmMigrationBoard,
+  QuantumThreatHeatmap
+} from "@/components/pqc";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const RISK_COLORS: Record<string, string> = {
@@ -376,6 +383,40 @@ export default function Dashboard() {
         <StatCard icon={Shield} label="PQC Readiness" value={`${summary.pqc_readiness_percent}%`}
           sub="Combined score" color="bg-purple-100 dark:bg-purple-950/30 text-purple-600 dark:text-purple-400" />
       </div>
+
+      {/* ── PQC-Focused Widgets ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <QDayCountdown />
+        <HybridCryptoGauge 
+          adoptionPercent={Math.round((adjustedApps.filter(a => a._adjPQC >= 80).length / (adjustedApps.length || 1)) * 100)}
+          totalApps={adjustedApps.length}
+          hybridApps={adjustedApps.filter(a => a._adjPQC >= 80).length}
+        />
+        <PQCScoreBreakdown
+          kexScore={75}
+          signatureScore={65}
+          symmetricScore={summary.pqc_readiness_percent}
+          hashScore={90}
+          overallScore={summary.pqc_readiness_percent}
+        />
+      </div>
+
+      {/* ── Algorithm Migration Board ── */}
+      <AlgorithmMigrationBoard />
+
+      {/* ── Quantum Threat Heatmap ── */}
+      {subOrgData.length > 0 && (
+        <QuantumThreatHeatmap 
+          subOrgs={subOrgData.map(so => ({
+            id: so.id,
+            name: so.name,
+            appsCount: so.apps,
+            avgPqcScore: so.avgPQC,
+            riskLevel: so.avgPQC >= 80 ? 'Low' : so.avgPQC >= 60 ? 'Medium' : so.avgPQC >= 40 ? 'High' : 'Very High',
+            vulnerabilities: so.vulns
+          }))}
+        />
+      )}
 
       {/* ── PQC score arc + trend timeline ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
