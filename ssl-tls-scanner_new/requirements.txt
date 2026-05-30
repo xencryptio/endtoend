@@ -1,0 +1,5 @@
+cryptography>=3.4
+dnspython>=2.1
+certifi>=2021.1
+fastapi>=0.110
+uvicorn>=0.29

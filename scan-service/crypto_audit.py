@@ -5,7 +5,6 @@ import sys
 import asyncio
 import base64
 import requests
-import subprocess
 import contextlib
 import uuid
 from urllib.parse import urlparse
@@ -41,8 +40,14 @@ logger = logging.getLogger(__name__)
 # --- Remote Scoring Configuration ---
 SCORING_SERVICE_URL = os.getenv("SCORING_SERVICE_URL", "http://localhost:9500")
 
-# --- Feature Flag for Internal Scanner ---
-USE_INTERNAL_SCANNER = os.getenv("USE_INTERNAL_SCANNER", "true") == "true"
+# --- External Scanner Configuration ---
+EXTERNAL_TLS_SCANNER_URL = os.getenv("EXTERNAL_TLS_SCANNER_URL", "http://ssl-tls-scanner-new:8010")
+
+# --- PQ Scanner Configuration ---
+OQS_PQ_SCANNER_URL = os.getenv("OQS_PQ_SCANNER_URL", "http://oqs-pq-scanner:8011")
+
+# --- Feature Flag for Internal Scanner (default: false) ---
+USE_INTERNAL_SCANNER = os.getenv("USE_INTERNAL_SCANNER", "false") == "true"
 
 def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:  # noqa: C901
     """Transform TLS scan data into the standard algorithm-scoring payload.
@@ -89,6 +94,7 @@ def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:  # noqa: C9
         "X25519KYBER768DRAFT00": 256, "X25519KYBER512DRAFT00": 256,
         "P256KYBER512DRAFT00": 256, "P384KYBER768DRAFT00": 384,
         "SECP256R1MLKEM768": 256, "SECP384R1MLKEM1024": 384,
+        "SECP256R1KYBER768": 256, "SECP256R1-MLKEM768": 256,
         "MLKEM768": 3168, "MLKEM1024": 6528, "KYBER768": 3168,
     }
 
@@ -1136,7 +1142,15 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
         "execution_time_seconds": 0  # Will be set by caller if needed, or default to 0
     }
 
-def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout: int, progress_tracker=None, max_backoff_retries: int = 3) -> Dict[str, Any]:
+def handle_scan_with_backoff(
+    domain: str,
+    use_cache: bool,
+    attempt: int,
+    timeout: int,
+    save_to_db: bool = False,
+    progress_tracker=None,
+    max_backoff_retries: int = 3
+) -> Dict[str, Any]:
     """
     Wrapper that handles rate limiting with exponential backoff.
     This runs in a separate thread, so it needs its own event loop.
@@ -1146,7 +1160,16 @@ def handle_scan_with_backoff(domain: str, use_cache: bool, attempt: int, timeout
         asyncio.set_event_loop(loop)
         for retry in range(max_backoff_retries):
             try:
-                return loop.run_until_complete(process_single_domain(domain, use_cache, attempt, timeout, progress_tracker=progress_tracker))
+                return loop.run_until_complete(
+                    process_single_domain(
+                        domain,
+                        use_cache,
+                        attempt,
+                        timeout,
+                        save_to_db=save_to_db,
+                        progress_tracker=progress_tracker,
+                    )
+                )
             except RateLimitException:
                 if retry < max_backoff_retries - 1:
                     wait_time = (2 ** retry) * 5  # 5s, 10s, 20s
@@ -1175,22 +1198,22 @@ async def run_internal_scanner(domain: str, timeout: int = 300, progress_tracker
     try:
         # Extract clean hostname (domain is already normalized with protocol)
         hostname = extract_hostname(domain)
-        
+
         # Preserve original protocol from normalized input
         protocol = detect_protocol(domain)
         url = f"{protocol}://{hostname}"
-        
+
         logger.info(f"Starting internal scan: {hostname}")
-        
+
         # Call internal scanner
         scan_result = await internal_scan_domain(url, timeout=timeout, progress_tracker=progress_tracker)
-        
+
         # Transform to SSL Labs format
         ssllabs_format = transform_internal_scan_to_ssllabs_format(scan_result)
-        
+
         logger.info(f"Internal scan completed for {hostname}")
         return [ssllabs_format]  # Wrap in list to match SSL Labs format
-        
+
     except Exception as e:
         logger.error(f"Internal scanner failed for {domain}: {e}")
         raise APIError(
@@ -1198,6 +1221,103 @@ async def run_internal_scanner(domain: str, timeout: int = 300, progress_tracker
             error_code="scan_failed",
             message=f"Internal scan failed for {domain}: {str(e)}"
         )
+
+
+async def run_external_scanner(domain: str, timeout: int = 300) -> dict:
+    """Call the external SSL/TLS scanner service and return SSL Labs format."""
+    hostname = extract_hostname(domain)
+    payload = {"host": hostname, "port": 443}
+    try:
+        response = await call_service(
+            "POST",
+            f"{EXTERNAL_TLS_SCANNER_URL}/scan",
+            json=payload,
+            timeout=timeout,
+        )
+        if response.status_code != 200:
+            raise APIError(
+                status_code=response.status_code,
+                error_code="external_scan_failed",
+                message=f"External scanner failed for {hostname}",
+                details={"status_code": response.status_code, "body": response.text},
+            )
+        return [response.json()]
+    except APIError:
+        raise
+    except Exception as e:
+        logger.error(f"External scanner failed for {hostname}: {e}")
+        raise APIError(
+            status_code=500,
+            error_code="external_scan_failed",
+            message=f"External scan failed for {hostname}: {str(e)}",
+        )
+
+
+async def detect_pq_groups(hostname: str, port: int = 443, timeout: int = 30) -> List[Dict]:
+    """
+    Call OQS PQ scanner to detect ML-KEM/Kyber hybrid groups.
+    Returns list of detected PQ groups or empty list if detection fails.
+    """
+    try:
+        logger.info(f"Detecting PQ groups for {hostname} using OQS scanner")
+        
+        response = await call_service(
+            "POST",
+            f"{OQS_PQ_SCANNER_URL}/scan-pq",
+            json={"host": hostname, "port": port, "timeout": timeout},
+            timeout=timeout + 5,
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            pq_groups = result.get("pq_groups", [])
+            logger.info(f"PQ detection complete: {len(pq_groups)} groups found")
+            return pq_groups
+        else:
+            logger.warning(f"PQ scanner returned {response.status_code}, skipping PQ detection")
+            return []
+            
+    except Exception as e:
+        logger.warning(f"PQ detection failed for {hostname}: {e}, continuing without PQ data")
+        return []
+
+
+def merge_pq_groups_into_scan(scan_result: Dict, pq_groups: List[Dict]) -> None:
+    """
+    Merge PQ hybrid groups into the scan result namedGroups section.
+    Modifies scan_result in place.
+    """
+    if not pq_groups:
+        return
+    
+    # Navigate to namedGroups in the SSL Labs format
+    if isinstance(scan_result, list) and len(scan_result) > 0:
+        endpoint = scan_result[0].get("endpoints", [{}])[0]
+        details = endpoint.get("details", {})
+        named_groups = details.get("namedGroups", {})
+        
+        if "list" not in named_groups:
+            named_groups["list"] = []
+        
+        existing_ids = {g.get("id") for g in named_groups["list"]}
+        
+        # Add PQ groups that aren't already detected
+        for pq_group in pq_groups:
+            if pq_group.get("id") not in existing_ids:
+                named_groups["list"].append({
+                    "id": pq_group["id"],
+                    "name": pq_group["name"],
+                    "bits": pq_group["bits"],
+                    "namedGroupType": pq_group["type"]
+                })
+                logger.info(f"Added PQ group: {pq_group['name']}")
+
+
+async def run_scanner(domain: str, timeout: int = 300, progress_tracker=None) -> dict:
+    """Select internal or external scanner based on configuration."""
+    if USE_INTERNAL_SCANNER:
+        return await run_internal_scanner(domain, timeout=timeout, progress_tracker=progress_tracker)
+    return await run_external_scanner(domain, timeout=timeout)
 
 def detect_protocol(domain: str) -> str:
     """Extract protocol from normalized domain input."""
@@ -1220,6 +1340,15 @@ def quick_domain_check(domain: str, timeout: int = 2) -> tuple[bool, str]:
     except Exception as e:
         return False, f"An unexpected error occurred during DNS check for {domain}: {e}"
 
+
+def generate_scan_request_id(domain: str) -> str:
+    """Generate a stable, unique request_id for one scan lifecycle."""
+    try:
+        host = extract_hostname(domain).replace(".", "_").replace(":", "_")
+    except Exception:
+        host = "scan"
+    return f"{host}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
+
 async def process_single_domain(
     domain: str, 
     use_cache: bool = True, 
@@ -1229,6 +1358,7 @@ async def process_single_domain(
     progress_tracker=None  # ADD THIS PARAMETER
 ) -> Dict[str, Any]:
     """Process a single domain scan, with HTTP/HTTPS logic. Each scan is independent."""
+    request_id = generate_scan_request_id(domain)
     
     # Register domain with tracker
     if progress_tracker:
@@ -1239,6 +1369,12 @@ async def process_single_domain(
 
     # 1. Protocol Detection
     protocol = detect_protocol(domain)
+
+    if save_to_db:
+        try:
+            await db_handler.save_pending_scan(domain, request_id)
+        except Exception as pending_error:
+            logger.warning(f"Failed to create pending scan record for {domain}: {pending_error}")
     
     if progress_tracker:
         progress_tracker.complete_phase(domain, "protocol_check")
@@ -1246,15 +1382,21 @@ async def process_single_domain(
     if protocol != "https":
         error_message = f"Domain is {protocol.upper()} and cannot be scanned (TLS/SSL only)."
         logger.warning(f"Skipping {domain}: {error_message}")
-        
-        request_id = f"{domain}_{int(datetime.now().timestamp())}"
-        
+
         transformed_result = {
             "domain": domain,
             "scan_status": "http_skipped",
             "error_detail": error_message,
         }
-        return format_result_for_frontend(transformed_result, request_id)
+        result = format_result_for_frontend(transformed_result, request_id)
+        if save_to_db:
+            try:
+                await db_handler.save_scan_result(result)
+            except Exception as save_error:
+                logger.error(f"Failed to save http_skipped result for {domain}: {save_error}")
+        if progress_tracker:
+            progress_tracker.mark_domain_completed(domain)
+        return result
 
     # 2. Proceed with HTTPS scan
     scan_start_time = datetime.now()
@@ -1265,11 +1407,26 @@ async def process_single_domain(
         if not is_resolvable:
             raise APIError(status_code=503, error_code="dns_resolution_failed", message=error_msg)
         
-        # Run internal scanner
-        raw_result = await run_internal_scanner(domain, timeout=timeout, progress_tracker=progress_tracker)
+        # Run scanner (external by default)
+        raw_result = await run_scanner(domain, timeout=timeout, progress_tracker=progress_tracker)
+        
+        # ✅ NEW: Detect PQ hybrid groups using OQS scanner
+        hostname = extract_hostname(domain)
+        pq_groups = await detect_pq_groups(hostname, port=443, timeout=30)
+        
+        # Merge PQ groups into scanner results
+        if pq_groups:
+            merge_pq_groups_into_scan(raw_result, pq_groups)
+            logger.info(f"Merged {len(pq_groups)} PQ groups into scan results")
         
         # Transform result
         transformed_result = transform_scan_result(raw_result)
+
+        # Preserve original scanner report (SSL Labs format) for UI/debugging
+        if isinstance(raw_result, list):
+            transformed_result["scanner_report"] = raw_result[0] if len(raw_result) == 1 else raw_result
+        else:
+            transformed_result["scanner_report"] = raw_result
         
         if progress_tracker:
             progress_tracker.start_phase(domain, "scoring")
@@ -1290,7 +1447,6 @@ async def process_single_domain(
         }
         transformed_result["scan_status"] = "completed"
         
-        request_id = f"{domain}_{int(datetime.now().timestamp())}"
         result = format_result_for_frontend(transformed_result, request_id)
         
         # Calculate execution time
@@ -1313,9 +1469,20 @@ async def process_single_domain(
 
         return result
     
-    except APIError:
+    except APIError as e:
+        if save_to_db:
+            try:
+                error_message = e.detail.get("message") if isinstance(e.detail, dict) else str(e)
+                await db_handler.save_failed_scan(domain, error_message, request_id)
+            except Exception as save_error:
+                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
         raise
     except Exception as e:
+        if save_to_db:
+            try:
+                await db_handler.save_failed_scan(domain, str(e), request_id)
+            except Exception as save_error:
+                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
         logger.exception(f"❌ Unexpected error scanning {domain}")
         raise APIError(
             status_code=500, 
@@ -1387,7 +1554,14 @@ async def scan_domain(request: ScanRequest):
             
             with ThreadPoolExecutor(max_workers=min(request.max_concurrent, len(domains_to_scan))) as executor:
                 future_to_domain = {
-                    executor.submit(handle_scan_with_backoff, domain, use_cache, round_num, current_timeout): domain 
+                    executor.submit(
+                        handle_scan_with_backoff,
+                        domain,
+                        use_cache,
+                        round_num,
+                        current_timeout,
+                        request.save_to_db,
+                    ): domain 
                     for domain in domains_to_scan
                 }
                 
@@ -1404,42 +1578,18 @@ async def scan_domain(request: ScanRequest):
                         retry_state.add_success(result)
                         retry_state.remove_success(domain)
                         logger.info(f"[{round_num}] Success: {domain}")
-                        
-                        # Save each result independently to database
-                        if request.save_to_db:
-                            try:
-                                await db_handler.save_scan_result(result)
-                                logger.info(f"✅ Saved result for {domain}")
-                            except Exception as save_error:
-                                logger.error(f"Failed to save result for {domain}: {save_error}")
-                        
+
                         time.sleep(5)  # Delay between scans
                         
                     except HTTPException as e:
                         if e.status_code == 429:
                             logger.warning(f"[{round_num}] Rate Limited: {domain} - will retry with backoff")
                         retry_state.add_failure(domain, e.detail, round_num)
-                        logger.error(f"[{round_num} Failed: {domain} - {e.detail}")
-                        
-                        # Save failed scan to database
-                        if request.save_to_db:
-                            request_id = f"{domain}_{int(datetime.now().timestamp())}"
-                            try:
-                                await db_handler.save_failed_scan(domain, e.detail, request_id)
-                            except Exception as save_error:
-                                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
+                        logger.error(f"[{round_num}] Failed: {domain} - {e.detail}")
                         
                     except Exception as e:
                         retry_state.add_failure(domain, str(e), round_num)
                         logger.error(f"[{round_num}] Failed: {domain} - {str(e)}")
-                        
-                        # Save failed scan to database
-                        if request.save_to_db:
-                            request_id = f"{domain}_{int(datetime.now().timestamp())}"
-                            try:
-                                await db_handler.save_failed_scan(domain, str(e), request_id)
-                            except Exception as save_error:
-                                logger.error(f"Failed to save failed scan for {domain}: {save_error}")
             
             # Update domains to scan for next round
             domains_to_scan = retry_state.get_failed_domains()
@@ -1521,6 +1671,7 @@ async def scan_with_progress(request: ScanRequest):
                         use_cache,
                         round_num,
                         current_timeout,
+                        request.save_to_db,
                         tracker
                     ): domain
                     for domain in domains_to_scan
@@ -1530,14 +1681,7 @@ async def scan_with_progress(request: ScanRequest):
                     domain = future_to_domain[future]
                     try:
                         result = future.result()
-                        
-                        # Save each result independently
-                        if request.save_to_db:
-                            try:
-                                await db_handler.save_scan_result(result)
-                            except Exception as save_error:
-                                logger.error(f"Failed to save result for {domain}: {save_error}")
-                        
+
                         # SEND PROGRESS UPDATE
                         yield f"data: {json.dumps(tracker.get_progress_snapshot())}\n\n"
                         
@@ -1614,21 +1758,15 @@ async def cancel_scan(request_id: str):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint for internal scanner mode."""
     logger.info("Health check called")
     try:
-        subprocess.run(
-            ["ssllabs-scan", "--help"],
-            capture_output=True,
-            timeout=5
-        )
         return {
             "status": "healthy",
-            "ssllabs_cli": "available",
+            "scanner_mode": "internal",
+            "ssllabs_cli": "not_required",
             "version": "4.0"
         }
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        raise APIError(status_code=503, error_code="cli_not_available", message="ssllabs-scan CLI not available or timed out")
     except Exception as e:
         logger.exception(f"Health check failed: {str(e)}")
         raise APIError(status_code=500, error_code="health_check_failed", message=f"Health check failed: {str(e)}")

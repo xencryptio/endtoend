@@ -9,35 +9,19 @@ WORKDIR /app
 # STAGE 1: Install system dependencies
 # ============================================================================
 RUN apt-get update && apt-get install -y \
-    # Go compiler for ssllabs-scan
-    golang \
-    git \
     # Network utilities for health checks
     curl \
     # Cleanup to reduce image size
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
-# STAGE 2: Install ssllabs-scan CLI (Go binary)
-# ============================================================================
-RUN go install github.com/ssllabs/ssllabs-scan@latest
-
-# Add Go binaries to PATH
-ENV PATH="/root/go/bin:${PATH}"
-
-# Verify ssllabs-scan installation
-RUN ssllabs-scan --help
-
-# ============================================================================
-# STAGE 3: Install Python dependencies
+# STAGE 2: Install Python dependencies
 # ============================================================================
 COPY requirements.txt .
-
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
 # ============================================================================
-# STAGE 4: Copy ALL Python files and tls_scanner package
+# STAGE 3: Copy ALL Python files and tls_scanner package
 # ============================================================================
 # Copy root-level Python files
 COPY *.py .
@@ -46,7 +30,7 @@ COPY *.py .
 COPY tls_scanner/ ./tls_scanner/
 
 # ============================================================================
-# STAGE 5: Configuration
+# STAGE 4: Configuration
 # ============================================================================
 
 # Expose port

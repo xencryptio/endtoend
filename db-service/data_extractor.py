@@ -135,11 +135,27 @@ def extract_certificate_fields(raw_response: Dict[str, Any]) -> Dict[str, Any]:
     cert_chain = raw_response.get("certificate_chain", {})
     leaf_cert = cert_chain.get("leaf_certificate", {})
 
+    def _to_datetime(value: Any) -> Optional[datetime]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            # Accept seconds or milliseconds since epoch
+            ts = float(value)
+            if ts > 1e12:
+                ts = ts / 1000.0
+            return datetime.fromtimestamp(ts)
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value)
+            except Exception:
+                return None
+        return None
+
     return {
         "cert_subject": leaf_cert.get("subject") or None,
         "cert_issuer": leaf_cert.get("issuer") or None,
-        "cert_not_before": leaf_cert.get("valid_from") or None,
-        "cert_not_after": leaf_cert.get("valid_until") or None,
+        "cert_not_before": _to_datetime(leaf_cert.get("valid_from")),
+        "cert_not_after": _to_datetime(leaf_cert.get("valid_until")),
         "public_key_algorithm": leaf_cert.get("public_key_algorithm") or None,
         "public_key_size_bits": leaf_cert.get("public_key_size") or None,
         "cert_pqc_score": leaf_cert.get("cert_pqc_score"),

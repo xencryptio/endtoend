@@ -246,7 +246,7 @@ CRYPTO_PATTERNS = {
         'category': 'Symmetric Encryption'
     },
     'Blowfish': {
-        'patterns': [r'\bBlowfish\b', r'\bblowfish\b', r'BF_'],
+        'patterns': [r'\bBlowfish\b', r'\bblowfish\b', r'\bBF_'],  # \bBF_ prevents matching ctbf_, tbf_ (NTT butterfly ops)
         'quantum_resistance_type': 'grover_resistant',
         'min_quantum_safe_keysize': 256,
         'category': 'Symmetric Encryption'
@@ -731,17 +731,128 @@ CRYPTO_PATTERNS = {
     },
 }
 
+# ══════════════════════════════════════════════════════════════════════════════
+# FILE TYPE CLASSIFICATION - Prevents False Positives
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ACTUAL CODE FILES - These are scanned for real crypto implementations
 CODE_EXTENSIONS = {
     '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', '.hpp', 
     '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.sh', 
     '.bash', '.zsh', '.pl', '.lua', '.r', '.m', '.mm', '.dart', '.groovy',
     '.clj', '.ex', '.exs', '.erl', '.hrl', '.ml', '.fs', '.vb', '.pas',
     '.html', '.htm', '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
-    '.yaml', '.yml', '.json', '.toml', '.xml', '.ini', '.conf', '.config',
-    '.properties', '.env', '.gradle', '.cmake', '.make', '.mk', '.dockerfile', 
-    '.md', '.rst', '.txt', '.asciidoc', '.asm', '.s', '.sql', '.proto', 
-    '.thrift', '.graphql'
+    '.asm', '.s', '.sql', '.proto', '.thrift', '.graphql'
 }
+
+# DOCUMENTATION/SCHEMA FILES - These often contain algorithm names in descriptions
+# Findings from these files are marked as 'documentation_reference' and excluded from scoring
+DOCUMENTATION_EXTENSIONS = {
+    '.json', '.yaml', '.yml', '.xml', '.toml', '.ini', '.conf', '.config',
+    '.properties', '.md', '.rst', '.txt', '.asciidoc', '.env'
+}
+
+# BUILD/PACKAGE FILES - Lock files, build configs (usually contain hashes for integrity)
+BUILD_EXTENSIONS = {
+    '.gradle', '.cmake', '.make', '.mk', '.dockerfile', 'package-lock.json',
+    'yarn.lock', 'composer.lock', 'Gemfile.lock', 'Pipfile.lock', 'poetry.lock'
+}
+
+# DIRECTORIES TO SKIP - Test data, examples, and vendor code
+SKIP_DIRECTORIES = {
+    'test', 'tests', '__tests__', 'testdata', 'test_data', 'testcase', 'testcases',
+    'mock', 'mocks', '__mocks__', 'fixtures',
+    'example', 'examples', 'sample', 'samples', 'demo', 'demos',
+    'vendor', 'node_modules', 'dist', 'build', '.git', '.github',
+    'docs', 'documentation', 'spec', 'specs',
+    'vectors', 'vector',  # Crypto test-vector directories (e.g. pyca/cryptography)
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FALSE POSITIVE FILTERS - Exclude non-crypto artifacts
+# ══════════════════════════════════════════════════════════════════════════════
+
+def is_false_positive(algorithm: str, context: str, match_text: str) -> bool:
+    """
+    Detects false positives - algorithm names that are NOT actual crypto code.
+    Returns True if this is a false positive (should be excluded).
+    
+    Common false positives:
+    - SSH keys (ssh-rsa, ssh-dss, etc.)
+    - API endpoint URLs containing hash names  
+    - Description/documentation strings
+    - AWS signature algorithm parameters
+    - File paths and URLs
+    """
+    context_lower = context.lower()
+    match_lower = match_text.lower()
+    
+    # ── RSA False Positives ────────────────────────────────────────────────
+    if algorithm == 'RSA':
+        # SSH public/private keys (ssh-rsa, ssh-dss)
+        if 'ssh-rsa' in context_lower or 'ssh-dss' in context_lower:
+            logger.debug(f"FP: RSA match in SSH key context: {context[:80]}")
+            return True
+        
+        # PEM certificate headers
+        if '-----begin' in context_lower or '-----end' in context_lower:
+            logger.debug(f"FP: RSA match in certificate context: {context[:80]}")
+            return True
+    
+    # ── MD5 False Positives ────────────────────────────────────────────────
+    if algorithm in ['MD5', 'SHA-1', 'SHA-256', 'SHA-512', 'SHA-384']:
+        # AWS signature algorithms in URLs
+        if 'x-amz-algorithm=aws4-hmac-' in context_lower:
+            logger.debug(f"FP: {algorithm} in AWS signature URL: {context[:80]}")
+            return True
+        
+        # Content-MD5 HTTP headers in examples/docs
+        if 'content-md5' in context_lower and ('"' in context or "'" in context):
+            logger.debug(f"FP: {algorithm} in HTTP header example: {context[:80]}")
+            return True
+        
+        # File integrity checksums in documentation
+        if any(keyword in context_lower for keyword in ['checksum', 'hash of the', 'digest of the', 'integrity check']):
+            logger.debug(f"FP: {algorithm} in checksum documentation: {context[:80]}")
+            return True
+    
+    # ── General Documentation Patterns ─────────────────────────────────────
+    # JSON/YAML description fields
+    if '"description"' in context_lower or "'description'" in context_lower:
+        logger.debug(f"FP: {algorithm} in description field: {context[:80]}")
+        return True
+    
+    # Algorithm names in URLs/endpoints
+    if context.startswith('http://') or context.startswith('https://') or '://' in context:
+        logger.debug(f"FP: {algorithm} in URL: {context[:80]}")
+        return True
+    
+    # File paths or base64 data (long alphanumeric strings)
+    if len(match_text) > 20 and match_text.replace('/', '').replace('+', '').replace('=', '').isalnum():
+        logger.debug(f"FP: {algorithm} match looks like base64/hash data: {match_text[:40]}")
+        return True
+
+    # ── Assembly Register Alias False Positives ────────────────────────────
+    # ARM/x86 assembly: variable names like 'des .req x11' or '.unreq des'
+    # Pattern: word used as register alias, not as crypto algorithm
+    if algorithm in ['DES', '3DES', 'AES', 'RSA', 'RC4']:
+        if '.req ' in context or 'unreq ' in context or 'unreq\t' in context:
+            logger.debug(f"FP: {algorithm} match in assembly register alias: {context[:80]}")
+            return True
+        # Assembly instruction operand: 'add des, x4, #0' or 'st1 ...[des]...'
+        if '[' + match_lower + ']' in context_lower or (', ' + match_lower + ',' in context_lower and '#' in context):
+            logger.debug(f"FP: {algorithm} match as assembly instruction operand: {context[:80]}")
+            return True
+
+    # ── NTT Butterfly False Positives (Blowfish) ───────────────────────────
+    # NTT butterfly functions: ctbf_*, tbf_* — nothing to do with Blowfish cipher
+    # (caught by \bBF_ pattern fix above, but extra safety)
+    if algorithm == 'Blowfish' and match_lower in ('bf_',):
+        if any(k in context_lower for k in ['ctbf_', 'tbf_', 'gsbi_', 'butterfly', 'ntt']):
+            logger.debug(f"FP: Blowfish match in NTT butterfly context: {context[:80]}")
+            return True
+
+    return False
 
 # ---------------------------------------------------------------------------
 # Comment-aware extraction helpers
@@ -1054,6 +1165,42 @@ class Database:
         db.refresh(repo)
         return repo.id
 
+    def create_failed_scan_record(self, db: Session, repo_url: str, branch_name: str, platform: str, error_message: str) -> int:
+        """Create (or update) a scan record with 'failed' status for a clone/network error."""
+        import hashlib as _hashlib
+        # Try to find the most-recent existing record for this URL+branch so retry updates in-place
+        existing = (
+            db.query(Repository)
+            .filter(Repository.repo_url == repo_url, Repository.branch_name == branch_name)
+            .order_by(Repository.created_at.desc())
+            .first()
+        )
+        if existing and existing.scan_status in ('failed', 'pending'):
+            existing.scan_status = 'failed'
+            existing.current_status = error_message
+            existing.last_scanned = datetime.utcnow()
+            db.commit()
+            db.refresh(existing)
+            return existing.id
+
+        # Generate a unique placeholder hash so the unique constraint passes
+        placeholder_hash = 'failed_' + _hashlib.md5(
+            f"{repo_url}{branch_name}{datetime.utcnow().isoformat()}".encode()
+        ).hexdigest()[:12]
+        repo = Repository(
+            repo_url=repo_url,
+            repo_hash=placeholder_hash,
+            branch_name=branch_name,
+            platform=platform,
+            scan_status='failed',
+            current_status=error_message,
+            last_scanned=datetime.utcnow(),
+        )
+        db.add(repo)
+        db.commit()
+        db.refresh(repo)
+        return repo.id
+
     def get_pending_scans(self, db: Session) -> List[Dict]:
         """Get all pending scans ordered by creation time"""
         scans = db.query(Repository).filter(Repository.scan_status == 'pending').order_by(Repository.created_at.asc()).all()
@@ -1254,9 +1401,10 @@ class Database:
         """Get list of scans with pagination to avoid large payloads"""
         limit = max(1, min(limit, 500))  # safety bounds
         offset = max(0, offset)
+        from sqlalchemy import func as _sqlfunc
         scans = (
             db.query(Repository)
-            .order_by(Repository.last_scanned.desc())
+            .order_by(_sqlfunc.coalesce(Repository.last_scanned, Repository.created_at).desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -1289,7 +1437,8 @@ class Database:
                 'total_files_to_scan': scan.total_files_to_scan,
                 'overall_security_score': scan.overall_security_score,
                 'overall_grade': scan.overall_grade,
-                'quantum_readiness_percentage': round(quantum_readiness_percentage, 2)
+                'quantum_readiness_percentage': round(quantum_readiness_percentage, 2),
+                'error_detail': scan.current_status if scan.scan_status == 'failed' else None,
             })
         return result
 
@@ -1356,12 +1505,35 @@ class CryptoScanner:
         return hasher.hexdigest()
     
     def get_all_code_files(self) -> List[Path]:
-        """Collects all code files to scan"""
+        """
+        Collects all CODE files to scan (excludes documentation/schema/test files)
+        This prevents false positives from JSON schemas, YAML configs, test data, etc.
+        """
         code_files = []
         for file_path in self.repo_path.rglob('*'):
-            if file_path.is_file() and '.git' not in file_path.parts:
-                if file_path.suffix in CODE_EXTENSIONS or file_path.suffix == '':
-                    code_files.append(file_path)
+            if not file_path.is_file():
+                continue
+            
+            # Skip files in excluded directories (tests, examples, node_modules, etc.)
+            if any(skip_dir in file_path.parts for skip_dir in SKIP_DIRECTORIES):
+                continue
+            
+            # Skip .git directory
+            if '.git' in file_path.parts:
+                continue
+            
+            # Skip documentation/schema/config files (these cause false positives)
+            ext = file_path.suffix.lower()
+            if ext in DOCUMENTATION_EXTENSIONS or ext in BUILD_EXTENSIONS:
+                logger.debug(f"Skipping documentation/config file: {file_path.name}")
+                continue
+            
+            # Only include actual code files
+            # Files with no extension are often scripts (entrypoints, shell scripts, etc.) — scan them
+            if ext in CODE_EXTENSIONS or ext == '':
+                code_files.append(file_path)
+        
+        logger.info(f"Collected {len(code_files)} code files for scanning (excluded docs/configs/tests)")
         return code_files
 
     def scan_file(self, file_path: Path) -> Dict[str, List[Dict]]:
@@ -1471,6 +1643,10 @@ class CryptoScanner:
                                 if matched_this_line:
                                     break
                                 for match in pattern.finditer(original_stripped):
+                                    # Filter out false positives before recording
+                                    if is_false_positive(algo, original_stripped, match.group()):
+                                        continue
+                                    
                                     results[algo].append({
                                         'file':         str(file_path.relative_to(self.repo_path)),
                                         'line':         line_num,
@@ -1489,6 +1665,10 @@ class CryptoScanner:
                         if matched_this_line:
                             break  # One match per algorithm per line — no duplicates
                         for match in pattern.finditer(line):
+                            # Filter out false positives before recording
+                            if is_false_positive(algo, raw_line.strip(), match.group()):
+                                continue
+                            
                             results[algo].append({
                                 'file':         str(file_path.relative_to(self.repo_path)),
                                 'line':         line_num,
@@ -1817,16 +1997,17 @@ class AllScansResponse(BaseModel):
     repo_hash: str
     branch_name: str
     platform: str
-    last_scanned: datetime
+    last_scanned: Optional[datetime] = None  # null for failed scans that never started
     scan_status: str
-    total_files: int
-    quantum_safe_count: int  # ✅ RENAMED
-    quantum_vulnerable_count: int  # ✅ RENAMED
-    current_status: str
-    total_files_to_scan: int
+    total_files: Optional[int] = 0
+    quantum_safe_count: Optional[int] = 0
+    quantum_vulnerable_count: Optional[int] = 0
+    current_status: Optional[str] = None
+    total_files_to_scan: Optional[int] = 0
     overall_security_score: Optional[float] = None
     overall_grade: Optional[str] = None
     quantum_readiness_percentage: Optional[float] = None
+    error_detail: Optional[str] = None  # human-readable failure reason
 
 class QueueStatusResponse(BaseModel):
     pending_count: int
@@ -2140,14 +2321,61 @@ async def scan_repository_endpoint(scan_request: ScanRequest):
         except subprocess.CalledProcessError as e:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            error_msg = e.stderr.decode() if e.stderr else 'Failed to clone repository'
-            if 'did not match any remote' in error_msg or 'not found' in error_msg.lower():
-                error_msg = f"Branch '{branch_name}' not found in {platform} repository"
-            raise APIError(status_code=400, error_code="clone_failed", message=f'Failed to clone repository from {platform}. Details: {error_msg}')
+            raw = e.stderr.decode(errors='replace') if e.stderr else ''
+            if 'did not match any remote' in raw or ('not found' in raw.lower() and 'branch' in raw.lower()):
+                error_msg = f"Branch '{branch_name}' not found in repository"
+            elif 'repository' in raw.lower() and ('not found' in raw.lower() or '404' in raw):
+                error_msg = f"Repository not found: {repo_url}"
+            elif 'could not read username' in raw.lower() or 'authentication failed' in raw.lower() or 'no such device' in raw.lower():
+                error_msg = f"Repository not found or is private: {normalized_url}"
+            elif 'fatal:' in raw.lower():
+                # Extract just the fatal message line
+                fatal_line = next((l.strip() for l in raw.splitlines() if l.strip().lower().startswith('fatal:')), None)
+                error_msg = fatal_line if fatal_line else f"Clone failed: {raw.strip()[:200]}"
+            elif raw.strip():
+                error_msg = f"Clone failed: {raw.strip()[:200]}"
+            else:
+                error_msg = f"Failed to clone repository from {platform}"
+            with get_db() as _db:
+                repo_id = db_manager.create_failed_scan_record(_db, normalized_url, branch_name, platform, error_msg)
+                failed_repo = _db.query(Repository).filter(Repository.id == repo_id).first()
+                return AllScansResponse(
+                    id=failed_repo.id,
+                    repo_url=failed_repo.repo_url,
+                    repo_hash=failed_repo.repo_hash,
+                    branch_name=failed_repo.branch_name,
+                    platform=failed_repo.platform,
+                    last_scanned=failed_repo.last_scanned,
+                    scan_status='failed',
+                    total_files=0,
+                    quantum_safe_count=0,
+                    quantum_vulnerable_count=0,
+                    current_status=error_msg,
+                    total_files_to_scan=0,
+                    error_detail=error_msg,
+                )
         except subprocess.TimeoutExpired:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            raise APIError(status_code=408, error_code="clone_timeout", message='Repository clone timed out. The repository might be too large or the connection is slow.')
+            error_msg = 'Repository clone timed out — repository may be too large or unreachable'
+            with get_db() as _db:
+                repo_id = db_manager.create_failed_scan_record(_db, normalized_url, branch_name, platform, error_msg)
+                failed_repo = _db.query(Repository).filter(Repository.id == repo_id).first()
+                return AllScansResponse(
+                    id=failed_repo.id,
+                    repo_url=failed_repo.repo_url,
+                    repo_hash=failed_repo.repo_hash,
+                    branch_name=failed_repo.branch_name,
+                    platform=failed_repo.platform,
+                    last_scanned=failed_repo.last_scanned,
+                    scan_status='failed',
+                    total_files=0,
+                    quantum_safe_count=0,
+                    quantum_vulnerable_count=0,
+                    current_status=error_msg,
+                    total_files_to_scan=0,
+                    error_detail=error_msg,
+                )
         except Exception as e:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)

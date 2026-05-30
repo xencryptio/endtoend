@@ -83,6 +83,44 @@ class DatabaseHandler:
             logger.exception(f"❌ Exception saving result to DB: {e}")
             return False
 
+    async def save_pending_scan(self, domain: str, request_id: str) -> bool:
+        """Create/update a pending scan record immediately when a scan starts."""
+        await self._ensure_connected()
+
+        if not self.enabled:
+            logger.warning(f"⚠️  Database disabled, skipping pending save for {domain}")
+            return False
+
+        try:
+            db_data = {
+                "request_id": request_id,
+                "url": domain,
+                "status": "pending",
+                "scan_status": "pending",
+                "scan_type": "crypto_audit",
+                "requested_at": datetime.now().isoformat(),
+                "raw_response": {
+                    "domain": domain,
+                    "scan_status": "pending",
+                    "scan_metadata": {
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "scan_start"
+                    }
+                }
+            }
+
+            response = await call_service(
+                "POST",
+                f"{self.db_service_url}/scans/result",
+                json=db_data,
+                timeout=15
+            )
+
+            return response.status_code in (200, 201)
+        except Exception as e:
+            logger.exception(f"❌ Exception saving pending scan for {domain}: {e}")
+            return False
+
     async def get_scan_results(self, status: Optional[str] = None, limit: int = 100, offset: int = 0):
         """Fetch scan results from database."""
         await self._ensure_connected()

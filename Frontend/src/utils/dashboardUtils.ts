@@ -5,6 +5,53 @@
 
 import { ApplicationSummary } from "@/types/dashboardTypes";
 
+type GenericApplication = Record<string, unknown>;
+
+function normalizeText(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function toSafeNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getApplicationIdentityKey(app: GenericApplication): string {
+  const appId = normalizeText(app["Application ID"]);
+  if (appId) return `id:${appId}`;
+
+  const appName = normalizeText(app.application);
+  const subOrg = normalizeText(app["Sub Org"] ?? app["Sub_Org"] ?? app.sub_org);
+  if (appName || subOrg) return `name:${appName}|suborg:${subOrg}`;
+
+  return "";
+}
+
+export function dedupeApplications<T extends GenericApplication>(apps: T[]): T[] {
+  const deduped = new Map<string, T>();
+
+  apps.forEach((app, index) => {
+    const key = getApplicationIdentityKey(app) || `index:${index}`;
+    const existing = deduped.get(key);
+
+    if (!existing) {
+      deduped.set(key, app);
+      return;
+    }
+
+    const existingCoverage = existing["scan_coverage"] ? 1 : 0;
+    const currentCoverage = app["scan_coverage"] ? 1 : 0;
+    const existingSignal = toSafeNumber(existing["pqc_ready"]) + toSafeNumber(existing["vulnerabilities"]);
+    const currentSignal = toSafeNumber(app["pqc_ready"]) + toSafeNumber(app["vulnerabilities"]);
+
+    if (currentCoverage > existingCoverage || (currentCoverage === existingCoverage && currentSignal >= existingSignal)) {
+      deduped.set(key, app);
+    }
+  });
+
+  return Array.from(deduped.values());
+}
+
 // ===== RISK UTILITIES =====
 export function getRiskColor(risk: string): string {
   const riskMap: Record<string, string> = {

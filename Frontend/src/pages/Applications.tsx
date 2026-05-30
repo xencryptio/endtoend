@@ -17,9 +17,11 @@ import {
 import { CSVData, SubOrg } from "@/components/applications/types";
 import { filterApplicationsByMultipleCategories } from "@/components/applications/utils";
 import { DUMMY_DATA } from "@/components/applications/constants";
+import { dedupeApplications } from "@/utils/dashboardUtils";
 
 // ── types ─────────────────────────────────────────────────────────────────────
 interface ApplicationApiResponse {
+  "Application ID"?: string;
   "Sub Org": string;
   application: string;
   risk_level: string;
@@ -99,6 +101,7 @@ const transformData = (raw: ApplicationApiResponse[]): TransformedData => {
   raw.forEach(item => {
     const so = item["Sub Org"] || "Unknown";
     applications.push({
+      application_id: item["Application ID"],
       application: item.application, sub_org: so, risk_level: item.risk_level,
       time_complexity: item.time_complexity || "N/A", time_quarter: item.status || item.time_quarter || "N/A",
       pqc_ready: Math.round(item.pqc_ready * 10) / 10, vulnerabilities: item.vulnerabilities,
@@ -414,7 +417,7 @@ function AppsSection({ apps, filtered, state, dispatch, subOrgName, onBack, onRe
           <motion.div key="grid" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((app, i) => (
-              <motion.div key={app.application + i}
+              <motion.div key={app.application_id || `${app.application}-${app.sub_org}-${i}`}
                 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
                 onClick={() => navigate(`/applications`)}
                 className="bg-card rounded-2xl border border-border p-5 shadow-sm hover:shadow-md cursor-pointer transition-all group">
@@ -449,7 +452,7 @@ function AppsSection({ apps, filtered, state, dispatch, subOrgName, onBack, onRe
                   </thead>
                   <tbody className="divide-y divide-border">
                     {filtered.map((app, i) => (
-                      <motion.tr key={app.application + i}
+                      <motion.tr key={app.application_id || `${app.application}-${app.sub_org}-${i}`}
                         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
                         onClick={() => navigate(`/applications`)}
                         className="cursor-pointer hover:bg-muted/40 transition-colors">
@@ -480,7 +483,7 @@ export default function Applications() {
 
   const { data, error, isLoading, isRefetching, refetch } = useQuery<TransformedData, Error>({
     queryKey: ["applications"],
-    queryFn: async () => transformData(await fetchApplications()),
+    queryFn: async () => transformData(dedupeApplications(await fetchApplications())),
     retry: 1, retryDelay: 1000,
   });
 

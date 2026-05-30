@@ -112,6 +112,8 @@ services:
       - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/crypto_scanner_db
       - UVICORN_LOG_LEVEL=debug
       - SCORING_SERVICE_URL=http://universal-scoring-service:9500
+      - EXTERNAL_TLS_SCANNER_URL=http://ssl-tls-scanner-new:8010
+      - USE_INTERNAL_SCANNER=false
     networks:
       - xencrypt-network
     depends_on:
@@ -121,6 +123,8 @@ services:
         condition: service_healthy
       universal-scoring-service:
         condition: service_healthy
+      ssl-tls-scanner-new:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -128,6 +132,56 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ================================
+  # NEW SSL/TLS SCANNER SERVICE
+  # ================================
+  ssl-tls-scanner-new:
+    build:
+      context: ./ssl-tls-scanner_new
+      dockerfile: Dockerfile
+    container_name: ssl-tls-scanner-new
+    ports:
+      - "8010:8010"
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ================================
+  # OQS PQ SCANNER (ML-KEM/Kyber Detection)
+  # ================================
+  oqs-pq-scanner:
+    build:
+      context: ./oqs-pq-scanner
+      dockerfile: Dockerfile
+    container_name: oqs-pq-scanner
+    ports:
+      - "8011:8011"
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8011/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     logging:
       driver: json-file
       options:

@@ -101,6 +101,7 @@ export interface Algorithm {
     overall_grade: string; // Letter grade A-F
     quantum_readiness_percentage: number; // Quantum readiness 0-100
     current_status: string;
+    error_detail?: string | null;  // Set when scan_status === 'failed'
   }
   
   export type StatusType = 'error' | 'success' | 'info';

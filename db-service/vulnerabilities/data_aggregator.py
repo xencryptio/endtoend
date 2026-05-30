@@ -209,9 +209,13 @@ def get_network_vulnerabilities(scandb: Session) -> List[schemas.NetworkVulnerab
     scan_results = scandb.query(ScandbScanResult).all()
     network_vulnerabilities = []
     for res in scan_results:
+        scan_status = "unknown"
+        if res.scan_status is not None:
+            scan_status = res.scan_status.value if hasattr(res.scan_status, "value") else str(res.scan_status)
+
         network_vulnerabilities.append(schemas.NetworkVulnerability(
             url=res.url,
-            scan_status=res.scan_status.value if res.scan_status else "unknown",
+            scan_status=scan_status,
             requested_at=res.requested_at,
             completed_at=res.completed_at,
             execution_time_seconds=res.execution_time_seconds,
@@ -282,7 +286,13 @@ def get_system_vulnerabilities(system_scanner_db: Session) -> List[schemas.Syste
     system_results = system_scanner_db.query(SystemScannerResult).all()
     system_vulnerabilities = []
     for res in system_results:
-        audit_results_json = json.loads(res.audit_results) if res.audit_results else {}
+        if isinstance(res.audit_results, dict):
+            audit_results_json = res.audit_results
+        else:
+            try:
+                audit_results_json = json.loads(res.audit_results) if res.audit_results else {}
+            except (TypeError, json.JSONDecodeError):
+                audit_results_json = {}
         
         system_vulnerabilities.append(schemas.SystemVulnerability(
             agent_id=res.agent_id,

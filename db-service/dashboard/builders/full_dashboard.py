@@ -225,6 +225,37 @@ def build_full_dashboard_view(db: Session) -> List[Dict[str, Any]]:
         total_apps_in_org = len(processed_applications)
         avg_pqc_readiness = sum(pqc_scores) / total_apps_in_org if total_apps_in_org > 0 else 0.0
 
+        # Build suborganizations structure by grouping applications
+        suborg_map = {}
+        for app in processed_applications:
+            suborg_id = app.get("Sub Org ID")
+            suborg_name = app.get("Sub Org")
+            if suborg_id and suborg_id not in suborg_map:
+                suborg_map[suborg_id] = {
+                    "suborganization_id": suborg_id,
+                    "suborganization_name": suborg_name,
+                    "applications": [],
+                    "pqc_readiness": 0.0,
+                    "total_vulnerabilities": 0,
+                    "risk_distribution": {"Low": 0, "Medium": 0, "High": 0, "Very High": 0}
+                }
+            if suborg_id:
+                suborg_map[suborg_id]["applications"].append(app)
+                suborg_map[suborg_id]["total_vulnerabilities"] += app.get("vulnerabilities", 0)
+                risk = app.get("risk_level", "Unknown")
+                if risk in suborg_map[suborg_id]["risk_distribution"]:
+                    suborg_map[suborg_id]["risk_distribution"][risk] += 1
+
+        # Calculate average PQC readiness per suborg
+        for suborg_id, suborg_data in suborg_map.items():
+            apps = suborg_data["applications"]
+            if apps:
+                avg_pqc = sum(a.get("pqc_ready", 0) for a in apps) / len(apps)
+                suborg_data["pqc_readiness"] = round(avg_pqc, 1)
+                suborg_data["total_applications"] = len(apps)
+
+        suborganizations_list = list(suborg_map.values())
+
         organization_view = {
             "view": "organization",
             "organization_id": org_id,
@@ -236,6 +267,7 @@ def build_full_dashboard_view(db: Session) -> List[Dict[str, Any]]:
                 "total_vulnerabilities": total_org_vulnerabilities
             },
             "risk_distribution": risk_distribution_counts,
+            "suborganizations": suborganizations_list,
             "applications": processed_applications
         }
         full_dashboard.append(organization_view)

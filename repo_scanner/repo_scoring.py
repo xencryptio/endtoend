@@ -1142,25 +1142,25 @@ class RepoScoringEngine:
         return "Low — minor adjustments"
 
     def _empty_result(self) -> Dict:
-        """Return empty scoring result."""
+        """Return empty scoring result — no crypto code found means no quantum risk."""
         return {
-            "overall_score": 0,
-            "overall_grade": "F",
-            "security_level": "critical",
+            "overall_score": 85,
+            "overall_grade": "A",
+            "security_level": "low",
             "quantum_safe_count": 0,
             "quantum_vulnerable_count": 0,
             "true_pqc_count": 0,
             "deprecated_count": 0,
             "quantum_readiness_detail": {
-                "quantum_readiness_percentage": 0,
-                "risk_level": "critical",
-                "risk_reason": "No cryptographic algorithms detected",
+                "quantum_readiness_percentage": 100,
+                "risk_level": "low",
+                "risk_reason": "No cryptographic algorithm usage found in code — no quantum migration needed",
                 "migration_status": "not_applicable",
-                "migration_note": "No cryptographic operations found in codebase",
+                "migration_note": "No direct cryptographic operations found. If the app uses crypto via external services/APIs, those should be assessed separately.",
             },
             "migration_plan": {"steps": [], "total_steps": 0, "critical_count": 0,
-                             "high_count": 0, "urgent_count": 0, "estimated_effort": "N/A"},
+                             "high_count": 0, "urgent_count": 0, "estimated_effort": "None"},
             "category_scores": {},
             "algorithm_scores": {},
-            "critical_vulnerabilities": ["No cryptographic algorithms detected"],
+            "critical_vulnerabilities": [],
         }
