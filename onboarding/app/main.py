@@ -227,6 +227,7 @@ class OnboardingPayload(BaseModel):
     domains: Optional[List[OnboardingDomain]] = []
     suborganizations: Optional[List[SubOrganizationPayload]] = []
     created_by: Optional[str] = None
+    trigger_scans: bool = True
 
 
 # ==================== AGENT REGISTRATION HELPER ====================
@@ -918,6 +919,128 @@ async def process_repo_batch(job_id: str, repositories: List[RepoScanRow]):
         })
 
 
+# ==================== MASTER SCAN / SELECTED SCAN ====================
+
+class SelectedScanPayload(BaseModel):
+    repos: Optional[List[dict]] = []   # [{repo_url: str, branch_name: str}]
+    domains: Optional[List[str]] = []  # ["example.com", ...]
+    agent_ids: Optional[List[str]] = []  # system-scan agent_ids to trigger
+
+
+@app.post("/api/master-scan", summary="Trigger scan for all onboarded organizations")
+async def master_scan():
+    """Fetch all organizations' repositories and domains then trigger scans for all."""
+    try:
+        orgs_resp = await call_service("GET", f"{DB_SERVICE_URL}/organizations")
+        orgs = orgs_resp.json()
+    except Exception as e:
+        raise APIError(status_code=500, error_code="fetch_orgs_failed", message=f"Failed to fetch organizations: {str(e)}")
+
+    if not orgs:
+        return {"message": "No organizations found to scan", "total_organizations": 0,
+                "total_repos": 0, "total_domains": 0, "triggered_scans": {}}
+
+    all_repo_rows: List[RepoScanRow] = []
+    all_domain_rows: List[TLSScanRow] = []
+
+    for org in orgs:
+        org_id = org["id"]
+        try:
+            repos_resp = await call_service("GET", f"{DB_SERVICE_URL}/organizations/{org_id}/repositories")
+            for r in repos_resp.json():
+                if r.get("repo_url"):
+                    all_repo_rows.append(RepoScanRow(repo_url=r["repo_url"], branch_name=r.get("branch_to_scan", "main")))
+        except Exception:
+            pass
+        try:
+            domains_resp = await call_service("GET", f"{DB_SERVICE_URL}/organizations/{org_id}/domains")
+            for d in domains_resp.json():
+                if d.get("domain"):
+                    all_domain_rows.append(TLSScanRow(domain=d["domain"]))
+        except Exception:
+            pass
+
+    triggered = {}
+
+    if all_repo_rows:
+        job_id = str(uuid.uuid4())
+        job = BatchScanJob(job_id=job_id, scan_type=ScanType.REPOSITORY, total_items=len(all_repo_rows))
+        batch_jobs[job_id] = job
+        task = asyncio.create_task(safe_background_task_wrapper(process_repo_batch, job_id, all_repo_rows))
+        running_tasks[job_id] = task
+        triggered["repo_scan_job_id"] = job_id
+        logger.info(f"Master scan: triggered repo job {job_id} for {len(all_repo_rows)} repos")
+
+    if all_domain_rows:
+        job_id = str(uuid.uuid4())
+        job = BatchScanJob(job_id=job_id, scan_type=ScanType.TLS, total_items=len(all_domain_rows))
+        batch_jobs[job_id] = job
+        task = asyncio.create_task(safe_background_task_wrapper(process_tls_batch, job_id, all_domain_rows))
+        running_tasks[job_id] = task
+        triggered["tls_scan_job_id"] = job_id
+        logger.info(f"Master scan: triggered TLS job {job_id} for {len(all_domain_rows)} domains")
+
+    return {
+        "message": "Master scan triggered",
+        "total_organizations": len(orgs),
+        "total_repos": len(all_repo_rows),
+        "total_domains": len(all_domain_rows),
+        "triggered_scans": triggered,
+    }
+
+
+@app.post("/api/selected-scan", summary="Trigger scan for a user-selected set of repos and domains")
+async def selected_scan(payload: SelectedScanPayload):
+    """Trigger scans only for the repos and domains explicitly provided."""
+    triggered = {}
+
+    repo_rows = [
+        RepoScanRow(repo_url=r["repo_url"], branch_name=r.get("branch_name", "main"))
+        for r in (payload.repos or []) if r.get("repo_url")
+    ]
+    if repo_rows:
+        job_id = str(uuid.uuid4())
+        job = BatchScanJob(job_id=job_id, scan_type=ScanType.REPOSITORY, total_items=len(repo_rows))
+        batch_jobs[job_id] = job
+        task = asyncio.create_task(safe_background_task_wrapper(process_repo_batch, job_id, repo_rows))
+        running_tasks[job_id] = task
+        triggered["repo_scan_job_id"] = job_id
+
+    domain_rows = [TLSScanRow(domain=d) for d in (payload.domains or []) if d]
+    if domain_rows:
+        job_id = str(uuid.uuid4())
+        job = BatchScanJob(job_id=job_id, scan_type=ScanType.TLS, total_items=len(domain_rows))
+        batch_jobs[job_id] = job
+        task = asyncio.create_task(safe_background_task_wrapper(process_tls_batch, job_id, domain_rows))
+        running_tasks[job_id] = task
+        triggered["tls_scan_job_id"] = job_id
+
+    if not triggered and not (payload.agent_ids or []):
+        raise APIError(status_code=400, error_code="nothing_selected",
+                       message="No repos, domains or agents were provided to scan")
+
+    # Trigger asset scans via system-scan service
+    triggered_agents = []
+    failed_agents = []
+    for agent_id in (payload.agent_ids or []):
+        try:
+            resp = await call_service("POST", f"{SYSTEM_SCAN_URL}/api/v1/admin/trigger-scan/{agent_id}")
+            triggered_agents.append(agent_id)
+            logger.info(f"Selected scan: triggered asset scan for agent {agent_id}")
+        except Exception as e:
+            failed_agents.append(agent_id)
+            logger.warning(f"Selected scan: failed to trigger scan for agent {agent_id}: {e}")
+
+    return {
+        "message": "Selected scan triggered",
+        "total_repos": len(repo_rows),
+        "total_domains": len(domain_rows),
+        "total_agents": len(triggered_agents),
+        "failed_agents": len(failed_agents),
+        "triggered_scans": triggered,
+    }
+
+
 @app.post("/api/repo-scan/batch",
           summary="Batch repository scan from Excel",
           description="""
@@ -1091,7 +1214,7 @@ async def api_onboarding(
 
     triggered_scans = {}
 
-    if repo_scan_rows:
+    if repo_scan_rows and payload.trigger_scans:
         scan_job_id = str(uuid.uuid4())
         # Create BatchScanJob and add to batch_jobs dictionary
         job = BatchScanJob(
@@ -1117,7 +1240,7 @@ async def api_onboarding(
         except Exception as e:
             logger.exception(f"Failed to schedule repository scan job {scan_job_id}: {e}")
 
-    if domain_rows:
+    if domain_rows and payload.trigger_scans:
         scan_job_id = str(uuid.uuid4())
         # Create BatchScanJob and add to batch_jobs dictionary
         job = BatchScanJob(
@@ -1735,7 +1858,8 @@ def parse_csv_to_json_payload(df: pd.DataFrame, created_by: Optional[str] = None
 async def onboarding_csv_upload(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="CSV file with organization data"),
-    created_by: Optional[str] = None
+    created_by: Optional[str] = None,
+    trigger_scans: bool = True
 ):
     """Process unified CSV file and onboard organization."""
     logger.info(f"Received CSV onboarding upload: {file.filename}")
@@ -1764,9 +1888,10 @@ async def onboarding_csv_upload(
         
         # Convert CSV to JSON payload
         payload_dict = parse_csv_to_json_payload(df, created_by)
+        payload_dict['trigger_scans'] = trigger_scans
         
         logger.info(f"Converted CSV to payload: org={payload_dict['organization']['organization_name']}, "
-                   f"suborgs={len(payload_dict.get('suborganizations', []))}")
+                   f"suborgs={len(payload_dict.get('suborganizations', []))}, trigger_scans={trigger_scans}")
         
         # Parse into Pydantic model
         payload = OnboardingPayload.parse_obj(payload_dict)

@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { UnifiedCard, UnifiedResultCard } from '@/components/ui/unified';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { Trash2, Eye, RefreshCw, Globe, FileCode, Server, Download, Building2, Upload } from 'lucide-react';
+import { Trash2, Eye, RefreshCw, Globe, FileCode, Server, Download, Building2, Upload, ScanLine } from 'lucide-react';
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -46,6 +47,7 @@ const OnboardingNipunPage: React.FC = () => {
   const [isLoadingBatches, setIsLoadingBatches] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvCreatedBy, setCsvCreatedBy] = useState<string>('');
+  const [runAutoScan, setRunAutoScan] = useState<boolean>(true);
   
   // Onboarding Data states
   const [orgs, setOrgs] = useState<any[]>([]);
@@ -220,7 +222,7 @@ const OnboardingNipunPage: React.FC = () => {
       const res = await fetch(`${BATCH_API_BASE}/api/onboarding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...payload, trigger_scans: runAutoScan })
       });
 
       const data = await res.json();
@@ -274,6 +276,7 @@ const OnboardingNipunPage: React.FC = () => {
       if (csvCreatedBy) {
         formData.append('created_by', csvCreatedBy);
       }
+      formData.append('trigger_scans', String(runAutoScan));
 
       const res = await fetch(`${BATCH_API_BASE}/api/onboarding/csv`, {
         method: 'POST',
@@ -633,6 +636,26 @@ const OnboardingNipunPage: React.FC = () => {
                     />
                   </div>
 
+                  {/* Auto-scan option */}
+                  <div className="flex items-start gap-3 p-4 rounded-lg border bg-muted/30">
+                    <Checkbox
+                      id="json-auto-scan"
+                      checked={runAutoScan}
+                      onCheckedChange={(checked) => setRunAutoScan(Boolean(checked))}
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <label htmlFor="json-auto-scan" className="text-sm font-medium cursor-pointer flex items-center gap-2">
+                        <ScanLine className="h-4 w-4 text-primary" />
+                        Automatically trigger scans after onboarding
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        When enabled, TLS/SSL and repository scans will start immediately after the organization is onboarded.
+                        Uncheck to onboard only — you can run scans manually later from Scan Center.
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="flex gap-3">
                     <Button
                       onClick={handleJSONOnboardingSubmit}
@@ -758,6 +781,26 @@ const OnboardingNipunPage: React.FC = () => {
                               {csvFile.name}
                             </span>
                           )}
+                        </div>
+                      </div>
+
+                      {/* Auto-scan option */}
+                      <div className="flex items-start gap-3 p-4 rounded-lg border bg-muted/30">
+                        <Checkbox
+                          id="csv-auto-scan"
+                          checked={runAutoScan}
+                          onCheckedChange={(checked) => setRunAutoScan(Boolean(checked))}
+                          className="mt-0.5"
+                        />
+                        <div>
+                          <label htmlFor="csv-auto-scan" className="text-sm font-medium cursor-pointer flex items-center gap-2">
+                            <ScanLine className="h-4 w-4 text-primary" />
+                            Automatically trigger scans after onboarding
+                          </label>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            When enabled, TLS/SSL and repository scans will start immediately after the organization is onboarded.
+                            Uncheck to onboard only — you can run scans manually later from Scan Center.
+                          </p>
                         </div>
                       </div>
 
