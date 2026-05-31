@@ -10,10 +10,10 @@ import { Trash2, Eye, RefreshCw, Globe, FileCode, Server, Download, Building2, U
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import { Textarea } from '@/components/ui/textarea';
 
-const BATCH_API_BASE = 'http://localhost:8008';
-const DB_API_BASE = 'http://localhost:8001';
-const REPO_SCAN_API = 'http://localhost:8003';
-const TLS_SCAN_API = 'http://localhost:8000';
+const BATCH_API_BASE = (import.meta.env.VITE_ONBOARDING_API_URL as string | undefined) || 'http://localhost:8008';
+const DB_API_BASE   = (import.meta.env.VITE_DB_API_URL        as string | undefined) || 'http://localhost:8001';
+const REPO_SCAN_API = (import.meta.env.VITE_REPO_SCAN_API_URL  as string | undefined) || 'http://localhost:8003';
+const TLS_SCAN_API  = (import.meta.env.VITE_SCAN_API_URL       as string | undefined) || 'http://localhost:8000';
 
 interface OnboardingBatch {
   id: string;

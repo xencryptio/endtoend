@@ -15,7 +15,7 @@ import { UnifiedBackButton } from "@/components/ui/unified";
 import { DEFAULT_ALGORITHM_LIBRARY, ALGORITHM_SECTIONS } from "@/data/algorithmLibrary";
 
 // ─── Backend config (only used for saving custom profiles & applications) ───
-const DB_API = "http://localhost:8001";
+const DB_API = (import.meta.env.VITE_DB_API_URL as string | undefined) || 'http://localhost:8001';
 
 // ─── Column definitions (shared across all tables) ───────────────────────────
 const commonColumns: ColumnDef[] = [

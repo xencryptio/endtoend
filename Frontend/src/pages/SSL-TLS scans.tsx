@@ -29,11 +29,10 @@ import { toast } from "sonner";
 
 type ViewType = "dashboard" | "webscan" | "gitscan" | "masterscan" | "selectedscan";
 
-const DB_API = "http://localhost:8001";
-const ONBOARDING_API = "http://localhost:8008";
-
-const SYSTEM_SCAN_API = "http://localhost:9000";
-const API_CONFIG = { scanApi: import.meta.env.VITE_SCAN_API_URL };
+const DB_API          = (import.meta.env.VITE_DB_API_URL          as string | undefined) || 'http://localhost:8001';
+const ONBOARDING_API  = (import.meta.env.VITE_ONBOARDING_API_URL   as string | undefined) || 'http://localhost:8008';
+const SYSTEM_SCAN_API = (import.meta.env.VITE_SYSTEM_SCAN_API_URL  as string | undefined) || 'http://localhost:9000';
+const API_CONFIG = { scanApi: (import.meta.env.VITE_SCAN_API_URL as string | undefined) || 'http://localhost:8000' };
 
 interface RepoItem {
   id: string;

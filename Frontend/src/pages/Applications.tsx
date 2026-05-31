@@ -87,7 +87,8 @@ function reducer(state: any, action: any) {
 
 // ── API ── Uses the SAME dashboard endpoint as Dashboard page for consistent data
 const fetchApplications = async (): Promise<ApplicationApiResponse[]> => {
-  const res = await fetch("http://localhost:8001/api/dashboard");
+  const dbBase = (import.meta.env.VITE_DB_API_URL as string | undefined) || 'http://localhost:8001';
+  const res = await fetch(`${dbBase}/api/dashboard`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const data = await res.json();
   // Dashboard returns org object or array of orgs — extract applications from first org

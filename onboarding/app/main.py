@@ -445,9 +445,14 @@ class TLSScanRow(BaseModel):
 async def scan_single_tls_domain(domain: str) -> ScanResult:
     """Scan a single domain using TLS scanner with direct API call."""
     logger.info(f"🔍 Initiating TLS scan for domain: {domain}")
+    # TLS scans via SSL Labs can take 3-10 minutes per domain.
+    # Must be long enough that we never drop the connection before scan-service
+    # calls save_scan_result — if we disconnect, FastAPI cancels the coroutine
+    # and the pending record is never updated to completed.
+    _SCAN_TIMEOUT = 660.0  # 11 minutes — matches scan-service's own 6000s limit
     try:
         # Use direct /scan endpoint for single-scan architecture
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=_SCAN_TIMEOUT) as client:
             response = await client.post(
                 f"{TLS_SCANNER_URL}/scan",
                 json={
@@ -455,7 +460,7 @@ async def scan_single_tls_domain(domain: str) -> ScanResult:
                     "max_concurrent": 1,
                     "save_to_db": True
                 },
-                timeout=120.0
+                timeout=_SCAN_TIMEOUT
             )
             response.raise_for_status()
             scan_data = response.json()
@@ -490,11 +495,11 @@ async def scan_single_tls_domain(domain: str) -> ScanResult:
                 )
 
     except httpx.TimeoutException:
-        logger.error(f"⏱️ TLS scan request for {domain} timed out.")
+        logger.error(f"⏱️ TLS scan request for {domain} timed out after 11 minutes.")
         return ScanResult(
             domain_or_repo=domain,
             status="failed",
-            error="Request timeout",
+            error="Request timeout (scan exceeded 11 minutes)",
             timestamp=datetime.utcnow()
         )
     except httpx.HTTPError as e:
