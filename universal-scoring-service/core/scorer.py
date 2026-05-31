@@ -55,8 +55,11 @@ class UniversalPQCScorer:
             # primary indicator of quantum readiness in active TLS sessions.
             # Signature weight lowered: PQC certificates don't exist yet for
             # public CAs, so a 30% penalty for classical certs is unfair.
+            # NOTE: "certificate" was removed — the input model only accepts
+            # {kex, signature, symmetric, hash, protocol}, so no scanner ever
+            # populated it. Weights now sum to 110% (normalized at use site).
             "kex": 0.40, "signature": 0.20, "symmetric": 0.25, "hash": 0.15,
-            "protocol": 0.10, "certificate": 0.10
+            "protocol": 0.10,
         }
 
     def score_algorithms(

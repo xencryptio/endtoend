@@ -272,6 +272,57 @@ def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:  # noqa: C9
                 "context": {"source": "protocol_detection"},
             })
 
+    # ------------------------------------------------------------------
+    # Step 7 — Hash algorithms
+    # Sources:
+    #   (a) certificate_signatures[*].hash_algorithm   (e.g. "SHA384")
+    #   (b) handshake_signatures[*].algorithm          (e.g. "RSA-PSS-SHA256")
+    #   (c) cipher suite name tail                     (e.g. "..._SHA384")
+    # Populates the 0.15-weight "hash" component, which previously had
+    # zero coverage despite being a defined scoring axis.
+    # ------------------------------------------------------------------
+    sig_block = scan_data.get("signature_algorithms", {}) or {}
+    seen_hash: set = set()
+
+    def _add_hash(name: str, pos: int, source: str) -> None:
+        if not name:
+            return
+        n = name.strip().upper()
+        if not n or n in ("UNKNOWN", "NONE", "NULL"):
+            return
+        if n in seen_hash:
+            return
+        seen_hash.add(n)
+        algorithms.append({
+            "name": n,
+            "algorithm_type": "hash",
+            "position": pos,
+            "context": {"source": source},
+        })
+
+    # (a) cert hash_algorithm
+    for i, cert in enumerate(sig_block.get("certificate_signatures", []) or []):
+        _add_hash(cert.get("hash_algorithm", ""), i, "certificate")
+
+    # (b) handshake signature hashes (parse trailing SHAxxx token)
+    import re as _re
+    _HASH_RE = _re.compile(
+        r"(SHA3-512|SHA3-384|SHA3-256|SHA3-224|SHA512|SHA384|SHA256|SHA224|SHA1|MD5)",
+        _re.IGNORECASE,
+    )
+    for i, hs in enumerate(sig_block.get("handshake_signatures", []) or []):
+        alg = (hs.get("algorithm") or hs.get("hash") or "")
+        m = _HASH_RE.search(alg)
+        if m:
+            _add_hash(m.group(1), 100 + i, "handshake_signature")
+
+    # (c) cipher suite name tail (TLS_..._SHA384 / TLS_..._SHA256)
+    for i, suite in enumerate(list(tls13_suites) + list(tls12_suites)):
+        nm = suite.get("name", "")
+        m = _HASH_RE.search(nm)
+        if m:
+            _add_hash(m.group(1), 200 + i, "cipher_suite")
+
     return algorithms
 
 from http_client import call_service

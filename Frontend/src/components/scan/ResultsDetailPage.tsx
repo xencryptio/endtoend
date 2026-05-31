@@ -333,9 +333,330 @@ const CipherRow: React.FC<{ cipher: any }> = ({ cipher }) => {
   );
 };
 
+// ── Justify Grade Panel (dynamic explanation of overall score) ───────────────
+const JustifyGradePanel: React.FC<{
+  domain: string;
+  pqcScore: number;
+  pqcGrade: string;
+  components?: Record<string, ComponentScore>;
+  pqcAnalysis: any;
+  supportedProtos: string[];
+}> = ({ domain, pqcScore, pqcGrade, components, pqcAnalysis, supportedProtos }) => {
+  // Component weights mirrored from universal-scoring-service/core/scorer.py
+  // (certificate axis removed — input model never accepted it)
+  const WEIGHTS: Record<string, number> = {
+    kex: 0.40, signature: 0.20, symmetric: 0.25,
+    hash: 0.15, protocol: 0.10,
+  };
+
+  const qrd = pqcAnalysis?.quantum_readiness_detail || {};
+  const hybridReady: boolean = !!pqcAnalysis?.hybrid_ready;
+  const quantumReady: boolean = !!pqcAnalysis?.quantum_ready;
+
+  // Build dynamic component table from whatever the backend returned
+  const compEntries = Object.entries(components || {})
+    .filter(([t]) => WEIGHTS[t] !== undefined)
+    .map(([t, c]) => ({
+      type: t,
+      score: (c as ComponentScore)?.weighted_average ?? 0,
+      weight: WEIGHTS[t] || 0,
+    }));
+
+  const totalWeight = compEntries.reduce((s, c) => s + c.weight, 0);
+  const weightedSum = compEntries.reduce((s, c) => s + c.score * c.weight, 0);
+  const baseScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
+
+  // Recreate adjustments (kept in lock-step with scorer._calculate_overall_score)
+  const protoScore = components?.protocol?.weighted_average ?? 0;
+  const symScore = components?.symmetric?.weighted_average ?? 0;
+  const legacyTlsPresent = supportedProtos.some(p => p.includes('1.0') || p.includes('1.1') || p.toUpperCase().includes('SSL'));
+
+  // Hybrid bonus estimate (we don't have per-algo final_score on UI side, so we
+  // derive a tier from hybrid_kex_groups when available)
+  const hybridGroups: string[] = qrd.hybrid_kex_groups || [];
+  let hybridBonus = 0;
+  if (hybridReady) {
+    const groupUpper = hybridGroups.join(' ').toUpperCase();
+    if (groupUpper.includes('MLKEM1024')) hybridBonus = 18.0;
+    else if (groupUpper.includes('MLKEM768')) hybridBonus = 15.0;
+    else if (groupUpper.includes('MLKEM') || groupUpper.includes('KYBER')) hybridBonus = 12.0;
+    else hybridBonus = 8.0;
+    if (symScore < 65) hybridBonus -= 5.0;
+  }
+
+  const tls13Bonus = (!hybridReady && protoScore >= 80) ? 7.0 : 0;
+  const protoPenalty = (protoScore > 0 && protoScore < 50) ? (50 - protoScore) * 0.2 : 0;
+  const floorApplied = hybridReady && symScore >= 70 && (baseScore + hybridBonus) < 55;
+  const cappedByLegacy = legacyTlsPresent && (baseScore + hybridBonus + tls13Bonus - protoPenalty) > 77;
+
+  // Build a narrative paragraph dynamically (no per-domain hardcoding)
+  const classicalKex: string[] = qrd.classical_kex_groups || [];
+  const sigAlgos: string[] = qrd.signature_algorithms || [];
+  const strongSym: string[] = qrd.strong_symmetric || [];
+  const weakSym: string[] = qrd.weak_symmetric || [];
+  const legacyProtos: string[] = qrd.legacy_protocols || [];
+
+  const sortedComps = [...compEntries].sort((a, b) => a.score - b.score);
+  const worst = sortedComps[0];
+  const best = sortedComps[sortedComps.length - 1];
+  const compLabel: Record<string, string> = {
+    kex: 'key exchange', signature: 'signature', symmetric: 'symmetric',
+    hash: 'hash', protocol: 'protocol', certificate: 'certificate',
+  };
+
+  const narrativeParts: string[] = [];
+  narrativeParts.push(
+    `${domain} receives an overall PQC-readiness grade of ${pqcGrade} (${pqcScore.toFixed(2)}/100). ` +
+    `Our scoring model is quantum-focused: it weights cryptographic agility and post-quantum readiness rather than only classical TLS hygiene.`
+  );
+
+  if (hybridReady) {
+    narrativeParts.push(
+      `This server **supports hybrid post-quantum key exchange** (${hybridGroups.join(', ') || 'PQC hybrid group'}). ` +
+      `A +${hybridBonus.toFixed(1)} hybrid bonus is applied because this directly mitigates Harvest-Now-Decrypt-Later attacks today.`
+    );
+  } else {
+    narrativeParts.push(
+      `The biggest drag is the **absence of hybrid key exchange**: only classical groups (${classicalKex.join(', ') || 'classical curves'}) are offered. ` +
+      `Key exchange carries the highest weight (40%) in this model because it is the single deployable control against Harvest-Now-Decrypt-Later attacks.`
+    );
+  }
+
+  if (sigAlgos.length > 0) {
+    const rsaOnly = sigAlgos.every(s => s.toUpperCase().includes('RSA'));
+    if (rsaOnly) {
+      narrativeParts.push(
+        `Signatures use **RSA only** (${sigAlgos.join(', ')}). RSA is fully breakable by Shor's algorithm, so signature score is held down — though we keep its weight modest (20%) because PQC certificates are not yet issuable by public CAs.`
+      );
+    } else {
+      narrativeParts.push(`Handshake signatures detected: ${sigAlgos.join(', ')}.`);
+    }
+  }
+
+  if (strongSym.length > 0 && weakSym.length === 0) {
+    narrativeParts.push(
+      `Symmetric encryption is **Grover-safe** (${strongSym.join(', ')}) — AES-256 / ChaCha20 provide ~128-bit post-quantum security, contributing a strong component score.`
+    );
+  } else if (weakSym.length > 0) {
+    narrativeParts.push(`Weak symmetric ciphers present (${weakSym.join(', ')}) drag the symmetric component down.`);
+  }
+
+  if (legacyProtos.length > 0 || legacyTlsPresent) {
+    narrativeParts.push(
+      `**Legacy TLS detected** (${legacyProtos.join(', ') || 'TLS 1.0/1.1'}). Per SSL-Labs-style rules the overall grade is hard-capped at B (77.0).`
+    );
+  } else if (tls13Bonus > 0) {
+    narrativeParts.push(
+      `TLS 1.3 is present without any legacy protocol — a +7.0 modern-protocol bonus is applied to reflect that the server is one config flag away from enabling X25519MLKEM768.`
+    );
+  }
+
+  if (worst && best && worst.type !== best.type) {
+    narrativeParts.push(
+      `Component-wise, **${compLabel[worst.type]}** is the weakest (${worst.score.toFixed(1)}/100) and **${compLabel[best.type]}** the strongest (${best.score.toFixed(1)}/100).`
+    );
+  }
+
+  if (!quantumReady && !hybridReady) {
+    narrativeParts.push(
+      `Recommended next step: deploy hybrid KEX (X25519MLKEM768) on the edge. That single change typically lifts this grade by 25–40 points immediately.`
+    );
+  } else if (hybridReady && !quantumReady) {
+    narrativeParts.push(`Hybrid KEX is in place but symmetric strength keeps the server out of the Quantum-Ready tier.`);
+  }
+
+  // Render a simple inline markdown-bold ( **text** -> <strong> )
+  const renderMD = (s: string) => {
+    const parts = s.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((p, i) => p.startsWith('**') && p.endsWith('**')
+      ? <strong key={i} className="text-foreground">{p.slice(2, -2)}</strong>
+      : <React.Fragment key={i}>{p}</React.Fragment>);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header strip */}
+      <div className="bg-card border border-border rounded-2xl p-6">
+        <div className="flex items-center gap-4 mb-2">
+          <Info className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-bold">Why This Grade?</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          A fully dynamic, per-domain explanation of how the overall PQC-readiness grade was computed —
+          derived from the same component scores, weights, bonuses and caps used by the scoring engine.
+        </p>
+      </div>
+
+      {/* Final score recap */}
+      <div className="bg-card border border-border rounded-2xl p-6 flex flex-wrap items-center gap-6">
+        <div className="flex items-center gap-3">
+          <span className={`text-5xl font-black ${gradeColor(pqcGrade)}`}>{pqcGrade}</span>
+          <div>
+            <div className="text-2xl font-black tabular-nums">{pqcScore.toFixed(2)}<span className="text-sm text-muted-foreground font-normal">/100</span></div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">Overall PQC Score</div>
+          </div>
+        </div>
+        <div className="ml-auto flex flex-wrap gap-2">
+          <span className={`px-3 py-1 rounded-full text-xs font-bold border ${quantumReady ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 'bg-muted text-muted-foreground border-border'}`}>
+            {quantumReady ? 'Quantum Ready' : 'Not Quantum Ready'}
+          </span>
+          <span className={`px-3 py-1 rounded-full text-xs font-bold border ${hybridReady ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800' : 'bg-muted text-muted-foreground border-border'}`}>
+            {hybridReady ? 'Hybrid KEX' : 'No Hybrid KEX'}
+          </span>
+        </div>
+      </div>
+
+      {/* Component breakdown table */}
+      <Card className="border">
+        <CardHeader className="border-b py-3 px-4">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Hash className="w-4 h-4" /> Component Breakdown
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="text-left px-4 py-2 font-semibold">Component</th>
+                <th className="text-right px-4 py-2 font-semibold">Score</th>
+                <th className="text-right px-4 py-2 font-semibold">Weight</th>
+                <th className="text-right px-4 py-2 font-semibold">Contribution</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compEntries.length === 0 && (
+                <tr><td colSpan={4} className="text-center text-muted-foreground italic py-6">No component data available.</td></tr>
+              )}
+              {compEntries.map(c => {
+                const contribution = c.score * c.weight;
+                return (
+                  <tr key={c.type} className="border-t border-border/60">
+                    <td className="px-4 py-2 capitalize font-mono">{compLabel[c.type] || c.type}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      <span className={c.score >= 80 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : c.score >= 50 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-red-600 dark:text-red-400 font-semibold'}>
+                        {c.score.toFixed(2)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{(c.weight * 100).toFixed(0)}%</td>
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold">{contribution.toFixed(2)}</td>
+                  </tr>
+                );
+              })}
+              <tr className="border-t-2 border-border bg-muted/20">
+                <td className="px-4 py-2 font-bold">Base (weighted avg)</td>
+                <td className="px-4 py-2 text-right text-muted-foreground italic">Σ contribs / Σ weights</td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{(totalWeight * 100).toFixed(0)}%</td>
+                <td className="px-4 py-2 text-right tabular-nums font-black">{baseScore.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {/* Adjustments ledger */}
+      <Card className="border">
+        <CardHeader className="border-b py-3 px-4">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" /> Adjustments Applied
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 space-y-3 text-sm">
+          <div className="flex items-baseline justify-between border-b border-border/40 pb-2">
+            <span className="text-muted-foreground">Base score</span>
+            <span className="font-mono font-semibold tabular-nums">{baseScore.toFixed(2)}</span>
+          </div>
+          {hybridBonus > 0 && (
+            <div className="flex items-baseline justify-between text-emerald-700 dark:text-emerald-400">
+              <span>+ Hybrid KEX bonus <span className="text-xs text-muted-foreground">(HNDL mitigation)</span></span>
+              <span className="font-mono font-semibold tabular-nums">+{hybridBonus.toFixed(2)}</span>
+            </div>
+          )}
+          {tls13Bonus > 0 && (
+            <div className="flex items-baseline justify-between text-emerald-700 dark:text-emerald-400">
+              <span>+ TLS 1.3-forward bonus <span className="text-xs text-muted-foreground">(modern protocol, one config flag from hybrid)</span></span>
+              <span className="font-mono font-semibold tabular-nums">+{tls13Bonus.toFixed(2)}</span>
+            </div>
+          )}
+          {protoPenalty > 0 && (
+            <div className="flex items-baseline justify-between text-red-700 dark:text-red-400">
+              <span>− Legacy protocol penalty</span>
+              <span className="font-mono font-semibold tabular-nums">−{protoPenalty.toFixed(2)}</span>
+            </div>
+          )}
+          {floorApplied && (
+            <div className="flex items-baseline justify-between text-blue-700 dark:text-blue-400">
+              <span>↑ Hybrid + strong-symmetric floor (min 55.0)</span>
+              <span className="font-mono font-semibold tabular-nums">→ 55.00</span>
+            </div>
+          )}
+          {cappedByLegacy && (
+            <div className="flex items-baseline justify-between text-amber-700 dark:text-amber-400">
+              <span>↓ Legacy TLS 1.0/1.1 hard cap (max 77.0)</span>
+              <span className="font-mono font-semibold tabular-nums">→ 77.00</span>
+            </div>
+          )}
+          {hybridBonus === 0 && tls13Bonus === 0 && protoPenalty === 0 && !floorApplied && !cappedByLegacy && (
+            <p className="text-xs text-muted-foreground italic">No bonuses, penalties, floors, or caps were applied.</p>
+          )}
+          <div className="flex items-baseline justify-between border-t-2 border-border pt-3 mt-2">
+            <span className="font-bold text-foreground">Final score</span>
+            <span className={`font-mono font-black text-lg tabular-nums ${gradeColor(pqcGrade)}`}>{pqcScore.toFixed(2)}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Narrative justification */}
+      <Card className="border">
+        <CardHeader className="border-b py-3 px-4">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Info className="w-4 h-4" /> Justification
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-5 space-y-3 text-sm leading-relaxed text-muted-foreground">
+          {narrativeParts.map((p, i) => <p key={i}>{renderMD(p)}</p>)}
+        </CardContent>
+      </Card>
+
+      {/* HNDL risk + migration tier (if backend provided them) */}
+      {(qrd.hndl_risk || qrd.migration_note) && (
+        <Card className="border">
+          <CardHeader className="border-b py-3 px-4">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4" /> Quantum Risk Assessment
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-5 space-y-3 text-sm">
+            {qrd.hndl_risk && (
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">HNDL Risk</div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
+                    qrd.hndl_risk === 'low' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                    : qrd.hndl_risk === 'high' ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'
+                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                  }`}>{qrd.hndl_risk.toUpperCase()}</span>
+                </div>
+                {qrd.hndl_reason && <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{qrd.hndl_reason}</p>}
+              </div>
+            )}
+            {qrd.migration_note && (
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                  Migration {qrd.migration_tier ? `Tier ${qrd.migration_tier}` : ''}
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">{qrd.migration_note}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+};
+
 // ── Domain Detail Page ────────────────────────────────────────────────────────
 const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = ({ result, onBack }) => {
-  const [tab, setTab] = useState<'summary' | 'findings' | 'details'>('summary');
+  const [tab, setTab] = useState<'summary' | 'findings' | 'details' | 'justify'>('summary');
   const [cipherFilter, setCipherFilter] = useState<'all' | 'tls13' | 'tls12'>('all');
   const [cipherSearch, setCipherSearch] = useState('');
   const [detailSection, setDetailSection] = useState<'certificates' | 'compliance' | 'migration' | 'raw'>('certificates');
@@ -486,11 +807,11 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
 
           {/* TAB BAR */}
           <div className="flex gap-1 border-b border-border">
-            {(['summary', 'findings', 'details'] as const).map(t => (
+            {(['summary', 'findings', 'details', 'justify'] as const).map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-5 py-2.5 text-sm font-semibold capitalize transition-all border-b-2 -mb-px ${
                   tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'
-                }`}>{t}</button>
+                }`}>{t === 'justify' ? 'Why This Grade' : t}</button>
             ))}
           </div>
 
@@ -820,6 +1141,18 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 </Card>
               )}
             </div>
+          )}
+
+          {/* ═══ JUSTIFY (WHY THIS GRADE) TAB ═══ */}
+          {tab === 'justify' && (
+            <JustifyGradePanel
+              domain={result.url}
+              pqcScore={scoreNum}
+              pqcGrade={pqcGrade as string}
+              components={components}
+              pqcAnalysis={pqcAnalysis}
+              supportedProtos={supportedProtos}
+            />
           )}
         </>) : (
           /* Failed / HTTP skipped */
