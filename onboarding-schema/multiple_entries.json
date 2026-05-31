@@ -1,0 +1,70 @@
+{
+  "_comment": "MULTIPLE ENTRIES EXAMPLE — Each suborganization/application can have multiple repos, domains, and servers. Just add more objects inside each array.",
+
+  "organization": {
+    "organization_name": "Amazon Inc.",
+    "organization_email": "security@amazon.com"
+  },
+  "created_by": "onboarding@amazon.com",
+  "suborganizations": [
+    {
+      "suborganization_name": "Amazon Web Services (AWS)",
+      "applications": [
+        {
+          "_comment": "One application with 3 repos, 3 domains, 3 servers",
+          "application_name": "EC2",
+          "repositories": [
+            { "repo_url": "https://github.com/aws/amazon-ec2-metadata-mock", "repo_name": "amazon-ec2-metadata-mock", "branch_to_scan": "main" },
+            { "repo_url": "https://github.com/aws/aws-cdk",                  "repo_name": "aws-cdk",                  "branch_to_scan": "main" },
+            { "repo_url": "https://github.com/aws/aws-cli",                  "repo_name": "aws-cli",                  "branch_to_scan": "develop" }
+          ],
+          "domains": [
+            { "domain": "console.aws.amazon.com" },
+            { "domain": "ec2.amazonaws.com" },
+            { "domain": "api.ec2.us-east-1.amazonaws.com" }
+          ],
+          "servers": [
+            { "hostname": "ec2-prod-1", "ip_address": "192.168.29.69", "operating_system": "Windows" },
+            { "hostname": "ec2-prod-2", "ip_address": "192.168.29.70", "operating_system": "Linux" },
+            { "hostname": "ec2-prod-3", "ip_address": "192.168.29.71", "operating_system": "Linux" }
+          ]
+        },
+        {
+          "_comment": "A second application inside the same suborganization",
+          "application_name": "S3",
+          "repositories": [
+            { "repo_url": "https://github.com/aws/aws-s3-transfer-manager", "repo_name": "aws-s3-transfer-manager", "branch_to_scan": "main" }
+          ],
+          "domains": [
+            { "domain": "s3.amazonaws.com" },
+            { "domain": "s3.us-east-1.amazonaws.com" }
+          ],
+          "servers": [
+            { "hostname": "s3-gateway-1", "ip_address": "10.0.1.10", "operating_system": "Linux" }
+          ]
+        }
+      ]
+    },
+    {
+      "suborganization_name": "Amazon Retail",
+      "applications": [
+        {
+          "application_name": "Online Store",
+          "repositories": [
+            { "repo_url": "https://github.com/amzn/selling-partner-api-models",       "repo_name": "selling-partner-api-models",       "branch_to_scan": "main" },
+            { "repo_url": "https://github.com/amzn/login-with-amazon-sdk-android",    "repo_name": "login-with-amazon-sdk-android",    "branch_to_scan": "main" }
+          ],
+          "domains": [
+            { "domain": "www.amazon.com" },
+            { "domain": "checkout.amazon.com" },
+            { "domain": "payments.amazon.com" }
+          ],
+          "servers": [
+            { "hostname": "retail-web-1", "ip_address": "172.16.0.2", "operating_system": "Linux" },
+            { "hostname": "retail-web-2", "ip_address": "172.16.0.3", "operating_system": "Linux" }
+          ]
+        }
+      ]
+    }
+  ]
+}

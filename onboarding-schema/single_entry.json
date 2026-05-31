@@ -1,0 +1,53 @@
+{
+  "_comment": "SINGLE ENTRY EXAMPLE — Each suborganization has one application with one repo, one domain, and one server.",
+
+  "organization": {
+    "organization_name": "Amazon Inc.",
+    "organization_email": "security@amazon.com"
+  },
+  "created_by": "onboarding@amazon.com",
+  "suborganizations": [
+    {
+      "suborganization_name": "Amazon Web Services (AWS)",
+      "applications": [
+        {
+          "application_name": "EC2",
+          "repositories": [
+            {
+              "repo_url": "https://github.com/aws/amazon-ec2-metadata-mock",
+              "repo_name": "amazon-ec2-metadata-mock",
+              "branch_to_scan": "main"
+            }
+          ],
+          "domains": [
+            { "domain": "console.aws.amazon.com" }
+          ],
+          "servers": [
+            { "hostname": "ec2-prod-1", "ip_address": "192.168.29.69", "operating_system": "Linux" }
+          ]
+        }
+      ]
+    },
+    {
+      "suborganization_name": "Amazon Retail",
+      "applications": [
+        {
+          "application_name": "Online Store",
+          "repositories": [
+            {
+              "repo_url": "https://github.com/amzn/selling-partner-api-models",
+              "repo_name": "selling-partner-api-models",
+              "branch_to_scan": "main"
+            }
+          ],
+          "domains": [
+            { "domain": "www.amazon.com" }
+          ],
+          "servers": [
+            { "hostname": "retail-web-1", "ip_address": "172.16.0.2", "operating_system": "Linux" }
+          ]
+        }
+      ]
+    }
+  ]
+}

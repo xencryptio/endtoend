@@ -1,0 +1,25 @@
+# MULTIPLE ENTRIES CSV EXAMPLE
+#
+# KEY RULE: Each row = ONE resource (one repo, OR one domain, OR one server).
+# To add multiple repos/domains/servers to the same suborg+app, repeat rows with
+# the same suborganization_name + application_name and fill only what is new.
+# Leave columns blank if that row doesn't add a new value for that column.
+#
+# organization_name only needs to be filled on the first row (or repeat — both work).
+# organization_email only needs to be filled once.
+#
+# Examples shown below:
+#   - "Amazon Web Services (AWS) / EC2" has 3 repos + 3 domains + 3 servers (9 rows total for that app)
+#   - "Amazon Web Services (AWS) / S3"  is a second app inside the same suborg
+#   - "Amazon Retail / Online Store"    has 2 repos + 3 domains + 2 servers
+organization_name,organization_email,suborganization_name,application_name,repo_url,repo_name,branch_to_scan,domain,hostname,ip_address,operating_system
+Amazon Inc.,security@amazon.com,Amazon Web Services (AWS),EC2,https://github.com/aws/amazon-ec2-metadata-mock,amazon-ec2-metadata-mock,main,console.aws.amazon.com,ec2-prod-1,192.168.29.69,Windows
+Amazon Inc.,,Amazon Web Services (AWS),EC2,https://github.com/aws/aws-cdk,aws-cdk,main,ec2.amazonaws.com,ec2-prod-2,192.168.29.70,Linux
+Amazon Inc.,,Amazon Web Services (AWS),EC2,https://github.com/aws/aws-cli,aws-cli,develop,api.ec2.us-east-1.amazonaws.com,ec2-prod-3,192.168.29.71,Linux
+Amazon Inc.,,Amazon Web Services (AWS),S3,https://github.com/aws/aws-s3-transfer-manager,aws-s3-transfer-manager,main,s3.amazonaws.com,s3-gateway-1,10.0.1.10,Linux
+Amazon Inc.,,Amazon Web Services (AWS),S3,,,, s3.us-east-1.amazonaws.com,,,
+Amazon Inc.,,Amazon Retail,Online Store,https://github.com/amzn/selling-partner-api-models,selling-partner-api-models,main,www.amazon.com,retail-web-1,172.16.0.2,Linux
+Amazon Inc.,,Amazon Retail,Online Store,https://github.com/amzn/login-with-amazon-sdk-android,login-with-amazon-sdk-android,main,checkout.amazon.com,retail-web-2,172.16.0.3,Linux
+Amazon Inc.,,Amazon Retail,Online Store,,,,payments.amazon.com,,,
+Amazon Inc.,,Amazon Prime,Prime Video,https://github.com/aws-samples/amazon-ivs-player-web-sample,amazon-ivs-player-web-sample,master,www.primevideo.com,primevideo-stream-1,172.18.0.12,Linux
+Amazon Inc.,,Amazon Prime,Prime Video,https://github.com/aws-samples/amazon-ivs-web-broadcast,amazon-ivs-web-broadcast,main,api.primevideo.com,primevideo-stream-2,172.18.0.13,Linux

@@ -1,0 +1,19 @@
+# SINGLE ENTRY CSV EXAMPLE
+# Rule: One row = one complete entry (one repo + one domain + one server for one suborg/app).
+# Each column must be filled on every row.
+#
+# organization_name   : Your company name (fill only on first row, or repeat — both work)
+# organization_email  : Security contact email
+# suborganization_name: Business unit / team name
+# application_name    : Application or service name within that unit
+# repo_url            : Full GitHub/GitLab URL of the repository
+# repo_name           : Short display name for the repo
+# branch_to_scan      : Branch to run PQC scan on (e.g. main, master, develop)
+# domain              : Domain/hostname to run TLS scan on (no https://)
+# hostname            : Server hostname
+# ip_address          : Server IP address
+# operating_system    : Linux / Windows / macOS
+organization_name,organization_email,suborganization_name,application_name,repo_url,repo_name,branch_to_scan,domain,hostname,ip_address,operating_system
+Amazon Inc.,security@amazon.com,Amazon Web Services (AWS),EC2,https://github.com/aws/amazon-ec2-metadata-mock,amazon-ec2-metadata-mock,main,console.aws.amazon.com,ec2-prod-1,192.168.29.69,Linux
+Amazon Inc.,security@amazon.com,Amazon Retail,Online Store,https://github.com/amzn/selling-partner-api-models,selling-partner-api-models,main,www.amazon.com,retail-web-1,172.16.0.2,Linux
+Amazon Inc.,security@amazon.com,Amazon Prime,Prime Video,https://github.com/aws-samples/amazon-ivs-player-web-sample,amazon-ivs-player-web-sample,master,www.primevideo.com,primevideo-stream-1,172.18.0.12,Linux
