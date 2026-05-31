@@ -1883,7 +1883,11 @@ const clearLiveProgress = (batchId: string) => {
                                                   <span>{n.message}</span>
                                                 </div>
                                               ))}
-                                              {graderNotices.filter(msg => !scorerNotices.some(n => n.message.startsWith(msg.slice(0, 20)))).map((msg, i) => (
+                                              {graderNotices
+                                              .filter(msg => !scorerNotices.some(n => n.message.startsWith(msg.slice(0, 20))))
+                                              // Suppress stale "does not support PQC" notice when the scorer has confirmed hybrid_ready
+                                              .filter(msg => !(pqcAnalysis?.hybrid_ready === true && msg.includes('does not support PQC')))
+                                              .map((msg, i) => (
                                                 <div
                                                   key={`g${i}`}
                                                   className="flex items-start gap-2 text-xs px-3 py-2 rounded-md bg-muted/50 text-muted-foreground"

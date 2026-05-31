@@ -2,6 +2,7 @@
 OQS-based PQ Hybrid Group Detector
 Uses OpenSSL with OQS provider to properly detect ML-KEM/Kyber hybrid support
 """
+import os
 import socket
 import ssl
 import subprocess
@@ -10,25 +11,24 @@ import re
 from typing import List, Dict, Optional
 
 # PQ hybrid group definitions (IANA codes)
+# Names must match those registered by the OQS provider (case-sensitive).
 PQ_GROUPS = {
-    0x11eb: "X25519Kyber768Draft00",  # Cloudflare/Chrome draft
     0x6399: "X25519MLKEM768",         # IANA 25497 (standardized)
     0x639a: "SecP256r1MLKEM768",      # IANA 25498
-    0x639b: "X25519MLKEM1024",        # IANA 25499
+    0x639b: "SecP384r1MLKEM1024",     # IANA 25499 — OQS registers this name
 }
 
 def detect_pq_groups(hostname: str, port: int = 443, timeout: int = 10) -> List[Dict]:
     """
     Detect PQ hybrid groups using OpenSSL s_client with OQS provider.
-    Returns list of supported PQ groups with metadata.
+    For each candidate group we attempt a TLS 1.3 handshake offering only that
+    group.  If the server completes the handshake ("CONNECTION ESTABLISHED" or
+    a valid cipher is reported), the group is confirmed.
     """
     detected = []
     
-    # Use OpenSSL s_client to probe for PQ groups
-    # The OQS provider enables ML-KEM key exchange
     for group_id, group_name in PQ_GROUPS.items():
         try:
-            # Build openssl s_client command with specific group
             cmd = [
                 "openssl", "s_client",
                 "-connect", f"{hostname}:{port}",
@@ -42,26 +42,31 @@ def detect_pq_groups(hostname: str, port: int = 443, timeout: int = 10) -> List[
                 input=b"",
                 capture_output=True,
                 timeout=timeout,
-                env={"OPENSSL_CONF": "/opt/oqs/ssl/openssl.cnf"}
+                env={**os.environ, "OPENSSL_CONF": "/opt/oqs/ssl/openssl.cnf"}
             )
             
-            output = result.stdout.decode('utf-8', errors='ignore')
+            stdout = result.stdout.decode('utf-8', errors='ignore')
+            stderr = result.stderr.decode('utf-8', errors='ignore')
+            combined = stdout + stderr
             
-            # Check if connection succeeded with this group
-            if "Cipher" in output and "TLS" in output:
-                # Parse the output for group info
-                if group_name.lower() in output.lower() or "mlkem" in output.lower() or "kyber" in output.lower():
-                    detected.append({
-                        "id": group_id,
-                        "name": group_name,
-                        "type": "PQC-Hybrid",
-                        "bits": 256,  # classical component strength
-                        "detection_method": "oqs-openssl"
-                    })
+            # If the group name is unknown to this OpenSSL build, skip
+            if "cannot be set" in stderr or "passed invalid argument" in stderr:
+                continue
+            
+            # A successful PQ handshake: connection established with TLSv1.3
+            # Note: openssl s_client -brief writes to stderr, not stdout
+            if "CONNECTION ESTABLISHED" in combined or ("Cipher" in combined and "TLSv1.3" in combined):
+                detected.append({
+                    "id": group_id,
+                    "name": group_name,
+                    "type": "PQC-Hybrid",
+                    "bits": 256,
+                    "detection_method": "oqs-openssl"
+                })
                     
         except subprocess.TimeoutExpired:
             continue
-        except Exception as e:
+        except Exception:
             continue
     
     return detected
@@ -69,41 +74,13 @@ def detect_pq_groups(hostname: str, port: int = 443, timeout: int = 10) -> List[
 
 def detect_pq_with_python_ssl(hostname: str, port: int = 443) -> List[Dict]:
     """
-    Fallback: Try to detect PQ groups using Python's SSL module.
-    This may work if OQS provider is properly loaded.
+    Fallback PQ detection. Previously this returned a false-positive
+    'PQC-Hybrid-Inferred' entry for any server that supports TLS 1.3,
+    which is meaningless — TLS 1.3 support does not imply PQC group support.
+    The fallback now always returns empty; only the OQS OpenSSL probe
+    (detect_pq_groups) produces authoritative results.
     """
-    detected = []
-    
-    try:
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        
-        # Try to connect with TLS 1.3 (required for PQ)
-        context.minimum_version = ssl.TLSVersion.TLSv1_3
-        
-        with socket.create_connection((hostname, port), timeout=10) as sock:
-            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
-                # Get negotiated cipher
-                cipher = ssock.cipher()
-                version = ssock.version()
-                
-                # Check if we got TLS 1.3
-                if version == "TLSv1.3":
-                    # Try to infer PQ support from connection
-                    # This is limited but may catch some cases
-                    detected.append({
-                        "id": 0x6399,
-                        "name": "X25519MLKEM768",
-                        "type": "PQC-Hybrid-Inferred",
-                        "bits": 256,
-                        "detection_method": "python-ssl",
-                        "note": "Inferred from TLS 1.3 connection"
-                    })
-    except Exception:
-        pass
-    
-    return detected
+    return []
 
 
 def scan_pq_support(hostname: str, port: int = 443) -> Dict:

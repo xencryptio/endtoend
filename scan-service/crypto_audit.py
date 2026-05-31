@@ -137,6 +137,10 @@ def extract_algorithms_from_tls_scan(scan_data: Dict) -> List[Dict]:  # noqa: C9
         cname_upper = cname.upper()
         if cname_upper in seen_curves:
             continue
+        # Skip inferred PQC groups — they are false positives (TLS 1.3 connectivity
+        # does not prove the server negotiates PQC hybrid key exchange).
+        if curve_entry.get("type") == "PQC-Hybrid-Inferred":
+            continue
         seen_curves.add(cname_upper)
         cbits = (
             curve_entry.get("bits")
@@ -1301,8 +1305,13 @@ def merge_pq_groups_into_scan(scan_result: Dict, pq_groups: List[Dict]) -> None:
         
         existing_ids = {g.get("id") for g in named_groups["list"]}
         
-        # Add PQ groups that aren't already detected
+        # Add only CONFIRMED PQ groups (skip "PQC-Hybrid-Inferred" — those are
+        # false positives from TLS 1.3 connectivity, not actual PQC negotiation)
+        confirmed_added = False
         for pq_group in pq_groups:
+            if pq_group.get("type") == "PQC-Hybrid-Inferred":
+                logger.debug(f"Skipping inferred PQ group: {pq_group['name']} (not confirmed via OQS probe)")
+                continue
             if pq_group.get("id") not in existing_ids:
                 named_groups["list"].append({
                     "id": pq_group["id"],
@@ -1310,7 +1319,17 @@ def merge_pq_groups_into_scan(scan_result: Dict, pq_groups: List[Dict]) -> None:
                     "bits": pq_group["bits"],
                     "namedGroupType": pq_group["type"]
                 })
-                logger.info(f"Added PQ group: {pq_group['name']}")
+                logger.info(f"Added confirmed PQ group: {pq_group['name']}")
+                confirmed_added = True
+
+        # Remove the stale "does not support PQC" gradeNotice only when we
+        # actually confirmed PQ support via the OQS probe.
+        if confirmed_added:
+            grade_notices = endpoint.get("gradeNotices", [])
+            endpoint["gradeNotices"] = [
+                n for n in grade_notices
+                if "does not support PQC" not in n
+            ]
 
 
 async def run_scanner(domain: str, timeout: int = 300, progress_tracker=None) -> dict:
@@ -1355,10 +1374,11 @@ async def process_single_domain(
     attempt: int = 1, 
     timeout: int = 300,
     save_to_db: bool = False,
-    progress_tracker=None  # ADD THIS PARAMETER
+    progress_tracker=None,
+    request_id: Optional[str] = None  # Allow caller to supply a pre-created request_id
 ) -> Dict[str, Any]:
     """Process a single domain scan, with HTTP/HTTPS logic. Each scan is independent."""
-    request_id = generate_scan_request_id(domain)
+    request_id = request_id or generate_scan_request_id(domain)
     
     # Register domain with tracker
     if progress_tracker:
@@ -1522,14 +1542,39 @@ async def scan_domain(request: ScanRequest):
                 "failed_scans": []
             }
 
-        # Single domain: process directly
+        # Single domain: fire-and-forget background task.
+        # The scan runs completely independently of this HTTP connection.
+        # Saves to DB when done — no risk of pending records stuck forever
+        # due to client disconnects or timeouts from callers like onboarding.
         if len(domains_to_scan) == 1:
-            result = await process_single_domain(
-                domains_to_scan[0], 
-                timeout=6000, 
-                save_to_db=request.save_to_db
-            )
-            return result
+            domain = domains_to_scan[0]
+            req_id = generate_scan_request_id(domain)
+
+            # Save pending record NOW so the caller can track it immediately
+            if request.save_to_db:
+                try:
+                    await db_handler.save_pending_scan(domain, req_id)
+                except Exception as _pe:
+                    logger.warning(f"Failed to create pending scan record for {domain}: {_pe}")
+
+            # Fire-and-forget: the scan lifecycle is now independent of this request
+            async def _run_background_scan(d: str, rid: str, s2db: bool):
+                try:
+                    await process_single_domain(d, timeout=6000, save_to_db=s2db, request_id=rid)
+                except Exception as _bg_exc:
+                    logger.exception(f"Background scan failed for {d}: {_bg_exc}")
+
+            asyncio.create_task(_run_background_scan(domain, req_id, request.save_to_db))
+            logger.info(f"Background scan task created for {domain} (request_id={req_id})")
+
+            # Return immediately — caller should poll /results for completion
+            return {
+                "request_id": req_id,
+                "url": domain,
+                "status": "pending",
+                "scan_status": "pending",
+                "message": "Scan started in background. Poll /results for updates."
+            }
         
         # Multi-domain with retry logic (each domain is independent)
         retry_state = RetryState()

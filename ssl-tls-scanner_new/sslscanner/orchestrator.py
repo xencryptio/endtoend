@@ -7,7 +7,6 @@ import socket
 import time
 import datetime
 import hashlib
-import sys
 from typing import Optional, Tuple, List
 
 from .scanner    import (probe_protocols, probe_cipher_suites, probe_named_groups_raw,
@@ -331,7 +330,7 @@ def run(host: str, port: int = 443, output_file: Optional[str] = None,
     # Resolve all IPs
     ips = resolve_ips(host)
     if not ips:
-        sys.exit(f"[!] Could not resolve: {host}")
+        raise RuntimeError(f"Could not resolve hostname: {host}")
     if len(ips) > 1:
         try:
             import ipaddress

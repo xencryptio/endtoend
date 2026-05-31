@@ -366,8 +366,18 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
     || "";
   const scoreNum = typeof pqcScore === "number" ? pqcScore : 0;
 
-  const tls13Suites: any[] = (tlsConfig["tls_1.3_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.3' }));
-  const tls12Suites: any[] = (tlsConfig["tls_1.2_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.2' }));
+  // Gate cipher suites by supported_protocols — the backend may populate tls_1.3_cipher_suites
+  // even when TLS 1.3 isn't actually negotiated, leading to false counts in the UI.
+  const supportedProtos: string[] = (tlsConfig.supported_protocols || []);
+  const tls13Active = supportedProtos.some((p: string) => p.includes('1.3'));
+  const tls12Active = supportedProtos.some((p: string) => p.includes('1.2'));
+
+  const tls13Suites: any[] = tls13Active
+    ? (tlsConfig["tls_1.3_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.3' }))
+    : [];
+  const tls12Suites: any[] = tls12Active
+    ? (tlsConfig["tls_1.2_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.2' }))
+    : (tlsConfig["tls_1.2_cipher_suites"]?.suites ?? []).map((c: any) => ({ ...c, protocol: 'TLS 1.2' })); // always show TLS 1.2 as fallback
   const allCiphers = [...tls13Suites, ...tls12Suites];
 
   const filteredCiphers = useMemo(() => {
@@ -392,11 +402,44 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
     : scoreNum >= 60 ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
     : "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800";
 
+  // Compute compliance failure reasons dynamically from actual scan data
+  // instead of showing a hardcoded list of all possible reasons.
+  const hasLegacyTLS = supportedProtos.some((p: string) => p.includes('1.0') || p.includes('1.1') || p.toUpperCase().includes('SSL'));
+  const allCipherNames = [...(tlsConfig["tls_1.3_cipher_suites"]?.suites ?? []), ...(tlsConfig["tls_1.2_cipher_suites"]?.suites ?? [])]
+    .map((c: any) => (c.name || '').toUpperCase());
+  const hasWeakCiphers = allCipherNames.some(n => n.includes('RC4') || n.includes('_DES') || n.includes('NULL') || n.includes('EXPORT') || n.includes('ANON'));
+  const allSigAlgs = [...(signatureAlgorithms.certificate_signatures || []), ...(signatureAlgorithms.handshake_signatures || [])]
+    .map((s: any) => (s.algorithm || '').toUpperCase());
+  const hasMd5OrSha1 = allSigAlgs.some(a => a.includes('MD5') || a === 'SHA1' || a.includes('SHA-1') || a.includes('RSA_PKCS1_SHA1'));
+  const hasNoKex = !secFeatures.pfs_supported;
+  const leafKeyBits = leafCert.public_key_size || result.public_key_size_bits || 0;
+  const hasSmallKey = leafKeyBits > 0 && leafKeyBits < 2048;
+  const hasPqcAlgo = allCipherNames.some(n => n.includes('MLKEM') || n.includes('KYBER') || n.includes('MLDSA') || n.includes('DILITHIUM'))
+    || (tlsConfig.supported_elliptic_curves?.curves ?? []).some((c: any) => (c.name || '').toUpperCase().includes('MLKEM'));
+  const hasHybridKex = (tlsConfig.supported_elliptic_curves?.curves ?? []).some((c: any) => {
+    const n = (c.name || '').toUpperCase(); return n.includes('MLKEM') || n.includes('KYBER') || (c.type || '').toUpperCase().includes('PQC');
+  });
+
   const complianceDetails: Record<string, { desc: string; fails: string[] }> = {
-    'PCI DSS 4.0':        { desc: 'Payment Card Industry',           fails: ['TLS 1.0/1.1 in use', 'Weak ciphers (RC4, DES)', 'MD5 or SHA-1 signatures'] },
-    'NIST 800-52r2':      { desc: 'NIST TLS Guidelines',             fails: ['RSA key exchange (no PFS)', 'Weak hashes (MD5/SHA-1)', 'SSL or early TLS enabled'] },
-    'FIPS 140-3':         { desc: 'Federal Info Processing',         fails: ['Non-FIPS algorithms', 'RSA key < 2048 bits', 'Unapproved hash algorithms'] },
-    'CNSA 2.0 (Quantum-Ready)': { desc: 'NSA Quantum-Ready Suite',  fails: ['No PQC algorithms detected', 'Classical KEX only', 'No hybrid key exchange'] },
+    'PCI DSS 4.0': { desc: 'Payment Card Industry', fails: [
+      ...(hasLegacyTLS ? ['TLS 1.0/1.1 in use'] : []),
+      ...(hasWeakCiphers ? ['Weak ciphers (RC4, DES)'] : []),
+      ...(hasMd5OrSha1 ? ['MD5 or SHA-1 signatures'] : []),
+    ]},
+    'NIST 800-52r2': { desc: 'NIST TLS Guidelines', fails: [
+      ...(hasNoKex ? ['RSA key exchange (no PFS)'] : []),
+      ...(hasMd5OrSha1 ? ['Weak hashes (MD5/SHA-1)'] : []),
+      ...(hasLegacyTLS ? ['SSL or early TLS enabled'] : []),
+    ]},
+    'FIPS 140-3': { desc: 'Federal Info Processing', fails: [
+      ...(hasWeakCiphers ? ['Non-FIPS algorithms detected'] : []),
+      ...(hasSmallKey ? [`RSA key too small (${leafKeyBits} bits < 2048)`] : []),
+      ...(hasMd5OrSha1 ? ['Unapproved hash algorithms (MD5/SHA-1)'] : []),
+    ]},
+    'CNSA 2.0 (Quantum-Ready)': { desc: 'NSA Quantum-Ready Suite', fails: [
+      ...(!hasPqcAlgo ? ['No PQC algorithms detected'] : []),
+      ...(!hasHybridKex ? ['No hybrid key exchange'] : []),
+    ]},
   };
 
   return (

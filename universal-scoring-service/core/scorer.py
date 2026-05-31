@@ -100,7 +100,25 @@ class UniversalPQCScorer:
         quantum_ready = self._check_quantum_readiness(components, overall_score, hybrid_ready)
 
         vulnerabilities = self._identify_vulnerabilities(scored_algorithms, components)
-        compliance = self._check_compliance(components, overall_score, hybrid_ready)
+
+        # Derive protocol/cipher facts needed for accurate compliance checks
+        _legacy_protos = {"TLS 1.0", "TLS 1.1", "SSL 2.0", "SSL 3.0"}
+        _weak_cipher_keywords = ("RC4", "DES", "NULL", "EXPORT", "ANON", "3DES")
+        has_legacy_tls = any(
+            a.algorithm_type == "protocol" and a.algorithm in _legacy_protos
+            for a in scored_algorithms
+        )
+        has_weak_ciphers = any(
+            a.algorithm_type in ("symmetric", "kex")
+            and any(kw in a.algorithm.upper() for kw in _weak_cipher_keywords)
+            for a in scored_algorithms
+        )
+
+        compliance = self._check_compliance(
+            components, overall_score, hybrid_ready,
+            has_legacy_tls=has_legacy_tls,
+            has_weak_ciphers=has_weak_ciphers,
+        )
         qr_detail = self._build_qr_detail(scored_algorithms, components, hybrid_ready)
         notices = self._build_notices(scored_algorithms, hybrid_ready)
 
@@ -551,14 +569,33 @@ class UniversalPQCScorer:
         self,
         components: Dict[str, ComponentScore],
         overall_score: float,
-        hybrid_ready: bool = False
+        hybrid_ready: bool = False,
+        has_legacy_tls: bool = False,
+        has_weak_ciphers: bool = False,
     ) -> Dict[str, bool]:
         sym_comp = components.get("symmetric")
+        kex_comp = components.get("kex")
         sym_ok = (sym_comp.weighted_average >= 70) if sym_comp else False
-        all_comps_ok = all(comp.weighted_average >= 60 for comp in components.values())
+
+        # PCI DSS 4.0: requires TLS 1.2+, no RC4/DES/NULL, no MD5/SHA-1 certs.
+        # Classical ECDSA/RSA signatures are FINE for PCI DSS — it is NOT a PQC
+        # standard. Only the symmetric and KEX components need to meet classical
+        # minimums, not the PQC-scored signature component.
+        kex_ok_pci = (kex_comp.weighted_average >= 40) if kex_comp else False
+        pci_pass = (
+            overall_score >= 70
+            and not has_legacy_tls
+            and not has_weak_ciphers
+            and sym_ok
+            and kex_ok_pci
+        )
+
+        # NIST 800-52r2: requires TLS 1.2+ minimum. TLS 1.0/1.1 is an explicit fail.
+        nist_pass = overall_score >= 75 and not has_legacy_tls
+
         return {
-            "PCI DSS 4.0": overall_score >= 70 and all_comps_ok,
-            "NIST 800-52r2": overall_score >= 75,
+            "PCI DSS 4.0": pci_pass,
+            "NIST 800-52r2": nist_pass,
             "FIPS 140-3": overall_score >= 80,
             # CNSA 2.0 requires ML-KEM hybrid KEX + AES-256; classical certs are
             # still acceptable during the transition period (until ~2030).

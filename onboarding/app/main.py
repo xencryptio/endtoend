@@ -465,12 +465,23 @@ async def scan_single_tls_domain(domain: str) -> ScanResult:
             response.raise_for_status()
             scan_data = response.json()
             
-            # The /scan endpoint returns the result directly (not in a results array)
-            # Check for scan_status in the response
+            # The /scan endpoint now returns immediately with status="pending" for
+            # single-domain scans — the actual scan runs as a background task in
+            # scan-service and saves to DB when done. Treat "pending" (scan queued),
+            # "completed", and "http_skipped" all as successful triggers.
             status = scan_data.get('scan_status', 'unknown')
-            
-            if status == 'completed':
-                logger.info(f"✅ TLS scan completed successfully for {domain}")
+            request_id = scan_data.get('request_id', '')
+
+            if status in ('pending', 'queued'):
+                logger.info(f"✅ TLS scan queued for {domain} (request_id={request_id}). "
+                            f"Scan running in background — result will appear in history.")
+                return ScanResult(
+                    domain_or_repo=domain,
+                    status="completed",  # "completed" here means "successfully triggered"
+                    timestamp=datetime.utcnow()
+                )
+            elif status == 'completed':
+                logger.info(f"✅ TLS scan completed for {domain}")
                 return ScanResult(
                     domain_or_repo=domain,
                     status="completed",

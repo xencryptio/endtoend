@@ -56,19 +56,28 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Configure OpenSSL to use OQS provider
-RUN mkdir -p /opt/oqs/ssl && \
-    echo "[openssl_init]" > /opt/oqs/ssl/openssl.cnf && \
-    echo "providers = provider_sect" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "[provider_sect]" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "default = default_sect" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "oqsprovider = oqsprovider_sect" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "[default_sect]" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "activate = 1" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "[oqsprovider_sect]" >> /opt/oqs/ssl/openssl.cnf && \
-    echo "activate = 1" >> /opt/oqs/ssl/openssl.cnf
+# The provider .so lands in the system ossl-modules directory during build.
+RUN OQS_MODULE=$(find /usr/lib -name 'oqsprovider.so' 2>/dev/null | head -1) && \
+    mkdir -p /opt/oqs/ssl && \
+    printf '%s\n' \
+      'openssl_conf = openssl_init' \
+      '' \
+      '[openssl_init]' \
+      'providers = provider_sect' \
+      '' \
+      '[provider_sect]' \
+      'default = default_sect' \
+      'oqsprovider = oqsprovider_sect' \
+      '' \
+      '[default_sect]' \
+      'activate = 1' \
+      '' \
+      '[oqsprovider_sect]' \
+      'activate = 1' \
+      "module = ${OQS_MODULE}" \
+      > /opt/oqs/ssl/openssl.cnf && \
+    echo "OQS provider module: ${OQS_MODULE}" && \
+    OPENSSL_CONF=/opt/oqs/ssl/openssl.cnf openssl list -kem-algorithms 2>&1 | grep -i mlkem | head -5
 
 ENV OPENSSL_CONF=/opt/oqs/ssl/openssl.cnf
 
