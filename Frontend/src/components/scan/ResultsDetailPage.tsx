@@ -223,10 +223,28 @@ const ScoreRing: React.FC<{ score: number; grade: string }> = ({ score, grade })
   );
 };
 
-const StatPill: React.FC<{ label: string; value: React.ReactNode; color?: string }> = ({ label, value, color = 'text-foreground' }) => (
+const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex items-center" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <Info className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help ml-0.5 flex-shrink-0" />
+      {open && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 px-3 py-2 rounded-lg bg-popover border border-border shadow-xl text-xs text-popover-foreground leading-relaxed whitespace-normal pointer-events-none">
+          {text}
+          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-border" />
+        </span>
+      )}
+    </span>
+  );
+};
+
+const StatPill: React.FC<{ label: string; value: React.ReactNode; color?: string; tooltip?: string }> = ({ label, value, color = 'text-foreground', tooltip }) => (
   <div className="flex flex-col items-center px-4 py-3 bg-muted/40 rounded-xl border border-border/50">
     <span className={`text-2xl font-black tabular-nums ${color}`}>{value}</span>
-    <span className="text-xs text-muted-foreground mt-0.5 whitespace-nowrap">{label}</span>
+    <span className="text-xs text-muted-foreground mt-0.5 whitespace-nowrap flex items-center gap-0.5">
+      {label}
+      {tooltip && <InfoTooltip text={tooltip} />}
+    </span>
   </div>
 );
 
@@ -431,30 +449,44 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                   <ScoreRing score={scoreNum} grade={pqcGrade as string} />
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-4">
-                      {result.tls_version && <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border">{result.tls_version}</span>}
-                      {sslGrade && (
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold border bg-muted/40 ${gradeBorder(sslGrade)}`}>
-                          SSL Grade {sslGrade}
+                      {result.tls_version && (
+                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border flex items-center gap-1">
+                          {result.tls_version}
+                          <InfoTooltip text="TLS protocol versions this server accepts. TLS 1.0 and 1.1 are deprecated since 2021 and weaken your security score." />
                         </span>
                       )}
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                      {sslGrade && (
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold border bg-muted/40 flex items-center gap-1 ${gradeBorder(sslGrade)}`}>
+                          SSL Grade {sslGrade}
+                          <InfoTooltip text="TLS configuration grade (SSL Labs-style). Measures cipher strength, protocol hygiene, and certificate quality — not directly related to quantum safety." />
+                        </span>
+                      )}
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 ${
                         quantumReady ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
                           : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'}`}>
                         {quantumReady ? '⚡ Quantum Ready' : '⚠ Not Quantum Ready'}
+                        <InfoTooltip text="Quantum Ready means the server uses at least one NIST-approved post-quantum algorithm (ML-KEM or ML-DSA) for key exchange or authentication — protecting against future quantum computer attacks." />
                       </span>
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 ${
                         hybridReady ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
                           : 'bg-muted text-muted-foreground border-border'}`}>
                         {hybridReady ? '🔗 Hybrid KEX' : 'No Hybrid KEX'}
+                        <InfoTooltip text="Hybrid Key Exchange (KEX) combines a classical algorithm (like X25519) with a post-quantum one (like ML-KEM/Kyber). This protects against quantum attacks while staying compatible with all clients." />
                       </span>
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${riskColorClass}`}>{riskLabel}</span>
-                      <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border capitalize">{securityLevel}</span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 ${riskColorClass}`}>
+                        {riskLabel}
+                        <InfoTooltip text="Risk level of quantum exposure. High = sensitive target with weak PQC coverage. Medium = partial protection in place. Low = strong post-quantum posture." />
+                      </span>
+                      <span className="px-3 py-1 rounded-full text-xs font-bold bg-muted border border-border capitalize flex items-center gap-1">
+                        {securityLevel}
+                        <InfoTooltip text="Overall security classification derived from the PQC score: High (≥85), Medium (≥65), Low (≥45), Critical (<45). Reflects combined strength of key exchange, signatures, and protocol versions." />
+                      </span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <StatPill label="Cipher Suites" value={allCiphers.length} />
-                      <StatPill label="TLS 1.3" value={tls13Suites.length} color="text-emerald-500" />
-                      <StatPill label="TLS 1.2" value={tls12Suites.length} color="text-blue-500" />
-                      <StatPill label="Elliptic Curves" value={tlsConfig.supported_elliptic_curves?.curves?.length ?? 0} />
+                      <StatPill label="Cipher Suites" value={allCiphers.length} tooltip="Total number of cipher suites the server supports. Each suite defines how encryption, key exchange, and authentication are performed." />
+                      <StatPill label="TLS 1.3" value={tls13Suites.length} color="text-emerald-500" tooltip="Cipher suites using TLS 1.3 — the most secure and modern TLS version. TLS 1.3 removes weak algorithms and mandatory forward secrecy is built-in." />
+                      <StatPill label="TLS 1.2" value={tls12Suites.length} color="text-blue-500" tooltip="Cipher suites using TLS 1.2 — acceptable but older. Supports weaker algorithms unless carefully configured." />
+                      <StatPill label="Elliptic Curves" value={tlsConfig.supported_elliptic_curves?.curves?.length ?? 0} tooltip="Named groups (elliptic curves) used for key exchange. PQC-Hybrid curves like ML-KEM/X25519 provide quantum-safe key agreement." />
                     </div>
                   </div>
                 </div>
