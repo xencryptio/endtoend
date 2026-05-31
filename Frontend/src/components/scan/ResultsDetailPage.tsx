@@ -373,7 +373,18 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
   const filteredCiphers = useMemo(() => {
     let list = cipherFilter === 'tls13' ? tls13Suites : cipherFilter === 'tls12' ? tls12Suites : allCiphers;
     if (cipherSearch) { const q = cipherSearch.toLowerCase(); list = list.filter(c => c.name?.toLowerCase().includes(q) || c.encryption?.toLowerCase().includes(q)); }
-    return list;
+    // Sort best → worst by the same badge grade logic used in CipherRow
+    return [...list].sort((a, b) => {
+      const isTls13a = a.protocol === 'TLS 1.3';
+      const isTls13b = b.protocol === 'TLS 1.3';
+      const encA = a.enc_pqc_grade || deriveEncGrade(a.encryption || a.name || '');
+      const encB = b.enc_pqc_grade || deriveEncGrade(b.encryption || b.name || '');
+      const kexA = a.kex_pqc_grade || (isTls13a ? '' : deriveKexGrade(a.key_exchange || '', a.name || ''));
+      const kexB = b.kex_pqc_grade || (isTls13b ? '' : deriveKexGrade(b.key_exchange || '', b.name || ''));
+      const badgeA = isTls13a ? encA : (kexA || encA);
+      const badgeB = isTls13b ? encB : (kexB || encB);
+      return gradeToScore(badgeB) - gradeToScore(badgeA);
+    });
   }, [cipherFilter, cipherSearch, tls13Suites, tls12Suites, allCiphers]);
 
   const riskLabel = scoreNum >= 90 ? "Low Risk" : scoreNum >= 80 ? "Med-Low Risk" : scoreNum >= 70 ? "Medium Risk" : scoreNum >= 60 ? "Med-High Risk" : "High Risk";
