@@ -102,6 +102,7 @@ class UniversalPQCScorer:
         vulnerabilities = self._identify_vulnerabilities(scored_algorithms, components)
         compliance = self._check_compliance(components, overall_score, hybrid_ready)
         qr_detail = self._build_qr_detail(scored_algorithms, components, hybrid_ready)
+        notices = self._build_notices(scored_algorithms, hybrid_ready)
 
         protocol_analysis = None
         certificate_analysis = None
@@ -122,6 +123,7 @@ class UniversalPQCScorer:
             "security_level": security_level,
             "quantum_ready": quantum_ready,
             "hybrid_ready": hybrid_ready,
+            "notices": notices,
             "quantum_readiness_detail": qr_detail,
             "components": {k: v.dict() for k, v in components.items()},
             "algorithm_scores": [s.dict() for s in scored_algorithms],
@@ -332,9 +334,22 @@ class UniversalPQCScorer:
             #    scores >80 on the protocol component; TLS 1.2-only scores 75.
             if not hybrid_ready and proto_avg >= 80:   # TLS 1.3 present
                 raw += 7.0   # Fills B-grade gap: moves C+ servers to B range
-            elif proto_avg < 50:                       # TLS 1.0/1.1 detected
+            elif proto_avg < 50:                       # SSL-only or old TLS-only
                 penalty = (50.0 - proto_avg) * 0.2    # up to -10 pts at SSL 3.0
                 raw = max(0.0, raw - penalty)
+
+        # ── Hard cap: TLS 1.0 / TLS 1.1 present → grade capped to B (max 77.0) ─
+        # This mirrors SSL Labs behaviour:
+        #   "This server supports TLS 1.0 and TLS 1.1. Grade capped to B."
+        # A server can still achieve B or B- but not B+ / A / A+.
+        # Note: a simple protocol-average check misses the case where TLS 1.0+1.1
+        # are present alongside TLS 1.2+1.3 (avg ≈ 56, above the old < 50 gate).
+        legacy_tls_present = any(
+            a.algorithm in ("TLS 1.0", "TLS 1.1") and a.algorithm_type == "protocol"
+            for a in scored_algorithms
+        )
+        if legacy_tls_present:
+            raw = min(raw, 77.0)
 
         return min(raw, 100.0)
 
@@ -445,7 +460,18 @@ class UniversalPQCScorer:
     def _identify_vulnerabilities(self, scores: List[AlgorithmScoreOutput], components: Dict[str, ComponentScore]) -> List[str]:
         vulns = []
 
-        deprecated_algos = [s.algorithm for s in scores if s.deprecated]
+        # Legacy TLS — explicit grade-cap notice (SSL Labs alignment)
+        legacy_tls = [
+            a.algorithm for a in scores
+            if a.algorithm_type == "protocol" and a.algorithm in ("TLS 1.0", "TLS 1.1")
+        ]
+        if legacy_tls:
+            vulns.append(
+                f"This server supports {', '.join(legacy_tls)}. Grade capped to B. "
+                "Disable these protocol versions immediately."
+            )
+
+        deprecated_algos = [s.algorithm for s in scores if s.deprecated and s.algorithm_type != "protocol"]
         if deprecated_algos:
             vulns.append(f"Deprecated algorithms detected: {', '.join(deprecated_algos[:3])}")
 
@@ -467,6 +493,59 @@ class UniversalPQCScorer:
             )
 
         return vulns
+
+    def _build_notices(
+        self,
+        scored_algorithms: List[AlgorithmScoreOutput],
+        hybrid_ready: bool,
+    ) -> List[Dict]:
+        """
+        Build SSL-Labs-style notices for display in the UI.
+        Returns a list of {type, severity, message} dicts.
+        """
+        notices = []
+        proto_names = [
+            a.algorithm for a in scored_algorithms
+            if a.algorithm_type == "protocol"
+        ]
+
+        # Legacy TLS cap notice
+        legacy = [p for p in proto_names if p in ("TLS 1.0", "TLS 1.1")]
+        if legacy:
+            notices.append({
+                "type": "grade_cap",
+                "severity": "warning",
+                "message": (
+                    f"This server supports {' and '.join(legacy)}. Grade capped to B."
+                ),
+            })
+
+        # TLS 1.3 present
+        if "TLS 1.3" in proto_names:
+            notices.append({
+                "type": "tls13",
+                "severity": "info",
+                "message": "This server supports TLS 1.3.",
+            })
+
+        # No PQC key exchange
+        if not hybrid_ready:
+            notices.append({
+                "type": "no_pqc_kex",
+                "severity": "warning",
+                "message": (
+                    "This server does not support PQC (Post-Quantum Cryptography) key exchange. "
+                    "Deploy X25519MLKEM768 to protect against Harvest-Now-Decrypt-Later attacks."
+                ),
+            })
+        else:
+            notices.append({
+                "type": "pqc_kex",
+                "severity": "info",
+                "message": "This server supports PQC hybrid key exchange.",
+            })
+
+        return notices
 
     def _check_compliance(
         self,

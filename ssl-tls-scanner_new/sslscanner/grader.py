@@ -19,41 +19,46 @@ def calculate_grade(
     forward_secrecy: int,
     key_size:        int,
     key_alg:         str,
+    named_groups:    dict = None,
 ) -> tuple:
-    """Returns (grade, grade_trust_ignored, has_warnings)."""
+    """Returns (grade, grade_trust_ignored, has_warnings, notices).
+
+    notices — list of SSL-Labs-style informational strings shown in the UI.
+    """
     proto_ids    = {p["id"] for p in protocols}
     has_warnings = False
+    notices      = []
 
     # ── Immediate F ──────────────────────────────────────────────────────────
     if vulns.get("heartbleed"):
-        return "F", "F", False
+        return "F", "F", False, []
 
     if vulns.get("poodle") or vulns.get("drownVulnerable"):
-        return "F", "F", False
+        return "F", "F", False, []
 
     if vulns.get("freak") or vulns.get("logjam"):
-        return "F", "F", False
+        return "F", "F", False, []
 
     if 512 in proto_ids or 768 in proto_ids:   # SSLv2 or SSLv3 accepted
-        return "F", "F", False
+        return "F", "F", False, []
 
     # FIX: only F if value==2 (confirmed vulnerable), not 3 (inconclusive/test failed)
     if vulns.get("openSslCcs") == 2:
-        return "F", "F", False
+        return "F", "F", False, []
 
     if vulns.get("bleichenbacher") == 2:
-        return "F", "F", False
+        return "F", "F", False, []
 
     # FIX: ticketbleed==2 means confirmed vulnerable, 3 = inconclusive
     if vulns.get("ticketbleed") == 2:
-        return "F", "F", False
+        return "F", "F", False, []
 
     # ── Certificate trust issues ──────────────────────────────────────────────
     cert_issues = leaf_cert.get("issues", 0)
     if cert_issues & 1:   # expired
-        return "T", "T", False
+        return "T", "T", False, []
     if cert_issues & 2:   # not yet valid
-        return "T", "T", False
+        return "T", "T", False, []
 
     # ── Start at A ───────────────────────────────────────────────────────────
     grade = "A"
@@ -68,6 +73,16 @@ def calculate_grade(
     # TLS 1.0 or 1.1 present → cap at B
     if 769 in proto_ids or 770 in proto_ids:
         grade = min_grade(grade, "B")
+        legacy = []
+        if 769 in proto_ids: legacy.append("TLS 1.0")
+        if 770 in proto_ids: legacy.append("TLS 1.1")
+        notices.append(
+            f"This server supports {' and '.join(legacy)}. Grade capped to B."
+        )
+
+    # ── TLS 1.3 notice ───────────────────────────────────────────────────────
+    if 772 in proto_ids:
+        notices.append("This server supports TLS 1.3.")
 
     # ── Forward secrecy ───────────────────────────────────────────────────────
     if forward_secrecy == 0:
@@ -116,13 +131,28 @@ def calculate_grade(
     if has_3des:
         has_warnings = True
 
+    # ── PQC key exchange notice ───────────────────────────────────────────────
+    pqc_groups = []
+    if named_groups:
+        pqc_groups = [
+            g for g in named_groups.get("list", [])
+            if g.get("type") == "PQC-Hybrid"
+        ]
+    if pqc_groups:
+        names = ", ".join(g.get("name", "") for g in pqc_groups[:3])
+        notices.append(f"This server supports PQC hybrid key exchange ({names}).")
+    else:
+        notices.append(
+            "This server does not support PQC (Post-Quantum Cryptography) key exchange."
+        )
+
     # ── A+ requires long HSTS ─────────────────────────────────────────────────
     if grade == "A":
         hsts_max_age = hsts.get("maxAge") or 0
         if hsts.get("status") == "present" and hsts_max_age >= 15552000:
             grade = "A+"
 
-    return grade, grade, has_warnings
+    return grade, grade, has_warnings, notices
 
 
 GRADE_ORDER = ["A+", "A", "B", "C", "D", "E", "F", "T", "M"]

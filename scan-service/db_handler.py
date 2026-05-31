@@ -1,5 +1,6 @@
 import httpx
 import logging
+import time
 from typing import Dict, Any, Optional
 from datetime import datetime
 from http_client import call_service
@@ -17,22 +18,31 @@ class DatabaseHandler:
         self.db_service_url = os.getenv("DB_SERVICE_URL", "http://db-service:8001")
         logger.info(f"📊 Attempting to connect to database service at: {self.db_service_url}")
         self.enabled = False
-        self._connection_checked = False
+        self._last_check_time: float = 0.0
+        _RETRY_INTERVAL = 30  # seconds between connection retries
+        self._retry_interval = _RETRY_INTERVAL
     
     async def _ensure_connected(self):
-        """Check connection on first use"""
-        if not self._connection_checked:
-            self._connection_checked = True
-            try:
-                response = await call_service("GET", f"{self.db_service_url}/health", timeout=5)
-                self.enabled = response.status_code == 200
-                if self.enabled:
-                    logger.info("✅ Database service is available")
-                else:
-                    logger.warning("⚠️ Database service health check failed")
-            except Exception as e:
-                logger.error(f"❌ Cannot connect to database service: {e}")
+        """Check connection and retry with a cooldown when previously unavailable."""
+        if self.enabled:
+            return  # Already confirmed connected — skip the check
+
+        now = time.monotonic()
+        if now - self._last_check_time < self._retry_interval:
+            return  # Too soon to retry; stay disabled until cooldown expires
+
+        self._last_check_time = now
+        try:
+            response = await call_service("GET", f"{self.db_service_url}/health", timeout=5)
+            if response.status_code == 200:
+                self.enabled = True
+                logger.info("✅ Database service is available")
+            else:
                 self.enabled = False
+                logger.warning("⚠️ Database service health check failed (status %s)", response.status_code)
+        except Exception as e:
+            self.enabled = False
+            logger.error(f"❌ Cannot connect to database service: {e}")
     
     async def save_scan_result(self, result: Dict[str, Any]) -> bool:
         """Save a single scan result to database (no batch required)."""

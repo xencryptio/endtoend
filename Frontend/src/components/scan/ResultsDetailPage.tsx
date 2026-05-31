@@ -115,6 +115,36 @@ const gradeBorder = (g: string): string => {
   return "border-red-500 text-red-600 dark:text-red-400";
 };
 
+// Derive a grade for a named group / elliptic curve from its type and bit-size
+const deriveCurveGrade = (type: string, bits: number, name: string): string => {
+  const t = (type || "").toUpperCase();
+  const n = (name || "").toUpperCase();
+  // PQC-Hybrid → A+ (best possible)
+  if (t.includes("PQC") || n.includes("MLKEM") || n.includes("KYBER")) return "A+";
+  // Large FFDHE / big EC
+  if (bits >= 512 || t === "DH") return "A";
+  if (bits >= 384) return "A";
+  if (bits >= 256) return "B+";
+  if (bits >= 224) return "B";
+  return "C";
+};
+
+// Derive a grade for a handshake signature algorithm
+const deriveSigGrade = (algorithm: string): string => {
+  const u = (algorithm || "").toUpperCase();
+  if (u.includes("MLDSA") || u.includes("DILITHIUM")) return "A+";
+  if (u.includes("ED448")) return "A+";
+  if (u.includes("ED25519")) return "A";
+  if (u.includes("ECDSA") && u.includes("SHA512")) return "A";
+  if (u.includes("ECDSA") && u.includes("SHA384")) return "A";
+  if (u.includes("ECDSA")) return "B+";
+  if (u.includes("RSA") && u.includes("PSS")) return "B+";
+  if (u.includes("RSA") && u.includes("SHA256")) return "B";
+  if (u.includes("RSA")) return "B";
+  if (u.includes("DSA")) return "C";
+  return "B";
+};
+
 const gradeToScore = (g: string): number => {
   if (!g) return 0;
   const map: Record<string, number> = { 'A+': 97, 'A': 90, 'A-': 85, 'B+': 78, 'B': 72, 'B-': 68, 'C+': 58, 'C': 52, 'C-': 45, 'D': 38, 'F': 20 };
@@ -524,16 +554,28 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 <div className="pt-2">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5"><Key className="h-3.5 w-3.5" /> Elliptic Curves ({tlsConfig.supported_elliptic_curves.curves.length})</p>
                   <div className="space-y-1.5">
-                    {tlsConfig.supported_elliptic_curves.curves.map((curve: any, i: number) => (
-                      <div key={i} className="flex items-center gap-3 px-4 py-2.5 border border-border/60 rounded-lg bg-card/50">
-                        {curve.curve_pqc_grade
-                          ? <span className={`w-10 h-6 rounded border-2 flex items-center justify-center text-xs font-black flex-shrink-0 ${gradeBorder(curve.curve_pqc_grade)}`}>{curve.curve_pqc_grade}</span>
-                          : <span className="w-10 h-6 rounded bg-muted flex-shrink-0" />}
-                        <code className="font-mono text-xs font-semibold flex-1">{curve.name}</code>
-                        <span className="text-xs text-muted-foreground">{curve.type}</span>
-                        <span className="text-xs text-muted-foreground">{curve.bits} bits</span>
-                      </div>
-                    ))}
+                    {[...tlsConfig.supported_elliptic_curves.curves].sort((a: any, b: any) => {
+                      const ga = a.curve_pqc_grade || deriveCurveGrade(a.type || a.namedGroupType, a.bits, a.name);
+                      const gb = b.curve_pqc_grade || deriveCurveGrade(b.type || b.namedGroupType, b.bits, b.name);
+                      return gradeToScore(gb) - gradeToScore(ga);
+                    }).map((curve: any, i: number) => {
+                      const displayGrade = curve.curve_pqc_grade || deriveCurveGrade(curve.type || curve.namedGroupType, curve.bits, curve.name);
+                      const isPqc = (curve.type || curve.namedGroupType || "").toUpperCase().includes("PQC") || (curve.name || "").toUpperCase().includes("MLKEM") || (curve.name || "").toUpperCase().includes("KYBER");
+                      return (
+                        <div key={i} className={`flex items-center gap-3 px-4 py-2.5 border rounded-lg transition-colors
+                          ${isPqc ? "border-emerald-500/40 bg-emerald-50/30 dark:bg-emerald-900/10" : "border-border/60 bg-card/50"}`}>
+                          <span className={`w-10 h-6 rounded border-2 flex items-center justify-center text-xs font-black flex-shrink-0 ${gradeBorder(displayGrade)}`}>
+                            {displayGrade}
+                          </span>
+                          <code className="font-mono text-xs font-semibold flex-1">{curve.name}</code>
+                          {isPqc
+                            ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shrink-0">PQC-Hybrid</span>
+                            : <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border shrink-0">{curve.type || curve.namedGroupType || "EC"}</span>
+                          }
+                          <span className="text-xs text-muted-foreground shrink-0">{curve.bits} bits</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -543,15 +585,24 @@ const DomainDetailPage: React.FC<{ result: ScanResult; onBack: () => void }> = (
                 <div className="pt-2">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5"><Zap className="h-3.5 w-3.5" /> Handshake Signatures ({signatureAlgorithms.handshake_signatures.length})</p>
                   <div className="space-y-1.5">
-                    {signatureAlgorithms.handshake_signatures.map((sig: any, i: number) => (
-                      <div key={i} className="flex items-center gap-3 px-4 py-2.5 border border-border/60 rounded-lg bg-card/50">
-                        {sig.sig_pqc_grade
-                          ? <span className={`w-10 h-6 rounded border-2 flex items-center justify-center text-xs font-black flex-shrink-0 ${gradeBorder(sig.sig_pqc_grade)}`}>{sig.sig_pqc_grade}</span>
-                          : <span className="w-10 h-6 rounded bg-muted flex-shrink-0" />}
-                        <code className="font-mono text-xs font-semibold flex-1 truncate">{sig.algorithm}</code>
-                        <span className="text-xs text-muted-foreground hidden sm:block">{sig.protocol}</span>
-                      </div>
-                    ))}
+                    {[...signatureAlgorithms.handshake_signatures].sort((a: any, b: any) => {
+                      const ga = a.sig_pqc_grade || deriveSigGrade(a.algorithm);
+                      const gb = b.sig_pqc_grade || deriveSigGrade(b.algorithm);
+                      return gradeToScore(gb) - gradeToScore(ga);
+                    }).map((sig: any, i: number) => {
+                      const displayGrade = sig.sig_pqc_grade || deriveSigGrade(sig.algorithm);
+                      const isPqcSig = (sig.algorithm || "").toUpperCase().includes("MLDSA") || (sig.algorithm || "").toUpperCase().includes("DILITHIUM");
+                      return (
+                        <div key={i} className={`flex items-center gap-3 px-4 py-2.5 border rounded-lg transition-colors
+                          ${isPqcSig ? "border-emerald-500/40 bg-emerald-50/30 dark:bg-emerald-900/10" : "border-border/60 bg-card/50"}`}>
+                          <span className={`w-10 h-6 rounded border-2 flex items-center justify-center text-xs font-black flex-shrink-0 ${gradeBorder(displayGrade)}`}>
+                            {displayGrade}
+                          </span>
+                          <code className="font-mono text-xs font-semibold flex-1 truncate">{sig.algorithm}</code>
+                          <span className="text-xs text-muted-foreground shrink-0 hidden sm:block">{sig.protocol}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

@@ -1792,6 +1792,12 @@ const clearLiveProgress = (batchId: string) => {
                   const pqcGrade = pqcAnalysis?.overall_grade || 'N/A';
                   const quantumStatus = pqcAnalysis?.quantum_ready === true ? 'Quantum Ready' : 'Not Ready';
 
+                  // Notices from PQC scorer + TLS grader
+                  const scorerNotices: Array<{type: string; severity: string; message: string}> =
+                    pqcAnalysis?.notices ?? [];
+                  const graderNotices: string[] =
+                    scan.raw_response?.scanner_report?.endpoints?.[0]?.gradeNotices ?? [];
+
                   return (
                                         <UnifiedResultCard
                                           key={uniqueKey}
@@ -1812,7 +1818,7 @@ const clearLiveProgress = (batchId: string) => {
                                               valueClassName: getGradeColor(pqcGrade)
                                             },
                                             { 
-                                              label: "Grade", 
+                                              label: "PQC Grade", 
                                               value: pqcGrade,
                                               valueClassName: getGradeColor(pqcGrade)
                                             },
@@ -1862,6 +1868,33 @@ const clearLiveProgress = (batchId: string) => {
                                             }
                                           ]}
                                         >
+                                          {/* Grade notices (SSL Labs-style) */}
+                                          {isIndividualDomain && scan.status === 'completed' && (scorerNotices.length > 0 || graderNotices.length > 0) && (
+                                            <div className="mt-3 space-y-1.5">
+                                              {scorerNotices.map((n, i) => (
+                                                <div
+                                                  key={i}
+                                                  className={`flex items-start gap-2 text-xs px-3 py-2 rounded-md
+                                                    ${n.severity === 'warning'
+                                                      ? 'bg-warning/10 text-warning dark:bg-warning/20'
+                                                      : 'bg-primary/5 text-muted-foreground'}`}
+                                                >
+                                                  <span className="mt-0.5 shrink-0">{n.severity === 'warning' ? '⚠' : 'ℹ'}</span>
+                                                  <span>{n.message}</span>
+                                                </div>
+                                              ))}
+                                              {graderNotices.filter(msg => !scorerNotices.some(n => n.message.startsWith(msg.slice(0, 20)))).map((msg, i) => (
+                                                <div
+                                                  key={`g${i}`}
+                                                  className="flex items-start gap-2 text-xs px-3 py-2 rounded-md bg-muted/50 text-muted-foreground"
+                                                >
+                                                  <span className="mt-0.5 shrink-0">ℹ</span>
+                                                  <span>{msg}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+
                                           {!isIndividualDomain && (domainLabel || shouldShowDomainHint) && (
                                             <div className="mb-3 text-sm">
                                               <span className="font-semibold text-foreground">Domain:</span>{' '}

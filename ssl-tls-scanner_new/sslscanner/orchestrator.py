@@ -200,7 +200,7 @@ def scan_endpoint(host: str, ip: str, port: int = 443) -> Tuple[dict, List[dict]
         "poodleTls":      poodle_tls,
         "zombiePoodle":   zombie_poodle,
     }
-    grade, grade_trust_ignored, has_warnings = calculate_grade(
+    grade, grade_trust_ignored, has_warnings, grade_notices = calculate_grade(
         protocols=protocols,
         suites=suites,
         leaf_cert=leaf_cert,
@@ -209,6 +209,7 @@ def scan_endpoint(host: str, ip: str, port: int = 443) -> Tuple[dict, List[dict]
         forward_secrecy=fs,
         key_size=leaf_cert.get("keySize", 2048),
         key_alg=leaf_cert.get("keyAlg", "RSA"),
+        named_groups=named_groups,
     )
     print(f"  ╚═ Grade: {grade} {'✓' if grade in ('A+','A') else '⚠'} ══════════════════════════════════╝")
 
@@ -284,6 +285,7 @@ def scan_endpoint(host: str, ip: str, port: int = 443) -> Tuple[dict, List[dict]
         "statusMessage":       "Ready",
         "grade":               grade,
         "gradeTrustIgnored":   grade_trust_ignored,
+        "gradeNotices":        grade_notices,
         "hasWarnings":         has_warnings,
         "isExceptional":       grade == "A+",
         "progress":            100,
