@@ -240,22 +240,35 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
     loadHistory();
   }, [loadHistory]);
 
-  // Auto-load repo scan results if navigated from Applications page
+  // Auto-load or auto-trigger repo scan when navigated from Scan Center
+  const autoLoadHandledRef = React.useRef(false);
   useEffect(() => {
-    if (autoLoadRepo && scans.length > 0) {
-      // Find the most recent scan for this repo URL
+    if (!autoLoadRepo || autoLoadHandledRef.current) return;
+
+    // Case 1: history already loaded — try to find a matching completed scan
+    if (scans.length > 0) {
+      autoLoadHandledRef.current = true;
       const repoLower = autoLoadRepo.toLowerCase();
-      const matchingScan = scans.find(scan => 
+      const matchingScan = scans.find(scan =>
         scan.repo_url?.toLowerCase().includes(repoLower) ||
         scan.repo_name?.toLowerCase().includes(repoLower)
       );
-
       if (matchingScan && matchingScan.scan_status === 'completed') {
-        // Auto-open the results detail view
         handleViewResults(matchingScan.id);
+        return;
       }
+      // No existing completed scan — trigger a fresh scan
+      handleOnboardingRepoScan(autoLoadRepo, 'main');
+      return;
     }
-  }, [autoLoadRepo, scans]);
+
+    // Case 2: history not yet loaded (isLoading still true) — wait, will re-run when scans loads
+    // But if loading is done and scans is empty, trigger immediately
+    if (!isLoading) {
+      autoLoadHandledRef.current = true;
+      handleOnboardingRepoScan(autoLoadRepo, 'main');
+    }
+  }, [autoLoadRepo, scans, isLoading]);
 
   useEffect(() => {
     setOnboardingReposLoading(true);

@@ -97,6 +97,7 @@ interface WebScanProps {
   onBack: () => void;
   apiBaseUrl: string;
   autoLoadDomain?: string;
+  autoScanUrl?: string;
   initialTab?: 'scan' | 'history';
 }
 
@@ -653,7 +654,7 @@ const connectSSEWithPost = async (
 // MAIN WEBSCAN COMPONENT
 // ============================================================================
 
-const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, initialTab }) => {
+const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, autoScanUrl, initialTab }) => {
   const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'onboarded'>(initialTab || 'scan');
   const [urls, setUrls] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -891,9 +892,16 @@ const clearLiveProgress = (batchId: string) => {
         console.log('⚠️ No scans found in database, setting empty array');
         setScanHistory([]);
       }
+
+      // Auto-trigger a new scan if requested via prop
+      if (autoScanUrl) {
+        const dummyEvent = { preventDefault: () => {} } as React.FormEvent;
+        handleScanSubmit(dummyEvent, autoScanUrl);
+      }
     };
     
     initializeScans();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBaseUrl]);
 
   // Auto-load domain scan results if navigated from Applications page
