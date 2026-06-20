@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { AnimatePresence } from "framer-motion";
 import Dashboard from "./pages/Dashboard";
+import PQC_DASHBOARD from "./pages/PQC_DASHBOARD";
 import Applications from "./pages/Applications";
 import Vulnerabilities2 from "./pages/Vulnerabilities2";
 import Profile from "./pages/Profile";
@@ -41,6 +42,9 @@ const AnimatedRoutes = () => {
         
         {/* Application View */}
         <Route path="/app/:appId" element={<ApplicationDashboard />} />
+
+        {/* PQC Analysis Dashboard */}
+        <Route path="/pqc-dashboard" element={<PQC_DASHBOARD />} />
 
         {/* Existing routes */}
         <Route path="/applications" element={<Applications />} />

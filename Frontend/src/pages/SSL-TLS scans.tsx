@@ -389,7 +389,7 @@ const SingleAssetTab: React.FC<{
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">IP / Hostname</label>
-              <Input value={endpointVal} onChange={e => setEndpointVal(e.target.value)} placeholder="10.0.0.1 or server.company.com" className="font-mono text-sm" onKeyDown={e => e.key === "Enter" && handleRun()} />
+              <Input value={endpointVal} onChange={e => setEndpointVal(e.target.value)} placeholder="10.0.0.1" className="font-mono text-sm" onKeyDown={e => e.key === "Enter" && handleRun()} />
             </div>
             <p className="text-xs text-muted-foreground">{cfg.scanDesc}</p>
           </div>

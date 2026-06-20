@@ -11,6 +11,7 @@ import {
   Computer,
   ClipboardCheck,
   ClipboardPlus,
+  BarChart3,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ import {
 // -------------------
 const menuItems = [
   { title: "Dashboard", url: "/", icon: Home },
+  { title: "PQC Analysis", url: "/pqc-dashboard", icon: BarChart3 },
   { title: "Applications", url: "/applications", icon: Server },
   { title: "Vulnerabilities", url: "/vulnerabilities", icon: Shield },
   { title: "Profile", url: "/profile", icon: User },
