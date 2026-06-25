@@ -23,6 +23,11 @@ import SubOrgDashboard from './components/dashboard/SubOrgDashboard'; // New Imp
 import ApplicationDashboard from './components/dashboard/ApplicationDashboard'; // New Import
 import NotFound from "./pages/NotFound";
 
+// ─── 🆕 ELK-powered pages ──────────────────────────────────────────────────
+import DashboardELK from "./pages/DashboardELK";
+import ResultsELK from "./pages/ResultsELK";
+import ScanHistoryELK from "./pages/ScanHistoryELK";
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { staleTime: 1000 * 60 * 5 }, // 5 minutes
@@ -58,7 +63,12 @@ const AnimatedRoutes = () => {
         <Route path="/migrationAssist" element={<MigrationAssist />} />
         <Route path="/integration" element={<Integration />} />
         <Route path="/onboarding" element={<Onboarding />} />
-        
+
+        {/* 🆕 ELK-backed routes (parallel to Postgres pages) */}
+        <Route path="/elk/dashboard" element={<DashboardELK />} />
+        <Route path="/elk/results" element={<ResultsELK />} />
+        <Route path="/elk/history" element={<ScanHistoryELK />} />
+
         {/* 404 Fallback */}
         <Route path="*" element={<NotFound />} />
       </Routes>

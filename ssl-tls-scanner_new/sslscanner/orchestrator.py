@@ -322,7 +322,7 @@ def run(host: str, port: int = 443, output_file: Optional[str] = None,
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║           SSL SCANNER — In-House  v1.0                       ║
-║           Modeled after Qualys SSL Labs Report Format        ║
+║           Xencryptio     ║ Nipu Negi
 ╚══════════════════════════════════════════════════════════════╝
   Target : {host}:{port}
 """, flush=True)

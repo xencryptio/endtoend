@@ -12,6 +12,9 @@ import {
   ClipboardCheck,
   ClipboardPlus,
   BarChart3,
+  Database,
+  History,
+  Activity,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -47,6 +50,13 @@ const menuItems = [
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
+// 🆕 ELK-backed menu (parallel to legacy Postgres pages)
+const elkMenuItems = [
+  { title: "ELK Dashboard", url: "/elk/dashboard", icon: Activity },
+  { title: "ELK Results", url: "/elk/results", icon: Database },
+  { title: "Scan History", url: "/elk/history", icon: History },
+];
+
 // -------------------
 // Navigation Component
 // -------------------
@@ -68,9 +78,9 @@ const NavigationContent = ({
       ? "bg-primary text-primary-foreground font-medium"
       : "hover:bg-accent text-foreground";
 
-  return (
+  const renderItems = (items: typeof menuItems) => (
     <SidebarMenu>
-      {menuItems.map((item) => (
+      {items.map((item) => (
         <SidebarMenuItem key={item.title}>
           <SidebarMenuButton
             asChild
@@ -91,6 +101,20 @@ const NavigationContent = ({
         </SidebarMenuItem>
       ))}
     </SidebarMenu>
+  );
+
+  return (
+    <div className="space-y-4">
+      {renderItems(menuItems)}
+      <div>
+        {!isCollapsed && (
+          <p className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-purple-600">
+            ELK · Audit Trail
+          </p>
+        )}
+        {renderItems(elkMenuItems)}
+      </div>
+    </div>
   );
 };
 

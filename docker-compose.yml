@@ -326,6 +326,7 @@ services:
       - VITE_SYSTEM_SCAN_API_URL=http://${VM_HOST}:9000
       - VITE_REPO_SCAN_API_URL=http://${VM_HOST}:8003
       - VITE_ONBOARDING_API_URL=http://${VM_HOST}:8008
+      - VITE_ELK_QUERY_API_URL=http://${VM_HOST}:9101
     networks:
       - xencrypt-network
     depends_on:
@@ -453,6 +454,161 @@ services:
   #       max-size: "10m"
   #       max-file: "5"
 
+  # ===========================================================================
+  # 🆕 ELASTICSEARCH - Document store for all scan results (audit trail)
+  # ===========================================================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9201:9200"
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # 🆕 KIBANA - Visualization UI for Elasticsearch
+  # ===========================================================================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_REPORTING_ENABLED=false
+      - SERVER_PUBLICBASEURL=http://localhost:5601
+    ports:
+      - "5601:5601"
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # 🆕 ELK INDEXER - Writes scan results into Elasticsearch (audit-friendly)
+  # ===========================================================================
+  elk-indexer:
+    build:
+      context: ./elk-indexer
+      dockerfile: Dockerfile
+    container_name: elk-indexer
+    ports:
+      - "9100:9100"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9100/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # 🆕 ELK QUERY API - Read API for React dashboards (reads from Elasticsearch)
+  # ===========================================================================
+  elk-query-api:
+    build:
+      context: ./elk-query-api
+      dockerfile: Dockerfile
+    container_name: elk-query-api
+    ports:
+      - "9101:9101"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9101/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # 🆕 ELK SYNC - Polls existing scan APIs and pushes results into Elasticsearch
+  # ===========================================================================
+  elk-sync:
+    build:
+      context: ./elk-sync
+      dockerfile: Dockerfile
+    container_name: elk-sync
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ELK_INDEXER_URL=http://elk-indexer:9100
+      - SCAN_API_URL=http://crypto-scanner:8000
+      - REPO_API_URL=http://repo-scanner:8001
+      - SYSTEM_API_URL=http://system-scan:9000
+      - POLL_INTERVAL_SECONDS=60
+    networks:
+      - xencrypt-network
+    restart: unless-stopped
+    depends_on:
+      elk-indexer:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
 # =============================================================================
 # NETWORKS
 # =============================================================================
@@ -474,6 +630,8 @@ volumes:
   agent-legacy-data:
     driver: local
   agent-mixed-data:
+    driver: local
+  elasticsearch-data:
     driver: local
 
 
