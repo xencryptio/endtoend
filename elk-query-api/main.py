@@ -316,3 +316,283 @@ def stats():
         return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# /api/elk/analyst — analyst-grade dashboard payload, all aggregations
+# ---------------------------------------------------------------------------
+def _terms_list(agg, key="key") -> List[Dict[str, Any]]:
+    if not agg:
+        return []
+    return [
+        {"key": b[key], "count": b["doc_count"]}
+        for b in agg.get("buckets", [])
+    ]
+
+
+def _top_bucket_key(agg) -> Optional[Any]:
+    buckets = (agg or {}).get("buckets", []) if agg else []
+    return buckets[0]["key"] if buckets else None
+
+
+@app.get("/api/elk/analyst")
+def analyst_dashboard(
+    interval: str = Query("day", description="hour|day|week|month"),
+):
+    """
+    One-call payload powering the in-app PQC Analyst dashboard.
+    Pure Elasticsearch aggregations — no Kibana involved.
+    """
+    body: Dict[str, Any] = {
+        "size": 0,
+        "track_total_hits": True,
+        "aggs": {
+            "unique_assets":     {"cardinality": {"field": "asset_id"}},
+            "avg_score":         {"avg":   {"field": "overall_score"}},
+            "avg_readiness":     {"avg":   {"field": "quantum_readiness_percentage"}},
+            "total_vulns":       {"sum":   {"field": "vulnerabilities_count"}},
+            "total_findings":    {"sum":   {"field": "findings_count"}},
+            "quantum_ready":     {"terms": {"field": "quantum_ready", "size": 2}},
+            "by_asset_type":     {"terms": {"field": "asset_type", "size": 10}},
+            "by_grade":          {"terms": {"field": "overall_grade", "size": 15}},
+            "score_by_type": {
+                "terms": {"field": "asset_type", "size": 10},
+                "aggs": {
+                    "avg_score":     {"avg": {"field": "overall_score"}},
+                    "avg_readiness": {"avg": {"field": "quantum_readiness_percentage"}},
+                    "total_vulns":   {"sum": {"field": "vulnerabilities_count"}},
+                },
+            },
+            "qr_trend": {
+                "date_histogram": {
+                    "field": "scanned_at",
+                    "calendar_interval": interval,
+                    "min_doc_count": 0,
+                },
+                "aggs": {
+                    "avg_readiness": {"avg": {"field": "quantum_readiness_percentage"}},
+                    "total_vulns":   {"sum": {"field": "vulnerabilities_count"}},
+                    "by_type": {
+                        "terms": {"field": "asset_type", "size": 5},
+                        "aggs": {
+                            "avg_readiness": {"avg": {"field": "quantum_readiness_percentage"}},
+                            "total_vulns":   {"sum": {"field": "vulnerabilities_count"}},
+                        },
+                    },
+                },
+            },
+            "domains": {
+                "filter": {"term": {"asset_type": "domain"}},
+                "aggs": {
+                    "cipher_suites":   {"terms": {"field": "primary_cipher_suite", "size": 10}},
+                    "public_key_algos": {"terms": {"field": "public_key_algorithm", "size": 10}},
+                    "issuers":         {"terms": {"field": "cert_issuer", "size": 10}},
+                    "hsts":            {"terms": {"field": "hsts_enabled", "size": 2}},
+                    "ocsp":            {"terms": {"field": "ocsp_stapling_active", "size": 2}},
+                    "ct_present":      {"terms": {"field": "ct_present", "size": 2}},
+                    "pfs":             {"terms": {"field": "ephemeral_key_exchange", "size": 2}},
+                    "tls_versions":    {"terms": {"field": "tls_version", "size": 10}},
+                },
+            },
+            "repos": {
+                "filter": {"term": {"asset_type": "repo"}},
+                "aggs": {
+                    "vulnerable_algorithms": {"terms": {"field": "vulnerable_algorithms", "size": 20}},
+                    "algorithm_names":       {"terms": {"field": "algorithm_names", "size": 20}},
+                    "platforms":             {"terms": {"field": "platform", "size": 10}},
+                    "findings_by_repo": {
+                        "terms": {"field": "asset_label", "size": 15, "order": {"findings": "desc"}},
+                        "aggs": {
+                            "findings":          {"sum": {"field": "findings_count"}},
+                            "total_files":       {"sum": {"field": "total_files"}},
+                            "total_algorithms":  {"sum": {"field": "total_algorithms"}},
+                        },
+                    },
+                    "sum_true_pqc":            {"sum": {"field": "true_pqc_count"}},
+                    "sum_quantum_safe":        {"sum": {"field": "quantum_safe_count"}},
+                    "sum_quantum_vulnerable":  {"sum": {"field": "quantum_vulnerable_count"}},
+                },
+            },
+            "endpoints": {
+                "filter": {"term": {"asset_type": "asset"}},
+                "aggs": {
+                    "fips":            {"terms": {"field": "fips_mode_enabled", "size": 2}},
+                    "os":              {"terms": {"field": "os_info", "size": 10}},
+                    "architectures":   {"terms": {"field": "architecture", "size": 10}},
+                    "weak_prov_by_host": {
+                        "terms": {"field": "hostname", "size": 15, "order": {"sum_w": "desc"}},
+                        "aggs": {"sum_w": {"sum": {"field": "weak_providers_count"}}},
+                    },
+                    "weak_cph_by_host": {
+                        "terms": {"field": "hostname", "size": 15, "order": {"sum_c": "desc"}},
+                        "aggs": {"sum_c": {"sum": {"field": "weak_ciphers_count"}}},
+                    },
+                    "cert_stores":     {"sum": {"field": "certificate_stores_count"}},
+                    "total_weak_prov": {"sum": {"field": "weak_providers_count"}},
+                    "total_weak_cph":  {"sum": {"field": "weak_ciphers_count"}},
+                },
+            },
+            "at_risk": {
+                "terms": {
+                    "field": "asset_label",
+                    "size": 25,
+                    "order": {"avg_score": "asc"},
+                },
+                "aggs": {
+                    "avg_score":     {"avg": {"field": "overall_score"}},
+                    "avg_readiness": {"avg": {"field": "quantum_readiness_percentage"}},
+                    "total_vulns":   {"sum": {"field": "vulnerabilities_count"}},
+                    "top_type":      {"terms": {"field": "asset_type", "size": 1}},
+                    "top_grade":     {"terms": {"field": "overall_grade", "size": 1}},
+                },
+            },
+        },
+    }
+
+    try:
+        result = es.search(index=ALL_INDICES, body=body)
+    except Exception as e:
+        logger.exception("analyst aggregation failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    aggs = result.get("aggregations", {}) or {}
+    total_scans = result.get("hits", {}).get("total", {}).get("value", 0)
+
+    def num(path: Dict[str, Any], default: float = 0) -> float:
+        val = (path or {}).get("value")
+        return round(val, 1) if isinstance(val, (int, float)) else default
+
+    # KPI
+    kpi = {
+        "total_scans": total_scans,
+        "unique_assets": int(num(aggs.get("unique_assets"))),
+        "avg_score": num(aggs.get("avg_score")),
+        "avg_readiness": num(aggs.get("avg_readiness")),
+        "total_vulnerabilities": int(num(aggs.get("total_vulns"))),
+        "total_findings": int(num(aggs.get("total_findings"))),
+        "quantum_ready_count": next(
+            (b["doc_count"] for b in aggs.get("quantum_ready", {}).get("buckets", [])
+             if b["key_as_string"] == "true" or b["key"] is True or b["key"] == 1),
+            0,
+        ),
+    }
+
+    # Distributions
+    by_asset_type = _terms_list(aggs.get("by_asset_type"))
+    by_grade = _terms_list(aggs.get("by_grade"))
+
+    score_by_type = [
+        {
+            "type": b["key"],
+            "scans": b["doc_count"],
+            "avg_score": num(b.get("avg_score")),
+            "avg_readiness": num(b.get("avg_readiness")),
+            "total_vulnerabilities": int(num(b.get("total_vulns"))),
+        }
+        for b in aggs.get("score_by_type", {}).get("buckets", [])
+    ]
+
+    # Time series
+    qr_trend = [
+        {
+            "timestamp": b["key_as_string"],
+            "scans": b["doc_count"],
+            "avg_readiness": num(b.get("avg_readiness")),
+            "total_vulnerabilities": int(num(b.get("total_vulns"))),
+            "by_type": [
+                {
+                    "type": t["key"],
+                    "scans": t["doc_count"],
+                    "avg_readiness": num(t.get("avg_readiness")),
+                    "total_vulnerabilities": int(num(t.get("total_vulns"))),
+                }
+                for t in b.get("by_type", {}).get("buckets", [])
+            ],
+        }
+        for b in aggs.get("qr_trend", {}).get("buckets", [])
+    ]
+
+    # Domain
+    dom = aggs.get("domains", {}) or {}
+    domains = {
+        "cipher_suites":          _terms_list(dom.get("cipher_suites")),
+        "public_key_algorithms":  _terms_list(dom.get("public_key_algos")),
+        "issuers":                _terms_list(dom.get("issuers")),
+        "tls_versions":           _terms_list(dom.get("tls_versions")),
+        "hsts":                   _terms_list(dom.get("hsts")),
+        "ocsp_stapling":          _terms_list(dom.get("ocsp")),
+        "ct_present":             _terms_list(dom.get("ct_present")),
+        "ephemeral_key_exchange": _terms_list(dom.get("pfs")),
+    }
+
+    # Repos
+    rep = aggs.get("repos", {}) or {}
+    repos = {
+        "vulnerable_algorithms": _terms_list(rep.get("vulnerable_algorithms")),
+        "algorithm_names":       _terms_list(rep.get("algorithm_names")),
+        "platforms":             _terms_list(rep.get("platforms")),
+        "findings_by_repo": [
+            {
+                "repo": b["key"],
+                "scans": b["doc_count"],
+                "findings": int(num(b.get("findings"))),
+                "total_files": int(num(b.get("total_files"))),
+                "total_algorithms": int(num(b.get("total_algorithms"))),
+            }
+            for b in rep.get("findings_by_repo", {}).get("buckets", [])
+        ],
+        "composition": {
+            "true_pqc": int(num(rep.get("sum_true_pqc"))),
+            "quantum_safe": int(num(rep.get("sum_quantum_safe"))),
+            "quantum_vulnerable": int(num(rep.get("sum_quantum_vulnerable"))),
+        },
+    }
+
+    # Endpoints
+    ep = aggs.get("endpoints", {}) or {}
+    endpoints = {
+        "fips":           _terms_list(ep.get("fips")),
+        "os":             _terms_list(ep.get("os")),
+        "architectures":  _terms_list(ep.get("architectures")),
+        "weak_providers_by_host": [
+            {"host": b["key"], "scans": b["doc_count"],
+             "weak_providers": int(num(b.get("sum_w")))}
+            for b in ep.get("weak_prov_by_host", {}).get("buckets", [])
+        ],
+        "weak_ciphers_by_host": [
+            {"host": b["key"], "scans": b["doc_count"],
+             "weak_ciphers": int(num(b.get("sum_c")))}
+            for b in ep.get("weak_cph_by_host", {}).get("buckets", [])
+        ],
+        "total_certificate_stores": int(num(ep.get("cert_stores"))),
+        "total_weak_providers":     int(num(ep.get("total_weak_prov"))),
+        "total_weak_ciphers":       int(num(ep.get("total_weak_cph"))),
+    }
+
+    # At-risk table
+    at_risk = [
+        {
+            "label": b["key"],
+            "type": _top_bucket_key(b.get("top_type")),
+            "grade": _top_bucket_key(b.get("top_grade")),
+            "scans": b["doc_count"],
+            "avg_score": num(b.get("avg_score")),
+            "avg_readiness": num(b.get("avg_readiness")),
+            "total_vulnerabilities": int(num(b.get("total_vulns"))),
+        }
+        for b in aggs.get("at_risk", {}).get("buckets", [])
+    ]
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "interval": interval,
+        "kpi": kpi,
+        "by_asset_type": by_asset_type,
+        "by_grade": by_grade,
+        "score_by_type": score_by_type,
+        "qr_trend": qr_trend,
+        "domains": domains,
+        "repos": repos,
+        "endpoints": endpoints,
+        "at_risk": at_risk,
+    }

@@ -15,6 +15,7 @@ import {
   Database,
   History,
   Activity,
+  Sparkles,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ const menuItems = [
 
 // 🆕 ELK-backed menu (parallel to legacy Postgres pages)
 const elkMenuItems = [
+  { title: "PQC Analyst", url: "/elk/analyst", icon: Sparkles },
   { title: "ELK Dashboard", url: "/elk/dashboard", icon: Activity },
   { title: "ELK Results", url: "/elk/results", icon: Database },
   { title: "Scan History", url: "/elk/history", icon: History },

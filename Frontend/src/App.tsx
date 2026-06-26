@@ -27,6 +27,7 @@ import NotFound from "./pages/NotFound";
 import DashboardELK from "./pages/DashboardELK";
 import ResultsELK from "./pages/ResultsELK";
 import ScanHistoryELK from "./pages/ScanHistoryELK";
+import PqcAnalystDashboard from "./pages/PqcAnalystDashboard";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,6 +69,7 @@ const AnimatedRoutes = () => {
         <Route path="/elk/dashboard" element={<DashboardELK />} />
         <Route path="/elk/results" element={<ResultsELK />} />
         <Route path="/elk/history" element={<ScanHistoryELK />} />
+        <Route path="/elk/analyst" element={<PqcAnalystDashboard />} />
 
         {/* 404 Fallback */}
         <Route path="*" element={<NotFound />} />

@@ -609,6 +609,36 @@ services:
         max-size: "10m"
         max-file: "5"
 
+  # ===========================================================================
+  # 🆕 KIBANA BOOTSTRAP - One-shot import of data views + dashboards on start
+  # ===========================================================================
+  # Runs whenever the stack comes up. Idempotent (overwrite=true), so it is
+  # safe to re-run. Ensures the analyst dashboard is restored automatically
+  # after `docker compose down -v` or any volume wipe.
+  kibana-bootstrap:
+    build:
+      context: ./kibana-bootstrap
+      dockerfile: Dockerfile
+    container_name: kibana-bootstrap
+    environment:
+      - KIBANA_URL=http://kibana:5601
+      - MAX_WAIT_SECONDS=600
+      - POLL_INTERVAL_SECONDS=5
+    volumes:
+      - ./elk-indexer/kibana-objects.ndjson:/import/01-data-views.ndjson:ro
+      - ./elk-indexer/kibana-analyst-dashboard.ndjson:/import/02-analyst-dashboard.ndjson:ro
+    networks:
+      - xencrypt-network
+    depends_on:
+      kibana:
+        condition: service_healthy
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 # =============================================================================
 # NETWORKS
 # =============================================================================

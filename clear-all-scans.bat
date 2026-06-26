@@ -47,8 +47,24 @@ timeout /t 2 /nobreak >nul
 echo [OK] elk-sync stopped
 echo.
 
-REM Reset ELK indices
-echo [3/6] Resetting ELK indices...
+REM Clear PostgreSQL (parent tables included so APIs return empty)
+echo [3/6] Clearing PostgreSQL databases...
+
+echo   - Clearing scandb.scan_results...
+docker exec postgres psql -U scanuser -d scandb -c "DELETE FROM scan_results;" >nul 2>&1
+echo     [OK] scandb cleaned
+
+echo   - Clearing repo_scanner_db (findings, category_scores, scan_results, repositories)...
+docker exec postgres psql -U scanuser -d repo_scanner_db -c "DELETE FROM findings; DELETE FROM category_scores; DELETE FROM scan_results; DELETE FROM repositories;" >nul 2>&1
+echo     [OK] repo_scanner_db fully cleaned
+
+echo   - Clearing system_scanner_db (results, tasks)...
+docker exec postgres psql -U scanuser -d system_scanner_db -c "DELETE FROM results; DELETE FROM tasks;" >nul 2>&1
+echo     [OK] system_scanner_db cleaned
+echo.
+
+REM Reset ELK indices AFTER Postgres is empty
+echo [4/6] Resetting ELK indices...
 curl -s -X POST http://localhost:9100/admin/reindex-indices | find "true" >nul
 if !errorlevel! equ 0 (
     echo [OK] ELK indices recreated
@@ -57,22 +73,6 @@ if !errorlevel! equ 0 (
     pause
     exit /b 1
 )
-echo.
-
-REM Clear PostgreSQL
-echo [4/6] Clearing PostgreSQL databases...
-
-echo   - Clearing scandb.scan_results...
-docker exec postgres psql -U scanuser -d scandb -c "DELETE FROM scan_results;" >nul 2>&1
-echo     [OK] scandb cleaned
-
-echo   - Clearing repo_scanner_db...
-docker exec postgres psql -U scanuser -d repo_scanner_db -c "DELETE FROM findings; DELETE FROM scan_results;" >nul 2>&1
-echo     [OK] repo_scanner_db cleaned
-
-echo   - Clearing system_scanner_db.results...
-docker exec postgres psql -U scanuser -d system_scanner_db -c "DELETE FROM results;" >nul 2>&1
-echo     [OK] system_scanner_db cleaned
 echo.
 
 REM Verify cleanup

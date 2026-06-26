@@ -83,6 +83,101 @@ export interface ElkGlobalTimelinePoint {
   by_type: { type: string; scan_count: number; avg_readiness: number }[];
 }
 
+// -- Analyst dashboard --
+export interface ElkTermBucket {
+  key: string | number | boolean;
+  count: number;
+}
+
+export interface ElkAnalystDashboard {
+  generated_at: string;
+  interval: string;
+  kpi: {
+    total_scans: number;
+    unique_assets: number;
+    avg_score: number;
+    avg_readiness: number;
+    total_vulnerabilities: number;
+    total_findings: number;
+    quantum_ready_count: number;
+  };
+  by_asset_type: ElkTermBucket[];
+  by_grade: ElkTermBucket[];
+  score_by_type: Array<{
+    type: string;
+    scans: number;
+    avg_score: number;
+    avg_readiness: number;
+    total_vulnerabilities: number;
+  }>;
+  qr_trend: Array<{
+    timestamp: string;
+    scans: number;
+    avg_readiness: number;
+    total_vulnerabilities: number;
+    by_type: Array<{
+      type: string;
+      scans: number;
+      avg_readiness: number;
+      total_vulnerabilities: number;
+    }>;
+  }>;
+  domains: {
+    cipher_suites: ElkTermBucket[];
+    public_key_algorithms: ElkTermBucket[];
+    issuers: ElkTermBucket[];
+    tls_versions: ElkTermBucket[];
+    hsts: ElkTermBucket[];
+    ocsp_stapling: ElkTermBucket[];
+    ct_present: ElkTermBucket[];
+    ephemeral_key_exchange: ElkTermBucket[];
+  };
+  repos: {
+    vulnerable_algorithms: ElkTermBucket[];
+    algorithm_names: ElkTermBucket[];
+    platforms: ElkTermBucket[];
+    findings_by_repo: Array<{
+      repo: string;
+      scans: number;
+      findings: number;
+      total_files: number;
+      total_algorithms: number;
+    }>;
+    composition: {
+      true_pqc: number;
+      quantum_safe: number;
+      quantum_vulnerable: number;
+    };
+  };
+  endpoints: {
+    fips: ElkTermBucket[];
+    os: ElkTermBucket[];
+    architectures: ElkTermBucket[];
+    weak_providers_by_host: Array<{
+      host: string;
+      scans: number;
+      weak_providers: number;
+    }>;
+    weak_ciphers_by_host: Array<{
+      host: string;
+      scans: number;
+      weak_ciphers: number;
+    }>;
+    total_certificate_stores: number;
+    total_weak_providers: number;
+    total_weak_ciphers: number;
+  };
+  at_risk: Array<{
+    label: string;
+    type: string | null;
+    grade: string | null;
+    scans: number;
+    avg_score: number;
+    avg_readiness: number;
+    total_vulnerabilities: number;
+  }>;
+}
+
 // ----- Fetch helpers -------------------------------------------------------
 async function jsonGet<T>(path: string): Promise<T> {
   const r = await fetch(`${ELK_API_URL}${path}`);
@@ -137,6 +232,8 @@ export const elkApi = {
       total: number;
       scans: ElkScanDocument[];
     }>(`/api/elk/scans?type=${type}&page=${page}&page_size=${pageSize}`),
+  analyst: (interval: "hour" | "day" | "week" | "month" = "day") =>
+    jsonGet<ElkAnalystDashboard>(`/api/elk/analyst?interval=${interval}`),
 };
 
 // ----- Display helpers -----------------------------------------------------

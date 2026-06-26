@@ -1282,12 +1282,19 @@ class Database:
             db.flush()  # To get scan_result.id
 
             for finding in data['findings'][:100]:
+                # Postgres TEXT/VARCHAR cannot store NUL (0x00) bytes; binary
+                # files can produce them when matched by regex. Strip defensively.
+                ctx_raw = finding.get('context') or ''
+                match_raw = finding.get('match') or ''
+                ctx_clean = ctx_raw.replace('\x00', '')[:200]
+                match_clean = match_raw.replace('\x00', '')
+
                 new_finding = Finding(
                     scan_result_id=scan_result.id,
                     file_path=finding['file'],
                     line_number=finding['line'],
-                    context=finding['context'][:200],
-                    match_text=finding['match']
+                    context=ctx_clean,
+                    match_text=match_clean
                 )
                 db.add(new_finding)
         
@@ -1308,6 +1315,12 @@ class Database:
 
     def mark_scan_failed(self, db: Session, repo_id: int, error_message: str = None):
         """Mark a scan as failed"""
+        # If a prior insert raised, the session is in a rollback-required state.
+        # Roll back first so subsequent queries don't hit PendingRollbackError.
+        try:
+            db.rollback()
+        except Exception:
+            pass
         repo = db.query(Repository).filter(Repository.id == repo_id).first()
         if repo:
             repo.scan_status = 'failed'
@@ -1545,6 +1558,10 @@ class CryptoScanner:
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
+            # Strip NUL bytes — they survive utf-8 with errors='ignore' but break
+            # Postgres text inserts and confuse regex/line-splitting on binaries.
+            if '\x00' in content:
+                content = content.replace('\x00', '')
             lines = content.split('\n')
 
             # ── Documentation files: only scan inside ``` code fences ──────────
