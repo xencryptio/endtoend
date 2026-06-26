@@ -39,9 +39,14 @@ services:
     container_name: universal-scoring-service
     ports:
       - "9500:9500"
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
     networks:
       - xencrypt-network
     restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9500/"]
       interval: 30s
@@ -241,6 +246,7 @@ services:
       - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db
       - UVICORN_LOG_LEVEL=debug
       - SCORING_SERVICE_URL=http://universal-scoring-service:9500
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
     networks:
       - xencrypt-network
     restart: always

@@ -54,6 +54,7 @@ const menuItems = [
 // 🆕 ELK-backed menu (parallel to legacy Postgres pages)
 const elkMenuItems = [
   { title: "PQC Analyst", url: "/elk/analyst", icon: Sparkles },
+  { title: "Algorithm Scorer", url: "/elk/scorer", icon: Database },
   { title: "ELK Dashboard", url: "/elk/dashboard", icon: Activity },
   { title: "ELK Results", url: "/elk/results", icon: Database },
   { title: "Scan History", url: "/elk/history", icon: History },

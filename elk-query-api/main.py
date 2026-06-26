@@ -11,8 +11,18 @@ Endpoints:
   GET /api/elk/timeline                -> aggregated readiness over time (all assets)
   GET /api/elk/asset/{asset_id}        -> latest doc for an asset
   GET /api/elk/scans                   -> paginated scan history (all types)
+  GET /api/elk/analyst?interval=day    -> analyst dashboard with all aggregations
+  
+Algorithm Management:
+  GET /api/algorithms                  -> list all algorithms with filters
+  GET /api/algorithms/{name}           -> get specific algorithm
+  POST /api/algorithms                 -> create new algorithm
+  PUT /api/algorithms/{name}           -> update algorithm score/properties
+  DELETE /api/algorithms/{name}        -> mark algorithm as inactive
+  POST /api/algorithms/_reload-cache   -> trigger cache reload for scoring engines
 """
 import os
+import time
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -595,4 +605,247 @@ def analyst_dashboard(
         "repos": repos,
         "endpoints": endpoints,
         "at_risk": at_risk,
+    }
+
+
+# ===========================================================================
+# /api/algorithms/* — Algorithm score management (read/write)
+# ===========================================================================
+ALGO_INDEX = "crypto-algorithm-scores"
+CACHE_VERSION_INDEX = "crypto-config"
+CACHE_VERSION_DOC_ID = "algorithm-scores-version"
+
+
+def _touch_scores_version() -> None:
+    """
+    Write a version timestamp to ES whenever algorithm scores are changed.
+    Scoring engines do a cheap GET of this doc at the start of each scan and
+    reload their cache immediately if the timestamp is newer than their last load.
+    """
+    try:
+        es.index(
+            index=CACHE_VERSION_INDEX,
+            id=CACHE_VERSION_DOC_ID,
+            document={
+                "last_modified": time.time(),
+                "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
+            },
+        )
+    except Exception as exc:
+        logger.warning("Could not update scores version marker: %s", exc)
+
+
+@app.get("/api/algorithms")
+def list_algorithms(
+    component_type: Optional[str] = Query(None),
+    quantum_safe: Optional[bool] = Query(None),
+    active: bool = Query(True),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+):
+    """
+    List all algorithms with optional filters.
+    
+    Args:
+        component_type: Filter by 'kex', 'signature', 'symmetric', 'hash', 'protocol'
+        quantum_safe: Filter by quantum_safe true/false
+        active: Filter by active status (default: True = only active)
+        page: Page number (1-indexed)
+        page_size: Results per page
+    """
+    filters = [{"term": {"active": active}}]
+    if component_type:
+        filters.append({"term": {"component_type": component_type}})
+    if quantum_safe is not None:
+        filters.append({"term": {"quantum_safe": quantum_safe}})
+    
+    body = {
+        "query": {"bool": {"must": filters}},
+        "size": page_size,
+        "from": (page - 1) * page_size,
+        "sort": [{"algorithm": {"order": "asc"}}],
+    }
+    
+    result = _safe_search(ALGO_INDEX, body)
+    total = result["hits"]["total"]["value"]
+    algorithms = [
+        {
+            "id": hit["_id"],
+            **hit["_source"]
+        }
+        for hit in result["hits"]["hits"]
+    ]
+    
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "algorithms": algorithms,
+    }
+
+
+@app.get("/api/algorithms/{name}")
+def get_algorithm(name: str):
+    """Get a specific algorithm by name."""
+    body = {"query": {"term": {"algorithm": {"value": name}}}}
+    result = _safe_search(ALGO_INDEX, body)
+    
+    if result["hits"]["total"]["value"] == 0:
+        raise HTTPException(status_code=404, detail=f"Algorithm '{name}' not found")
+    
+    hit = result["hits"]["hits"][0]
+    return {
+        "id": hit["_id"],
+        **hit["_source"]
+    }
+
+
+@app.post("/api/algorithms")
+def create_algorithm(body: Dict[str, Any]):
+    """
+    Create a new algorithm score entry.
+    
+    Required fields:
+      - algorithm: str (name)
+      - component_type: str (kex, signature, symmetric, hash, protocol)
+      - base_score: float (0-100)
+      - quantum_safe: bool
+      - resistance: str (vulnerable, deprecated, grover_resistant, etc)
+    
+    Optional fields:
+      - reason: str
+      - migration: str
+      - variants: dict
+      - category: str
+      - tags: list[str]
+    """
+    algo_name = body.get("algorithm", "").upper()
+    
+    if not algo_name:
+        raise HTTPException(status_code=400, detail="'algorithm' field is required")
+    
+    if not isinstance(body.get("base_score"), (int, float)):
+        raise HTTPException(status_code=400, detail="'base_score' must be a number")
+    
+    # Check if already exists
+    existing = _safe_search(ALGO_INDEX, {"query": {"term": {"algorithm": {"value": algo_name}}}})
+    if existing["hits"]["total"]["value"] > 0:
+        raise HTTPException(status_code=409, detail=f"Algorithm '{algo_name}' already exists")
+    
+    # Prepare document
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    doc = {
+        "algorithm": algo_name,
+        "component_type": body.get("component_type", "unknown"),
+        "base_score": float(body.get("base_score", 0)),
+        "quantum_safe": bool(body.get("quantum_safe", False)),
+        "resistance": body.get("resistance", "unknown"),
+        "category": body.get("category", "unknown"),
+        "reason": body.get("reason", ""),
+        "migration": body.get("migration", ""),
+        "active": True,
+        "created_at": now,
+        "last_updated": now,
+        "tags": body.get("tags", []),
+    }
+    
+    if "variants" in body:
+        doc["variants"] = body["variants"]
+    
+    # Insert
+    result = es.index(index=ALGO_INDEX, document=doc)
+    _touch_scores_version()
+    return {
+        "id": result["_id"],
+        "algorithm": algo_name,
+        "status": "created",
+        "message": f"Algorithm '{algo_name}' created successfully",
+    }
+
+
+@app.put("/api/algorithms/{name}")
+def update_algorithm(name: str, body: Dict[str, Any]):
+    """
+    Update an algorithm score entry.
+    
+    Updatable fields:
+      - base_score, quantum_safe, resistance, category, reason, migration, variants, tags, active
+    """
+    # Get existing doc
+    existing_result = _safe_search(ALGO_INDEX, {"query": {"term": {"algorithm": {"value": name.upper()}}}})
+    
+    if existing_result["hits"]["total"]["value"] == 0:
+        raise HTTPException(status_code=404, detail=f"Algorithm '{name}' not found")
+    
+    hit = existing_result["hits"]["hits"][0]
+    doc_id = hit["_id"]
+    doc = hit["_source"]
+    
+    # Update allowed fields
+    updatable_fields = [
+        "base_score", "quantum_safe", "resistance", "category",
+        "reason", "migration", "variants", "tags", "active"
+    ]
+    
+    for field in updatable_fields:
+        if field in body:
+            doc[field] = body[field]
+    
+    doc["last_updated"] = datetime.now(timezone.utc).isoformat() + "Z"
+    
+    # Save
+    es.index(index=ALGO_INDEX, id=doc_id, document=doc)
+    _touch_scores_version()
+    return {
+        "algorithm": name,
+        "status": "updated",
+        "message": f"Algorithm '{name}' updated successfully",
+    }
+
+
+@app.delete("/api/algorithms/{name}")
+def delete_algorithm(name: str):
+    """Mark an algorithm as inactive (soft delete)."""
+    # Get existing doc
+    existing_result = _safe_search(ALGO_INDEX, {"query": {"term": {"algorithm": {"value": name.upper()}}}})
+    
+    if existing_result["hits"]["total"]["value"] == 0:
+        raise HTTPException(status_code=404, detail=f"Algorithm '{name}' not found")
+    
+    hit = existing_result["hits"]["hits"][0]
+    doc_id = hit["_id"]
+    doc = hit["_source"]
+    
+    # Mark as inactive instead of hard delete
+    doc["active"] = False
+    doc["last_updated"] = datetime.now(timezone.utc).isoformat() + "Z"
+    
+    es.index(index=ALGO_INDEX, id=doc_id, document=doc)
+    _touch_scores_version()
+    return {
+        "algorithm": name,
+        "status": "deactivated",
+        "message": f"Algorithm '{name}' marked as inactive",
+    }
+
+
+@app.post("/api/algorithms/_reload-cache")
+def reload_cache():
+    """
+    Notify scoring engines to reload algorithm cache from ES.
+    Returns stats about the current cache.
+    """
+    result = _safe_search(ALGO_INDEX, {
+        "query": {"term": {"active": True}},
+        "size": 10000,
+    })
+    
+    total_active = result["hits"]["total"]["value"]
+    algorithms = [hit["_source"]["algorithm"] for hit in result["hits"]["hits"]]
+    
+    return {
+        "status": "cache_reload_triggered",
+        "message": "Scoring engines should reload their algorithm cache from Elasticsearch",
+        "total_active_algorithms": total_active,
+        "sample_algorithms": algorithms[:10],
     }

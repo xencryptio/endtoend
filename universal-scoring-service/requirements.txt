@@ -5,3 +5,4 @@ requests
 tenacity
 circuitbreaker
 httpx
+elasticsearch>=8.0,<9.0

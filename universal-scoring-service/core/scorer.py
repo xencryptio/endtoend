@@ -38,6 +38,9 @@ class UniversalPQCScorer:
     """
     
     def __init__(self):
+        # Algorithm tables are loaded from Elasticsearch by algorithms.py at import time.
+        # They are available as module-level attributes and referenced here.
+        from .algorithms import PQ_RESISTANCE_TABLE, PQC_ALGORITHMS, DEPRECATED_ALGORITHMS, HYBRID_ALGORITHMS
         self.resistance_table = PQ_RESISTANCE_TABLE
         self.pqc_algorithms = PQC_ALGORITHMS
         self.deprecated_algorithms = DEPRECATED_ALGORITHMS
@@ -74,6 +77,15 @@ class UniversalPQCScorer:
         """
         if not algorithms:
             return self._empty_result(scoring_type)
+
+        # Reload algorithm cache from ES if older than CACHE_TTL_SECONDS.
+        # Picks up any score edits made via /elk/scorer without restarting.
+        from .algorithms import _maybe_reload, PQ_RESISTANCE_TABLE, PQC_ALGORITHMS, DEPRECATED_ALGORITHMS, HYBRID_ALGORITHMS
+        _maybe_reload()
+        self.resistance_table      = PQ_RESISTANCE_TABLE
+        self.pqc_algorithms        = PQC_ALGORITHMS
+        self.deprecated_algorithms = DEPRECATED_ALGORITHMS
+        self.hybrid_algorithms     = HYBRID_ALGORITHMS
 
         scored_algorithms = []
         for algo in algorithms:
