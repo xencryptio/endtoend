@@ -242,6 +242,68 @@ export const elkApi = {
     jsonGet<ElkVulnerabilitiesResponse>(
       `/api/elk/vulnerabilities?threshold=${threshold}&type=${type}&size=${size}`
     ),
+
+  // ----- Onboarding (ELK-direct) -----
+  onboardingJSON: (payload: Record<string, any>) =>
+    fetch(`${ELK_API_URL}/api/elk/onboarding`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j as any).detail || `HTTP ${r.status}`);
+      return j as ElkOnboardingResponse;
+    }),
+  onboardingCSV: (file: File, createdBy?: string, triggerScans = true) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (createdBy) fd.append("created_by", createdBy);
+    fd.append("trigger_scans", String(triggerScans));
+    return fetch(`${ELK_API_URL}/api/elk/onboarding/csv`, {
+      method: "POST",
+      body: fd,
+    }).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j as any).detail || `HTTP ${r.status}`);
+      return j as ElkOnboardingResponse;
+    });
+  },
+  onboardingCSVTemplateURL: () => `${ELK_API_URL}/api/elk/onboarding/csv-template`,
+  onboardingBatches: (size = 100) =>
+    jsonGet<{ total: number; batches: ElkOnboardingBatch[] }>(
+      `/api/elk/onboarding/batches?size=${size}`
+    ),
+  onboardingBatchDelete: (batchId: string) =>
+    fetch(`${ELK_API_URL}/api/elk/onboarding/batches/${encodeURIComponent(batchId)}`, {
+      method: "DELETE",
+    }).then(async (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
+  onboardedOrganizations: (size = 200) =>
+    jsonGet<{ total: number; organizations: ElkOnboardedOrg[] }>(
+      `/api/elk/onboarding/organizations?size=${size}`
+    ),
+  onboardedOrganizationDetail: (orgId: string) =>
+    jsonGet<ElkOnboardedOrgDetail>(
+      `/api/elk/onboarding/organizations/${encodeURIComponent(orgId)}`
+    ),
+  onboardedOrganizationDelete: (orgId: string) =>
+    fetch(
+      `${ELK_API_URL}/api/elk/onboarding/organizations/${encodeURIComponent(orgId)}`,
+      { method: "DELETE" }
+    ).then(async (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
+
+  // ----- Applications (ELK-direct) -----
+  applications: (size = 500) =>
+    jsonGet<ElkApplicationsResponse>(`/api/elk/applications?size=${size}`),
+  applicationDetail: (appId: string) =>
+    jsonGet<ElkApplicationDetail>(
+      `/api/elk/applications/${encodeURIComponent(appId)}`
+    ),
 };
 
 // ----- Vulnerabilities types ------------------------------------------------
@@ -314,3 +376,169 @@ export const formatDateTime = (iso?: string) => {
     return iso;
   }
 };
+
+// ----- Onboarding / Applications types ------------------------------------
+export interface ElkOnboardingResponse {
+  ok: boolean;
+  org_id: string;
+  batch_id: string;
+  totals: {
+    suborganizations: number;
+    applications: number;
+    repositories: number;
+    domains: number;
+    servers: number;
+  };
+  triggered: {
+    repos_ok: number;
+    repos_failed: number;
+    domains_ok: number;
+    domains_failed: number;
+    details: {
+      repos: Array<Record<string, any>>;
+      domains: Array<Record<string, any>>;
+    };
+  };
+}
+
+export interface ElkOnboardingBatch {
+  batch_id: string;
+  org_id: string;
+  organization_name: string;
+  created_by?: string | null;
+  submitted_at: string;
+  source: "json" | "csv" | string;
+  trigger_scans: boolean;
+  totals: { repositories: number; domains: number; servers: number };
+  triggered: {
+    repos_ok: number;
+    repos_failed: number;
+    domains_ok: number;
+    domains_failed: number;
+  };
+}
+
+export interface ElkOnboardedOrg {
+  org_id: string;
+  organization_name: string;
+  organization_email?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  totals: {
+    suborganizations: number;
+    applications: number;
+    repositories: number;
+    domains: number;
+    servers: number;
+  };
+}
+
+export interface ElkOnboardedOrgDetail extends ElkOnboardedOrg {
+  suborganizations: Array<{
+    suborg_id: string;
+    suborganization_name: string;
+    applications: Array<{
+      app_id: string;
+      application_name: string;
+      repositories: Array<{ repo_url: string; repo_name?: string; branch_to_scan?: string; asset_id?: string }>;
+      domains: Array<{ domain: string; asset_id?: string }>;
+      servers: Array<{ hostname?: string; ip_address?: string; operating_system?: string }>;
+    }>;
+  }>;
+}
+
+export interface ElkScanSnippet {
+  scan_id: string | null;
+  scanned_at: string | null;
+  overall_grade?: string | null;
+  overall_score?: number | null;
+  quantum_readiness_percentage?: number | null;
+  quantum_ready?: boolean | null;
+  vulnerabilities_count?: number | null;
+  asset_type?: string | null;
+}
+
+export interface ElkAppView {
+  app_id: string;
+  application_name: string;
+  repositories: {
+    items: Array<{ repo_url: string; repo_name?: string; branch_to_scan?: string; asset_id?: string; scan_count: number; latest_scan: ElkScanSnippet | null }>;
+    total: number;
+    scanned: number;
+    unscanned: number;
+    quantum_ready: number;
+    total_vulnerabilities: number;
+    avg_readiness: number | null;
+    avg_score: number | null;
+  };
+  domains: {
+    items: Array<{ domain: string; asset_id?: string; scan_count: number; latest_scan: ElkScanSnippet | null }>;
+    total: number;
+    scanned: number;
+    unscanned: number;
+    quantum_ready: number;
+    total_vulnerabilities: number;
+    avg_readiness: number | null;
+    avg_score: number | null;
+  };
+  servers: {
+    items: Array<{ hostname?: string; ip_address?: string; operating_system?: string; latest_scan?: ElkScanSnippet | null }>;
+    total: number;
+    scanned: number;
+    total_vulnerabilities: number;
+  };
+  stats: {
+    resources_total: number;
+    scanned: number;
+    total_vulnerabilities: number;
+    avg_readiness: number | null;
+    quantum_ready_resources: number;
+  };
+}
+
+export interface ElkSubOrgView {
+  suborg_id: string;
+  suborganization_name: string;
+  applications: ElkAppView[];
+  stats: {
+    applications: number;
+    resources_total: number;
+    scanned: number;
+    total_vulnerabilities: number;
+    avg_readiness: number | null;
+  };
+}
+
+export interface ElkOrgView {
+  org_id: string;
+  organization_name: string;
+  organization_email?: string | null;
+  created_by?: string | null;
+  updated_at?: string | null;
+  totals: any;
+  suborganizations: ElkSubOrgView[];
+  stats: {
+    applications: number;
+    scanned: number;
+    total_vulnerabilities: number;
+    avg_readiness: number | null;
+  };
+}
+
+export interface ElkApplicationsResponse {
+  summary: {
+    organizations: number;
+    applications: number;
+    scanned_resources: number;
+    total_vulnerabilities: number;
+    avg_readiness: number | null;
+  };
+  organizations: ElkOrgView[];
+}
+
+export interface ElkApplicationDetail {
+  organization: { org_id: string; organization_name: string };
+  suborganization: { suborg_id: string; suborganization_name: string };
+  application: ElkAppView;
+}

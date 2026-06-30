@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UnifiedCard } from "@/components/ui/unified";
+import QDayCountdown from "@/components/pqc/QDayCountdown";
 import { toast } from "sonner";
 import {
   elkApi,
@@ -274,6 +275,11 @@ const DashboardELK: React.FC = () => {
             />
           </div>
         )}
+
+        {/* Q-Day Countdown + future placeholder cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          <QDayCountdown />
+        </div>
 
         {/* Timeline */}
         <UnifiedCard className="mb-6">

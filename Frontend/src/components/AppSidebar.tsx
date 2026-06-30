@@ -57,6 +57,8 @@ const elkMenuItems = [
   { title: "PQC Analyst", url: "/elk/analyst", icon: Sparkles },
   { title: "Algorithm Scorer", url: "/elk/scorer", icon: Database },
   { title: "ELK Dashboard", url: "/elk/dashboard", icon: Activity },
+  { title: "ELK Onboarding", url: "/elk/onboarding", icon: ClipboardPlus },
+  { title: "ELK Applications", url: "/elk/applications", icon: Server },
   { title: "ELK Results", url: "/elk/results", icon: Database },
   { title: "ELK Vulnerabilities", url: "/elk/vulnerabilities", icon: ShieldAlert },
   { title: "Scan History", url: "/elk/history", icon: History },

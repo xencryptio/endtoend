@@ -571,6 +571,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - TLS_SCANNER_URL=http://crypto-scanner:8000
+      - REPO_SCANNER_URL=http://repo-scanner:8001
+      - SYSTEM_SCAN_URL=http://system-scan:9000
     networks:
       - xencrypt-network
     restart: unless-stopped
