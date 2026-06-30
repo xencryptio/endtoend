@@ -16,6 +16,7 @@ import {
   History,
   Activity,
   Sparkles,
+  ShieldAlert,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,7 @@ const elkMenuItems = [
   { title: "Algorithm Scorer", url: "/elk/scorer", icon: Database },
   { title: "ELK Dashboard", url: "/elk/dashboard", icon: Activity },
   { title: "ELK Results", url: "/elk/results", icon: Database },
+  { title: "ELK Vulnerabilities", url: "/elk/vulnerabilities", icon: ShieldAlert },
   { title: "Scan History", url: "/elk/history", icon: History },
 ];
 

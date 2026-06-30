@@ -333,6 +333,7 @@ services:
       - VITE_REPO_SCAN_API_URL=http://${VM_HOST}:8003
       - VITE_ONBOARDING_API_URL=http://${VM_HOST}:8008
       - VITE_ELK_QUERY_API_URL=http://${VM_HOST}:9101
+      - VITE_KIBANA_URL=http://${VM_HOST}:5601
     networks:
       - xencrypt-network
     depends_on:

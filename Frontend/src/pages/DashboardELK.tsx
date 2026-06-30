@@ -33,6 +33,10 @@ import {
 } from "@/api/elkClient";
 import { cn } from "@/lib/utils";
 
+// External link to Kibana — sourced from .env via docker-compose (VITE_KIBANA_URL)
+const KIBANA_URL =
+  (import.meta.env.VITE_KIBANA_URL as string | undefined) || "http://localhost:5601";
+
 // ---------------------------------------------------------------------------
 // Summary card
 // ---------------------------------------------------------------------------
@@ -322,12 +326,12 @@ const DashboardELK: React.FC = () => {
               </p>
               <p className="text-purple-700 mt-1">
                 <a
-                  href="http://localhost:5601"
+                  href={KIBANA_URL}
                   target="_blank"
                   rel="noreferrer"
                   className="underline font-mono"
                 >
-                  http://localhost:5601
+                  {KIBANA_URL}
                 </a>{" "}
                 — view raw documents, build custom visualisations, export PDFs.
               </p>

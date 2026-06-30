@@ -28,9 +28,9 @@ import { cn } from "@/lib/utils";
 // CONSTANTS & TYPES
 // ============================================================================
 
-const SCAN_API = "http://localhost:8000";
-const REPO_SCAN_API = "http://localhost:8003";
-const SYSTEM_SCAN_API = "http://localhost:9000";
+const SCAN_API        = (import.meta.env.VITE_SCAN_API_URL        as string | undefined) || "http://localhost:8000";
+const REPO_SCAN_API   = (import.meta.env.VITE_REPO_SCAN_API_URL   as string | undefined) || "http://localhost:8003";
+const SYSTEM_SCAN_API = (import.meta.env.VITE_SYSTEM_SCAN_API_URL as string | undefined) || "http://localhost:9000";
 
 // Helper: Extract weaknesses from audit results
 const extractWeaknesses = (auditResults: any): { vulnerabilities: string[]; weak_providers: string[]; weak_ciphers: string[] } => {

@@ -234,7 +234,59 @@ export const elkApi = {
     }>(`/api/elk/scans?type=${type}&page=${page}&page_size=${pageSize}`),
   analyst: (interval: "hour" | "day" | "week" | "month" = "day") =>
     jsonGet<ElkAnalystDashboard>(`/api/elk/analyst?interval=${interval}`),
+  vulnerabilities: (
+    threshold = 70,
+    type: "domain" | "repo" | "asset" | "all" = "all",
+    size = 500
+  ) =>
+    jsonGet<ElkVulnerabilitiesResponse>(
+      `/api/elk/vulnerabilities?threshold=${threshold}&type=${type}&size=${size}`
+    ),
 };
+
+// ----- Vulnerabilities types ------------------------------------------------
+export interface ElkVulnFinding {
+  algorithm: string;
+  score: number;
+  quantum_safe: boolean;
+  component_type?: string | null;
+  resistance?: string | null;
+  reason?: string | null;
+  migration?: string | null;
+  source_type: "domain" | "repo" | "asset" | string;
+  asset_id: string;
+  asset_label: string;
+  scan_id: string;
+  scanned_at: string;
+  role: string;
+  evidence: Record<string, any>;
+}
+
+export interface ElkVulnHistogramEntry {
+  algorithm: string;
+  score: number;
+  quantum_safe: boolean;
+  component_type?: string | null;
+  occurrences: number;
+  assets_affected: number;
+  by_type: { domain: number; repo: number; asset: number };
+}
+
+export interface ElkVulnerabilitiesResponse {
+  threshold: number;
+  type: string;
+  summary: {
+    total_assets_scanned: number;
+    assets_with_vulnerabilities: number;
+    assets_with_vulnerabilities_pct: number;
+    unique_algorithms_found: number;
+    algorithms_below_threshold: number;
+    algorithms_below_threshold_pct: number;
+    total_findings: number;
+  };
+  histogram: ElkVulnHistogramEntry[];
+  findings: ElkVulnFinding[];
+}
 
 // ----- Display helpers -----------------------------------------------------
 export const gradeColor = (grade?: string) => {

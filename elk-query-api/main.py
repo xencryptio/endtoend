@@ -613,6 +613,307 @@ def analyst_dashboard(
 # ===========================================================================
 ALGO_INDEX = "crypto-algorithm-scores"
 CACHE_VERSION_INDEX = "crypto-config"
+
+
+# ---------------------------------------------------------------------------
+# /api/elk/vulnerabilities — algorithms found in scans whose score < threshold
+# ---------------------------------------------------------------------------
+def _load_algorithm_scores() -> Dict[str, Dict[str, Any]]:
+    """Fetch all active algorithm score rows from ES, indexed by upper-case name."""
+    out: Dict[str, Dict[str, Any]] = {}
+    try:
+        body = {
+            "size": 2000,
+            "query": {"term": {"active": True}},
+        }
+        result = es.search(index=ALGO_INDEX, body=body)
+        for hit in result.get("hits", {}).get("hits", []):
+            src = hit.get("_source", {}) or {}
+            name = (src.get("algorithm") or "").strip().upper()
+            if name:
+                out[name] = src
+    except Exception as e:
+        logger.warning(f"Could not load algorithm scores: {e}")
+    return out
+
+
+def _lookup_algo_meta(
+    name: Optional[str], algo_scores: Dict[str, Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Find a score row for a raw algorithm/cipher/provider string.
+
+    First tries exact match, then substring matches (e.g. a cipher-suite
+    string `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384` will match a known
+    `AES_256_GCM` or `RSA` row).
+    """
+    if not name:
+        return None
+    up = str(name).strip().upper()
+    if not up:
+        return None
+    if up in algo_scores:
+        return algo_scores[up]
+    # Substring: scored name appears inside the candidate string
+    best: Optional[Dict[str, Any]] = None
+    best_len = 0
+    for k, v in algo_scores.items():
+        if len(k) < 3:
+            continue
+        if k in up and len(k) > best_len:
+            best = v
+            best_len = len(k)
+    return best
+
+
+@app.get("/api/elk/vulnerabilities")
+def elk_vulnerabilities(
+    threshold: float = Query(70, ge=0, le=100, description="Algorithms with score below this are listed"),
+    type: str = Query("all", description="domain | repo | asset | all"),
+    size: int = Query(500, ge=1, le=2000),
+):
+    """Flatten every algorithm occurrence across the latest scan of each asset,
+    join with the score in crypto-algorithm-scores, and return those that fall
+    below `threshold`.
+
+    Returns a summary (asset / algorithm coverage stats), a histogram for
+    charting, and a detailed list of findings with per-asset context.
+    """
+    index = TYPE_TO_INDEX.get(type)
+    if not index:
+        raise HTTPException(status_code=400, detail=f"Invalid type: {type}")
+
+    algo_scores = _load_algorithm_scores()
+
+    # Latest scan per asset, with raw payload for repo algorithms / asset audit
+    body = {
+        "size": size,
+        "sort": [{"scanned_at": {"order": "desc"}}],
+        "collapse": {"field": "asset_id"},
+        "_source": True,
+    }
+    result = _safe_search(index, body)
+    scans = [h["_source"] for h in result["hits"]["hits"]]
+
+    findings: List[Dict[str, Any]] = []
+    seen_algos: set = set()
+    below_threshold_algos: set = set()
+    assets_with_vulns: set = set()
+
+    def _record(
+        raw_name: str,
+        meta: Optional[Dict[str, Any]],
+        explicit_score: Optional[float],
+        explicit_quantum_safe: Optional[bool],
+        scan: Dict[str, Any],
+        role: str,
+        evidence: Dict[str, Any],
+    ):
+        if not raw_name:
+            return
+        up = str(raw_name).strip().upper()
+        if not up:
+            return
+        score = explicit_score
+        if score is None and meta:
+            try:
+                score = float(meta.get("base_score"))
+            except (TypeError, ValueError):
+                score = None
+        if score is None:
+            return  # unscored — cannot judge
+        seen_algos.add(up)
+        if score >= threshold:
+            return
+        below_threshold_algos.add(up)
+        qsafe = explicit_quantum_safe
+        if qsafe is None and meta:
+            qsafe = meta.get("quantum_safe")
+        findings.append({
+            "algorithm": raw_name,
+            "score": round(float(score), 1),
+            "quantum_safe": bool(qsafe) if qsafe is not None else False,
+            "component_type": (meta or {}).get("component_type"),
+            "resistance": (meta or {}).get("resistance"),
+            "reason": (meta or {}).get("reason"),
+            "migration": (meta or {}).get("migration"),
+            "source_type": scan.get("asset_type"),
+            "asset_id": scan.get("asset_id"),
+            "asset_label": scan.get("asset_label") or scan.get("asset_id"),
+            "scan_id": scan.get("scan_id"),
+            "scanned_at": scan.get("scanned_at"),
+            "role": role,
+            "evidence": evidence,
+        })
+        assets_with_vulns.add(scan.get("asset_id"))
+
+    for s in scans:
+        atype = s.get("asset_type")
+        raw = s.get("raw") or {}
+
+        if atype == "domain":
+            candidates = [
+                ("public_key_algorithm", s.get("public_key_algorithm")),
+                ("signature_algorithm", s.get("primary_signature_algorithm")),
+                ("hash_algorithm", s.get("primary_hash_algorithm")),
+                ("cipher_suite", s.get("primary_cipher_suite")),
+            ]
+            base_evidence = {
+                "url": s.get("url"),
+                "tls_version": s.get("tls_version"),
+                "cert_issuer": s.get("cert_issuer"),
+                "cert_subject": s.get("cert_subject"),
+                "cipher_suite": s.get("primary_cipher_suite"),
+                "public_key_size_bits": s.get("public_key_size_bits"),
+                "hsts_enabled": s.get("hsts_enabled"),
+                "ocsp_stapling_active": s.get("ocsp_stapling_active"),
+                "ct_present": s.get("ct_present"),
+            }
+            for role, algo_name in candidates:
+                if not algo_name:
+                    continue
+                meta = _lookup_algo_meta(algo_name, algo_scores)
+                _record(algo_name, meta, None, None, s, role, base_evidence)
+
+        elif atype == "repo":
+            algorithms = raw.get("algorithms") if isinstance(raw, dict) else None
+            if not isinstance(algorithms, dict):
+                # Fallback: at least surface the algorithm_names keyword list
+                for algo_name in (s.get("algorithm_names") or []):
+                    meta = _lookup_algo_meta(algo_name, algo_scores)
+                    _record(algo_name, meta, None, None, s, "algorithm",
+                            {"repo_url": s.get("repo_url"), "branch_name": s.get("branch_name")})
+                continue
+
+            for algo_name, algo_data in algorithms.items():
+                if not isinstance(algo_data, dict):
+                    continue
+                meta = _lookup_algo_meta(algo_name, algo_scores)
+
+                # Prefer scorer's explicit per-scan score, fall back to ES score
+                explicit_score = None
+                for key in ("score", "base_score", "weighted_score", "algorithm_score"):
+                    v = algo_data.get(key)
+                    if isinstance(v, (int, float)):
+                        explicit_score = float(v)
+                        break
+
+                quantum_safe = algo_data.get("quantum_safe")
+
+                algo_findings = algo_data.get("findings") or []
+                files_seen: List[str] = []
+                samples: List[Dict[str, Any]] = []
+                for f in algo_findings:
+                    if not isinstance(f, dict):
+                        continue
+                    fp = f.get("file_path")
+                    if fp and fp not in files_seen:
+                        files_seen.append(fp)
+                    if len(samples) < 10:
+                        samples.append({
+                            "file_path": fp,
+                            "line_number": f.get("line_number"),
+                            "code_snippet": (f.get("code_snippet") or "")[:240],
+                            "match_text": f.get("match_text"),
+                        })
+
+                evidence = {
+                    "repo_url": s.get("repo_url"),
+                    "branch_name": s.get("branch_name"),
+                    "platform": s.get("platform"),
+                    "findings_count": len(algo_findings) if isinstance(algo_findings, list) else 0,
+                    "files": files_seen[:25],
+                    "samples": samples,
+                    "category": algo_data.get("category"),
+                }
+                _record(algo_name, meta, explicit_score, quantum_safe, s,
+                        "code-finding", evidence)
+
+        elif atype == "asset":
+            audit = raw.get("audit_results") if isinstance(raw, dict) else None
+            audit = audit if isinstance(audit, dict) else {}
+
+            providers = (((audit.get("cryptoapi_info") or {}).get("cryptographic_providers")) or {}).get("providers", []) or []
+            cipher_details = (((audit.get("tls_ssl_configuration") or {}).get("cipher_suites")) or {}).get("cipher_details", []) or []
+
+            base_evidence = {
+                "hostname": s.get("hostname"),
+                "computer_name": s.get("computer_name"),
+                "ip_address": s.get("ip_address"),
+                "os_info": s.get("os_info"),
+                "fips_mode_enabled": s.get("fips_mode_enabled"),
+                "organization_name": s.get("organization_name"),
+                "suborganization_name": s.get("suborganization_name"),
+                "application_name": s.get("application_name"),
+            }
+
+            for p in providers if isinstance(providers, list) else []:
+                name = p if isinstance(p, str) else (p.get("provider_name") if isinstance(p, dict) else None)
+                meta = _lookup_algo_meta(name, algo_scores)
+                if meta:
+                    _record(name, meta, None, None, s, "crypto-provider",
+                            {**base_evidence, "provider": p if isinstance(p, dict) else {"provider_name": p}})
+
+            for c in cipher_details if isinstance(cipher_details, list) else []:
+                name = c if isinstance(c, str) else (c.get("name") if isinstance(c, dict) else None)
+                meta = _lookup_algo_meta(name, algo_scores)
+                if meta:
+                    _record(name, meta, None, None, s, "tls-cipher",
+                            {**base_evidence, "cipher": c if isinstance(c, dict) else {"name": c}})
+
+    # ---- Aggregate per-algorithm rollup for charting ----
+    per_algo: Dict[str, Dict[str, Any]] = {}
+    for f in findings:
+        k = f["algorithm"].strip().upper()
+        rec = per_algo.setdefault(k, {
+            "algorithm": f["algorithm"],
+            "score": f["score"],
+            "quantum_safe": f["quantum_safe"],
+            "component_type": f["component_type"],
+            "occurrences": 0,
+            "_assets": set(),
+            "by_type": {"domain": 0, "repo": 0, "asset": 0},
+        })
+        rec["occurrences"] += 1
+        rec["_assets"].add(f["asset_id"])
+        st = f.get("source_type")
+        if st in rec["by_type"]:
+            rec["by_type"][st] += 1
+
+    histogram = []
+    for v in per_algo.values():
+        histogram.append({
+            "algorithm": v["algorithm"],
+            "score": v["score"],
+            "quantum_safe": v["quantum_safe"],
+            "component_type": v["component_type"],
+            "occurrences": v["occurrences"],
+            "assets_affected": len(v["_assets"]),
+            "by_type": v["by_type"],
+        })
+    histogram.sort(key=lambda x: (x["score"], -x["occurrences"]))
+
+    total_assets = len(scans)
+    pct_assets_affected = round((len(assets_with_vulns) / total_assets * 100), 1) if total_assets else 0.0
+    pct_algos_below = round((len(below_threshold_algos) / len(seen_algos) * 100), 1) if seen_algos else 0.0
+
+    return {
+        "threshold": threshold,
+        "type": type,
+        "summary": {
+            "total_assets_scanned": total_assets,
+            "assets_with_vulnerabilities": len(assets_with_vulns),
+            "assets_with_vulnerabilities_pct": pct_assets_affected,
+            "unique_algorithms_found": len(seen_algos),
+            "algorithms_below_threshold": len(below_threshold_algos),
+            "algorithms_below_threshold_pct": pct_algos_below,
+            "total_findings": len(findings),
+        },
+        "histogram": histogram,
+        "findings": findings,
+    }
+
+
+
 CACHE_VERSION_DOC_ID = "algorithm-scores-version"
 
 

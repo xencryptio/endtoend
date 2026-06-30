@@ -29,6 +29,7 @@ import ResultsELK from "./pages/ResultsELK";
 import ScanHistoryELK from "./pages/ScanHistoryELK";
 import PqcAnalystDashboard from "./pages/PqcAnalystDashboard";
 import ELKScorerDashboard from "./pages/ELKScorerDashboard";
+import ELKVulnerabilities from "./pages/ELKVulnerabilities";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -72,6 +73,7 @@ const AnimatedRoutes = () => {
         <Route path="/elk/history" element={<ScanHistoryELK />} />
         <Route path="/elk/analyst" element={<PqcAnalystDashboard />} />
         <Route path="/elk/scorer" element={<ELKScorerDashboard />} />
+        <Route path="/elk/vulnerabilities" element={<ELKVulnerabilities />} />
 
         {/* 404 Fallback */}
         <Route path="*" element={<NotFound />} />
