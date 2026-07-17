@@ -23,11 +23,14 @@ Algorithm Management:
 """
 import os
 import time
+import json
 import logging
 import uuid
 import csv
 import io
+import re
 import asyncio
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
@@ -35,6 +38,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk as es_bulk
 import httpx
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -1073,6 +1077,7 @@ def create_algorithm(body: Dict[str, Any]):
     # Insert
     result = es.index(index=ALGO_INDEX, document=doc)
     _touch_scores_version()
+    _auto_snapshot_after_write()
     return {
         "id": result["_id"],
         "algorithm": algo_name,
@@ -1114,6 +1119,7 @@ def update_algorithm(name: str, body: Dict[str, Any]):
     # Save
     es.index(index=ALGO_INDEX, id=doc_id, document=doc)
     _touch_scores_version()
+    _auto_snapshot_after_write()
     return {
         "algorithm": name,
         "status": "updated",
@@ -1140,6 +1146,7 @@ def delete_algorithm(name: str):
     
     es.index(index=ALGO_INDEX, id=doc_id, document=doc)
     _touch_scores_version()
+    _auto_snapshot_after_write()
     return {
         "algorithm": name,
         "status": "deactivated",
@@ -1167,6 +1174,276 @@ def reload_cache():
         "total_active_algorithms": total_active,
         "sample_algorithms": algorithms[:10],
     }
+
+
+# ===========================================================================
+# /api/algorithms/_backup{,s}, /_restore, /_restore_baseline
+# ---------------------------------------------------------------------------
+# The algorithm-scores index is critical and has been wiped before by accident
+# (`docker compose down -v`). Three layers of defence:
+#   1. algo-backups/baseline.json  — immutable golden snapshot (git-tracked)
+#   2. algo-backups/snapshot-*.json — user-triggered backups via the UI
+#   3. algo-backups/auto-last.json — rolling snapshot written by every write
+# All three live on the host (mounted into the container) so even a full
+# Elasticsearch volume wipe cannot lose them.
+# ===========================================================================
+ALGO_BACKUPS_DIR = Path(os.getenv("ALGO_BACKUPS_DIR", "/app/backups"))
+BASELINE_NAME = "baseline.json"
+AUTO_LAST_NAME = "auto-last.json"
+_SAFE_BACKUP_NAME = re.compile(r"^[A-Za-z0-9._-]+\.json$")
+
+
+def _ensure_backups_dir() -> Path:
+    try:
+        ALGO_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        logger.warning("Could not create backups dir %s: %s", ALGO_BACKUPS_DIR, exc)
+    return ALGO_BACKUPS_DIR
+
+
+def _snapshot_index_to_dict() -> Dict[str, Any]:
+    """Read every doc in ALGO_INDEX (active+inactive) and return a backup payload."""
+    docs: List[Dict[str, Any]] = []
+    try:
+        # Use scroll so we never silently drop docs past the default 10k window.
+        resp = es.search(
+            index=ALGO_INDEX,
+            scroll="2m",
+            size=1000,
+            body={"query": {"match_all": {}}},
+        )
+        scroll_id = resp.get("_scroll_id")
+        hits = resp["hits"]["hits"]
+        while hits:
+            for h in hits:
+                docs.append({"_id": h["_id"], "_source": h.get("_source", {})})
+            if not scroll_id:
+                break
+            resp = es.scroll(scroll_id=scroll_id, scroll="2m")
+            scroll_id = resp.get("_scroll_id")
+            hits = resp["hits"]["hits"]
+    except Exception as exc:
+        logger.warning("Snapshot read failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Could not read index: {exc}")
+
+    return {
+        "kind": "crypto-algorithm-scores-backup",
+        "version": 1,
+        "index": ALGO_INDEX,
+        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "count": len(docs),
+        "docs": docs,
+    }
+
+
+def _write_backup_file(path: Path, payload: Dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _auto_snapshot_after_write() -> None:
+    """Best-effort rolling backup written after every create/update/delete."""
+    try:
+        _ensure_backups_dir()
+        payload = _snapshot_index_to_dict()
+        _write_backup_file(ALGO_BACKUPS_DIR / AUTO_LAST_NAME, payload)
+    except Exception as exc:
+        logger.warning("auto-last snapshot failed: %s", exc)
+
+
+def _restore_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Wipe ALGO_INDEX and bulk-reindex every doc from the backup payload."""
+    docs = payload.get("docs") or []
+    if not isinstance(docs, list) or not docs:
+        raise HTTPException(status_code=400, detail="Backup contains no docs")
+
+    # Before destructive restore, drop a "pre-restore" snapshot of current state
+    # so the user can always undo a restore.
+    try:
+        _ensure_backups_dir()
+        current = _snapshot_index_to_dict()
+        if current.get("count"):
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            _write_backup_file(
+                ALGO_BACKUPS_DIR / f"pre-restore-{stamp}.json", current
+            )
+    except Exception as exc:
+        logger.warning("Could not write pre-restore snapshot: %s", exc)
+
+    # Delete and recreate index. Mapping is recreated permissively — the
+    # docs already carry their own field types; explicit mapping isn't needed
+    # for a restore since the source-of-truth seed creates it on first run.
+    try:
+        if es.indices.exists(index=ALGO_INDEX):
+            es.indices.delete(index=ALGO_INDEX)
+        es.indices.create(
+            index=ALGO_INDEX,
+            mappings={
+                "properties": {
+                    "algorithm": {"type": "keyword"},
+                    "component_type": {"type": "keyword"},
+                    "base_score": {"type": "float"},
+                    "quantum_safe": {"type": "boolean"},
+                    "resistance": {"type": "keyword"},
+                    "category": {"type": "keyword"},
+                    "reason": {"type": "text"},
+                    "migration": {"type": "text"},
+                    "variants": {"type": "object", "enabled": True},
+                    "active": {"type": "boolean"},
+                    "created_at": {"type": "date"},
+                    "last_updated": {"type": "date"},
+                    "tags": {"type": "keyword"},
+                }
+            },
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not recreate index: {exc}")
+
+    actions = []
+    for d in docs:
+        src = d.get("_source") or {}
+        if not src:
+            continue
+        action = {"_op_type": "index", "_index": ALGO_INDEX, "_source": src}
+        if d.get("_id"):
+            action["_id"] = d["_id"]
+        actions.append(action)
+
+    success, errors = es_bulk(es, actions, raise_on_error=False, stats_only=False)
+    try:
+        es.indices.refresh(index=ALGO_INDEX)
+    except Exception:
+        pass
+
+    _touch_scores_version()
+
+    return {
+        "status": "restored",
+        "restored": success,
+        "errors": len(errors) if isinstance(errors, list) else 0,
+        "source_count": len(docs),
+    }
+
+
+@app.get("/api/algorithm-backups")
+def list_backups():
+    """List available backup files on disk."""
+    _ensure_backups_dir()
+    items: List[Dict[str, Any]] = []
+    if ALGO_BACKUPS_DIR.exists():
+        for p in sorted(ALGO_BACKUPS_DIR.iterdir(), reverse=True):
+            if not p.is_file() or not p.name.endswith(".json"):
+                continue
+            stat = p.stat()
+            count = None
+            created_at = None
+            try:
+                # Cheap header peek: read first 4 KB only.
+                with p.open("r", encoding="utf-8") as f:
+                    head = f.read(4096)
+                m = re.search(r'"count"\s*:\s*(\d+)', head)
+                if m:
+                    count = int(m.group(1))
+                m2 = re.search(r'"created_at"\s*:\s*"([^"]+)"', head)
+                if m2:
+                    created_at = m2.group(1)
+            except Exception:
+                pass
+            items.append({
+                "name": p.name,
+                "size_bytes": stat.st_size,
+                "modified_at": datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat(),
+                "created_at": created_at,
+                "count": count,
+                "is_baseline": p.name == BASELINE_NAME,
+                "is_auto": p.name == AUTO_LAST_NAME,
+            })
+    return {"total": len(items), "backups": items}
+
+
+@app.post("/api/algorithm-backups")
+def create_backup(body: Optional[Dict[str, Any]] = None):
+    """
+    Create a new on-disk snapshot of the current algorithm-scores index.
+
+    Optional body: {"label": "before-tuning"} → filename becomes
+    snapshot-YYYYMMDD-HHMMSS-before-tuning.json. Otherwise just the timestamp.
+    """
+    _ensure_backups_dir()
+    payload = _snapshot_index_to_dict()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    label = ""
+    if body and isinstance(body.get("label"), str):
+        clean = re.sub(r"[^A-Za-z0-9._-]+", "-", body["label"].strip()).strip("-")
+        if clean:
+            label = "-" + clean[:40]
+    name = f"snapshot-{stamp}{label}.json"
+    _write_backup_file(ALGO_BACKUPS_DIR / name, payload)
+    return {
+        "status": "created",
+        "name": name,
+        "count": payload["count"],
+        "created_at": payload["created_at"],
+    }
+
+
+@app.post("/api/algorithm-backups/_restore")
+def restore_backup(body: Dict[str, Any]):
+    """
+    Restore the algorithm-scores index from a named backup file.
+    Body: {"name": "snapshot-20260630-181500.json"}
+    """
+    name = (body or {}).get("name")
+    if not isinstance(name, str) or not _SAFE_BACKUP_NAME.match(name):
+        raise HTTPException(status_code=400, detail="Invalid backup name")
+    path = ALGO_BACKUPS_DIR / name
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Backup not found: {name}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Bad backup file: {exc}")
+    if payload.get("kind") != "crypto-algorithm-scores-backup":
+        raise HTTPException(status_code=400, detail="Not an algorithm-scores backup")
+    result = _restore_from_payload(payload)
+    result["from"] = name
+    return result
+
+
+@app.post("/api/algorithm-backups/_restore_baseline")
+def restore_baseline():
+    """Restore from the immutable golden baseline.json bundled with the app."""
+    path = ALGO_BACKUPS_DIR / BASELINE_NAME
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"baseline.json not found at {path}. "
+                   "Check that ./algo-backups is mounted into the container.",
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Bad baseline file: {exc}")
+    result = _restore_from_payload(payload)
+    result["from"] = BASELINE_NAME
+    return result
+
+
+@app.delete("/api/algorithm-backups/{name}")
+def delete_backup(name: str):
+    """Delete an on-disk snapshot. The immutable baseline cannot be deleted."""
+    if not _SAFE_BACKUP_NAME.match(name):
+        raise HTTPException(status_code=400, detail="Invalid backup name")
+    if name == BASELINE_NAME:
+        raise HTTPException(status_code=403, detail="The baseline backup is protected")
+    path = ALGO_BACKUPS_DIR / name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Backup not found: {name}")
+    path.unlink()
+    return {"status": "deleted", "name": name}
 
 
 # ===========================================================================

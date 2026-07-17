@@ -14,14 +14,14 @@ from database import get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/applications", tags=["applications"])
 
-# Auxiliary database URLs (should be in environment variables)
+# Auxiliary database URLs (default to local SQLite files on the shared volume).
 REPO_SCANNER_DB_URL = os.getenv(
     "REPO_SCANNER_DB_URL",
-    "postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db"
+    "sqlite:////data/repo_scanner.db",
 )
 SYSTEM_SCANNER_DB_URL = os.getenv(
     "SYSTEM_SCANNER_DB_URL",
-    "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db"
+    "sqlite:////data/system_scanner.db",
 )
 
 

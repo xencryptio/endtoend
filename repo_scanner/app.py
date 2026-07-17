@@ -40,8 +40,9 @@ setup_logging("REPO-SCANNER", logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # --- SQLAlchemy Setup ---
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scanuser:scanpass@localhost:5432/repo_scanner_db")
-engine = create_engine(DATABASE_URL)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/repo_scanner.db")
+_sqlite_kwargs = {"connect_args": {"check_same_thread": False}} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, **_sqlite_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

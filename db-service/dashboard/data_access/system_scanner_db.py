@@ -13,8 +13,8 @@ def fetch_system_metrics() -> Dict[str, Any]:
     Returns a dictionary where keys are hostnames/IPs and values are their metrics.
     """
     system_scanner_engine = create_engine(
-        os.getenv("SYSTEM_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db"),
-        pool_pre_ping=True
+        os.getenv("SYSTEM_SCANNER_DB_URL", "sqlite:////data/system_scanner.db"),
+        connect_args={"check_same_thread": False},
     )
     system_session = None
     system_metrics = {}
@@ -27,7 +27,7 @@ def fetch_system_metrics() -> Dict[str, Any]:
                 a.agent_id,
                 a.hostname,
                 a.ip_address,
-                r.audit_results::text AS audit_json,
+                r.audit_results AS audit_json,
                 r.submitted_at
             FROM agents a
             LEFT JOIN results r ON a.agent_id = r.agent_id
@@ -98,8 +98,8 @@ def fetch_agent_status_by_ip() -> Dict[str, Dict[str, Any]]:
     Agents that never connected (last_seen IS NULL) are 'not_installed'.
     """
     system_scanner_engine = create_engine(
-        os.getenv("SYSTEM_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db"),
-        pool_pre_ping=True
+        os.getenv("SYSTEM_SCANNER_DB_URL", "sqlite:////data/system_scanner.db"),
+        connect_args={"check_same_thread": False},
     )
     session = None
     agent_map: Dict[str, Dict[str, Any]] = {}

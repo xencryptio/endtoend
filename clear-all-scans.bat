@@ -47,19 +47,19 @@ timeout /t 2 /nobreak >nul
 echo [OK] elk-sync stopped
 echo.
 
-REM Clear PostgreSQL (parent tables included so APIs return empty)
-echo [3/6] Clearing PostgreSQL databases...
+REM Clear SQLite databases (parent tables included so APIs return empty)
+echo [3/6] Clearing SQLite databases...
 
 echo   - Clearing scandb.scan_results...
-docker exec postgres psql -U scanuser -d scandb -c "DELETE FROM scan_results;" >nul 2>&1
+docker compose exec -T db-service python -c "import sqlite3; c=sqlite3.connect('/data/scandb.db'); c.executescript('DELETE FROM scan_results;'); c.commit()" >nul 2>&1
 echo     [OK] scandb cleaned
 
 echo   - Clearing repo_scanner_db (findings, category_scores, scan_results, repositories)...
-docker exec postgres psql -U scanuser -d repo_scanner_db -c "DELETE FROM findings; DELETE FROM category_scores; DELETE FROM scan_results; DELETE FROM repositories;" >nul 2>&1
+docker compose exec -T repo-scanner python -c "import sqlite3; c=sqlite3.connect('/data/repo_scanner.db'); c.executescript('DELETE FROM findings; DELETE FROM category_scores; DELETE FROM scan_results; DELETE FROM repositories;'); c.commit()" >nul 2>&1
 echo     [OK] repo_scanner_db fully cleaned
 
 echo   - Clearing system_scanner_db (results, tasks)...
-docker exec postgres psql -U scanuser -d system_scanner_db -c "DELETE FROM results; DELETE FROM tasks;" >nul 2>&1
+docker compose exec -T system-scan python -c "import sqlite3; c=sqlite3.connect('/data/system_scanner.db'); c.executescript('DELETE FROM results; DELETE FROM tasks;'); c.commit()" >nul 2>&1
 echo     [OK] system_scanner_db cleaned
 echo.
 

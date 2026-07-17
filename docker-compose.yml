@@ -4,32 +4,6 @@
 
 services:
   # ---------------------------------------------------------------------------
-  # POSTGRESQL DATABASE
-  # ---------------------------------------------------------------------------
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres
-    environment:
-      POSTGRES_USER: scanuser
-      POSTGRES_PASSWORD: scanpass
-    volumes:
-      - ./postgres-init/init.sql:/docker-entrypoint-initdb.d/init.sql
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - xencrypt-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U scanuser"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-  # ---------------------------------------------------------------------------
   # UNIVERSAL SCORING SERVICE
   # ---------------------------------------------------------------------------
   universal-scoring-service:
@@ -71,22 +45,19 @@ services:
       - "9000:9000"
     volumes:
       - server-data:/app/data
+      - scanner-data:/data
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/system_scanner_db
+      - DATABASE_URL=sqlite:////data/system_scanner.db
       - LOG_LEVEL=DEBUG
       - SCORING_SERVICE_URL=http://universal-scoring-service:9500
     networks:
       - xencrypt-network
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-      db-service:
-        condition: service_healthy
       universal-scoring-service:
         condition: service_healthy
-    command: ["/usr/local/bin/wait-for-db.sh", "postgres", "python", "api_server.py"]
+    command: ["python", "api_server.py"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/api/v1/admin/stats"]
       interval: 30s
@@ -114,7 +85,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DB_SERVICE_URL=http://db-service:8001
-      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/crypto_scanner_db
       - UVICORN_LOG_LEVEL=debug
       - SCORING_SERVICE_URL=http://universal-scoring-service:9500
       - EXTERNAL_TLS_SCANNER_URL=http://ssl-tls-scanner-new:8010
@@ -123,8 +93,6 @@ services:
       - xencrypt-network
     depends_on:
       db-service:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
       universal-scoring-service:
         condition: service_healthy
@@ -205,19 +173,17 @@ services:
       - "8001:8001"
     volumes:
       - ./db-service:/app
+      - scanner-data:/data
     environment:
       - PYTHONUNBUFFERED=1
-      # Main database
-      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/scandb
-      # Additional databases for CSV export
-      - REPO_SCANNER_DB_URL=postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db
-      - SYSTEM_SCANNER_DB_URL=postgresql://scanuser:scanpass@postgres:5432/system_scanner_db
+      # Main database (SQLite stored on the shared scanner-data volume)
+      - DATABASE_URL=sqlite:////data/scandb.db
+      # Cross-service read URLs (shared volume, read-only-by-convention)
+      - REPO_SCANNER_DB_URL=sqlite:////data/repo_scanner.db
+      - SYSTEM_SCANNER_DB_URL=sqlite:////data/system_scanner.db
       - UVICORN_LOG_LEVEL=debug
     networks:
       - xencrypt-network
-    depends_on:
-      postgres:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -242,8 +208,9 @@ services:
       - "8003:8001"
     volumes:
       - ./repo_scanner:/app
+      - scanner-data:/data
     environment:
-      - DATABASE_URL=postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db
+      - DATABASE_URL=sqlite:////data/repo_scanner.db
       - UVICORN_LOG_LEVEL=debug
       - SCORING_SERVICE_URL=http://universal-scoring-service:9500
       - ELASTICSEARCH_URL=http://elasticsearch:9200
@@ -251,8 +218,6 @@ services:
       - xencrypt-network
     restart: always
     depends_on:
-      postgres:
-        condition: service_healthy
       db-service:
         condition: service_healthy
       universal-scoring-service:
@@ -296,24 +261,9 @@ services:
         max-file: "5"
 
   # ======================
-  # ADMINER (DB WEB UI)
+  # ADMINER REMOVED — PostgreSQL is no longer part of the stack.
+  # All persistent state lives in SQLite files on the `scanner-data` volume.
   # ======================
-  adminer:
-    image: adminer
-    container_name: adminer
-    restart: always
-    ports:
-      - "8080:8080"
-    networks:
-      - xencrypt-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
 
   # ---------------------------------------------------------------------------
   # FRONTEND SERVICE
@@ -574,6 +524,12 @@ services:
       - TLS_SCANNER_URL=http://crypto-scanner:8000
       - REPO_SCANNER_URL=http://repo-scanner:8001
       - SYSTEM_SCAN_URL=http://system-scan:9000
+      - ALGO_BACKUPS_DIR=/app/backups
+    volumes:
+      # Algorithm-scores backup folder. baseline.json is the immutable golden
+      # snapshot (git-tracked); snapshot-*.json files are user-created backups
+      # that persist on the host even if the ES volume is wiped.
+      - ./algo-backups:/app/backups
     networks:
       - xencrypt-network
     restart: unless-stopped
@@ -661,7 +617,7 @@ networks:
 # VOLUMES
 # =============================================================================
 volumes:
-  postgres-data:
+  scanner-data:
     driver: local
   server-data:
     driver: local
@@ -686,14 +642,16 @@ volumes:
 
 # SERVICE NAME            CONTAINER NAME           EXTERNAL PORT → INTERNAL PORT
 # -------------------------------------------------------------------------------
-# PostgreSQL              postgres                 ❌ Internal only (5432)
 # System Scan API         system-scan              9000 → 9000
 # Crypto Scanner          crypto-scanner           8000 → 8000
 # DB Service              db-service-1             8001 → 8001
 # Repo Scanner            repo-scanner             8003 → 8001
 # Onboarding Service      onboarding               8008 → 8008
 # Frontend (Web UI)       frontend                 3000 → 8080
-# Adminer (DB UI)         adminer                  8080 → 8080
+# Elasticsearch           elasticsearch            9201 → 9200
+# Kibana                  kibana                   5601 → 5601
+# ELK Indexer             elk-indexer              9100 → 9100
+# ELK Query API           elk-query-api            9101 → 9101
 
 
 # =============================================================================
@@ -726,10 +684,7 @@ volumes:
 # ✅ SERVICE-WISE BUILD & START (SEPARATE COMMANDS)
 # =============================================================================
 
-# 1️⃣ POSTGRES
-# docker compose up -d postgres
-
-# 2️⃣ DB SERVICE
+# 1⃣⃣ DB SERVICE
 # docker compose build db-service
 # docker compose up -d db-service
 
@@ -753,8 +708,6 @@ volumes:
 # docker compose build frontend
 # docker compose up -d frontend
 
-# 8️⃣ ADMINER
-# docker compose up -d adminer
 
 # 9️⃣ LINUX AGENT - MODERN
 # docker compose build linux-agent-modern
@@ -773,14 +726,12 @@ volumes:
 # ✅ SINGLE-LINE SERVICE-WISE BUILD + RUN (NO SEPARATE BUILD)
 # =============================================================================
 
-# docker compose up -d --build postgres
 # docker compose up -d --build db-service
 # docker compose up -d --build system-scan
 # docker compose up -d --build crypto-scanner
 # docker compose up -d --build repo-scanner
 # docker compose up -d --build onboarding
 # docker compose up -d --build frontend
-# docker compose up -d --build adminer
 # docker compose up -d --build linux-agent-modern
 # docker compose up -d --build linux-agent-legacy
 # docker compose up -d --build linux-agent-mixed
@@ -790,14 +741,12 @@ volumes:
 # ✅ SEE LOGS (SERVICE-WISE)
 # =============================================================================
 
-# docker compose logs -f postgres
 # docker compose logs -f db-service
 # docker compose logs -f system-scan
 # docker compose logs -f crypto-scanner
 # docker compose logs -f repo-scanner
 # docker compose logs -f onboarding
 # docker compose logs -f frontend
-# docker compose logs -f adminer
 # docker compose logs -f linux-agent-modern
 # docker compose logs -f linux-agent-legacy
 # docker compose logs -f linux-agent-mixed
@@ -813,7 +762,6 @@ volumes:
 # ✅ ENTER INTO A CONTAINER (SHELL)
 # =============================================================================
 
-# docker exec -it postgres sh
 # docker exec -it db-service-1 sh
 # docker exec -it system-scan sh
 # docker exec -it crypto-scanner sh
@@ -826,14 +774,12 @@ volumes:
 # ✅ RESTART ANY SINGLE SERVICE
 # =============================================================================
 
-# docker compose restart postgres
 # docker compose restart db-service
 # docker compose restart system-scan
 # docker compose restart crypto-scanner
 # docker compose restart repo-scanner
 # docker compose restart onboarding
 # docker compose restart frontend
-# docker compose restart adminer
 # docker compose restart linux-agent-modern
 # docker compose restart linux-agent-legacy
 # docker compose restart linux-agent-mixed
@@ -859,9 +805,12 @@ volumes:
 
 
 # =============================================================================
-# ✅ DATABASE LOGIN (POSTGRES)
+# ✅ DATABASE
 # =============================================================================
-# docker exec -it postgres psql -U scanuser
+# PostgreSQL has been removed. State now lives in SQLite files under the
+# `scanner-data` volume. Inspect them via:
+#   docker compose exec db-service ls /data
+#   docker compose exec db-service sqlite3 /data/scandb.db '.tables'
 
 
 # =============================================================================
@@ -873,7 +822,9 @@ volumes:
 # DB Service API     → http://localhost:8001
 # Repo Scanner API   → http://localhost:8003
 # Onboarding API     → http://localhost:8008
-# Adminer DB UI      → http://localhost:8080
+# Elasticsearch      → http://localhost:9201
+# Kibana             → http://localhost:5601
+# ELK Query API      → http://localhost:9101
 
 
 # =============================================================================

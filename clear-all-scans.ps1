@@ -40,22 +40,22 @@ Start-Sleep -Seconds 2
 Write-Host "  OK elk-sync stopped" -ForegroundColor Green
 Write-Host ""
 
-# 3. Clear PostgreSQL (parent tables included so APIs return empty)
-Write-Host "[3/6] Clearing PostgreSQL..." -ForegroundColor Yellow
+# 3. Clear SQLite databases (parent tables included so APIs return empty)
+Write-Host "[3/6] Clearing SQLite databases..." -ForegroundColor Yellow
 
 Write-Host "  -> scandb..." -ForegroundColor Cyan
-docker exec postgres psql -U scanuser -d scandb `
-    -c "DELETE FROM scan_results;" 2>&1 | Out-Null
+docker compose exec -T db-service python -c `
+    "import sqlite3; c=sqlite3.connect('/data/scandb.db'); c.executescript('DELETE FROM scan_results;'); c.commit()" 2>&1 | Out-Null
 Write-Host "     OK scandb cleaned" -ForegroundColor Green
 
 Write-Host "  -> repo_scanner_db (findings, category_scores, scan_results, repositories)..." -ForegroundColor Cyan
-docker exec postgres psql -U scanuser -d repo_scanner_db `
-    -c "DELETE FROM findings; DELETE FROM category_scores; DELETE FROM scan_results; DELETE FROM repositories;" 2>&1 | Out-Null
+docker compose exec -T repo-scanner python -c `
+    "import sqlite3; c=sqlite3.connect('/data/repo_scanner.db'); c.executescript('DELETE FROM findings; DELETE FROM category_scores; DELETE FROM scan_results; DELETE FROM repositories;'); c.commit()" 2>&1 | Out-Null
 Write-Host "     OK repo_scanner_db fully cleaned" -ForegroundColor Green
 
 Write-Host "  -> system_scanner_db (results, tasks)..." -ForegroundColor Cyan
-docker exec postgres psql -U scanuser -d system_scanner_db `
-    -c "DELETE FROM results; DELETE FROM tasks;" 2>&1 | Out-Null
+docker compose exec -T system-scan python -c `
+    "import sqlite3; c=sqlite3.connect('/data/system_scanner.db'); c.executescript('DELETE FROM results; DELETE FROM tasks;'); c.commit()" 2>&1 | Out-Null
 Write-Host "     OK system_scanner_db cleaned" -ForegroundColor Green
 Write-Host ""
 

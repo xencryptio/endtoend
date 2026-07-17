@@ -14,8 +14,8 @@ def fetch_repo_metrics() -> Dict[str, Any]:
     Returns a dictionary where keys are normalized repo URLs and values are their metrics.
     """
     repo_scanner_engine = create_engine(
-        os.getenv("REPO_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db"),
-        pool_pre_ping=True
+        os.getenv("REPO_SCANNER_DB_URL", "sqlite:////data/repo_scanner.db"),
+        connect_args={"check_same_thread": False},
     )
     repo_session = None
     repo_metrics = {}

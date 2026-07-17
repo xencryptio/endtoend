@@ -1,15 +1,11 @@
 // frontend/src/App.tsx
 import { ThemeProvider } from "next-themes";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/Layout";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { AnimatePresence } from "framer-motion";
-import Dashboard from "./pages/Dashboard";
-import PQC_DASHBOARD from "./pages/PQC_DASHBOARD";
-import Applications from "./pages/Applications";
-import Vulnerabilities2 from "./pages/Vulnerabilities2";
 import Profile from "./pages/Profile";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
@@ -18,12 +14,9 @@ import Integration from "./pages/integration";
 import Scan from "./pages/SSL-TLS scans";
 import SystemScan from "./pages/AssetsScans";
 import Readinessanalysis from "./pages/Readinessanalysis";
-import Onboarding from "./pages/onboarding";
-import SubOrgDashboard from './components/dashboard/SubOrgDashboard'; // New Import
-import ApplicationDashboard from './components/dashboard/ApplicationDashboard'; // New Import
 import NotFound from "./pages/NotFound";
 
-// ─── 🆕 ELK-powered pages ──────────────────────────────────────────────────
+// ─── ELK-powered pages (the only dashboards now) ───────────────────────────
 import DashboardELK from "./pages/DashboardELK";
 import ResultsELK from "./pages/ResultsELK";
 import ScanHistoryELK from "./pages/ScanHistoryELK";
@@ -44,21 +37,10 @@ const AnimatedRoutes = () => {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
-        {/* Main Dashboard - Organization View */}
-        <Route path="/" element={<Dashboard />} />
-        
-        {/* Sub-Organization View */}
-        <Route path="/suborg/:subOrgId" element={<SubOrgDashboard />} />
-        
-        {/* Application View */}
-        <Route path="/app/:appId" element={<ApplicationDashboard />} />
+        {/* Root → ELK dashboard */}
+        <Route path="/" element={<Navigate to="/elk/dashboard" replace />} />
 
-        {/* PQC Analysis Dashboard */}
-        <Route path="/pqc-dashboard" element={<PQC_DASHBOARD />} />
-
-        {/* Existing routes */}
-        <Route path="/applications" element={<Applications />} />
-        <Route path="/vulnerabilities" element={<Vulnerabilities2 />} />
+        {/* Standalone tools */}
         <Route path="/profile" element={<Profile />} />
         <Route path="/scans" element={<Scan />} />
         <Route path="/assets-scans" element={<SystemScan />} />
@@ -67,9 +49,8 @@ const AnimatedRoutes = () => {
         <Route path="/settings" element={<Settings />} />
         <Route path="/migrationAssist" element={<MigrationAssist />} />
         <Route path="/integration" element={<Integration />} />
-        <Route path="/onboarding" element={<Onboarding />} />
 
-        {/* 🆕 ELK-backed routes (parallel to Postgres pages) */}
+        {/* ELK-backed routes (the only dashboard set now) */}
         <Route path="/elk/dashboard" element={<DashboardELK />} />
         <Route path="/elk/results" element={<ResultsELK />} />
         <Route path="/elk/history" element={<ScanHistoryELK />} />
@@ -78,6 +59,13 @@ const AnimatedRoutes = () => {
         <Route path="/elk/vulnerabilities" element={<ELKVulnerabilities />} />
         <Route path="/elk/onboarding" element={<OnboardingELK />} />
         <Route path="/elk/applications" element={<ApplicationsELK />} />
+
+        {/* Legacy redirects so any saved bookmarks still work */}
+        <Route path="/dashboard" element={<Navigate to="/elk/dashboard" replace />} />
+        <Route path="/pqc-dashboard" element={<Navigate to="/elk/analyst" replace />} />
+        <Route path="/applications" element={<Navigate to="/elk/applications" replace />} />
+        <Route path="/vulnerabilities" element={<Navigate to="/elk/vulnerabilities" replace />} />
+        <Route path="/onboarding" element={<Navigate to="/elk/onboarding" replace />} />
 
         {/* 404 Fallback */}
         <Route path="*" element={<NotFound />} />

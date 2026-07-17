@@ -1,7 +1,20 @@
 import { useEffect, useState } from 'react';
-import { Search, Plus, Edit2, Trash2, X, Save, Check, AlertCircle } from 'lucide-react';
+import {
+  Search, Plus, Edit2, Trash2, X, Save, Check, AlertCircle,
+  Archive, RotateCcw, ShieldCheck, Download,
+} from 'lucide-react';
 import { ELK_API_URL } from '../api/elkClient';
 import { motion } from 'framer-motion';
+
+interface BackupEntry {
+  name: string;
+  size_bytes: number;
+  modified_at: string;
+  created_at: string | null;
+  count: number | null;
+  is_baseline: boolean;
+  is_auto: boolean;
+}
 
 interface Algorithm {
   id: string;
@@ -64,6 +77,127 @@ export default function ELKScorerDashboard() {
     saving: false,
     error: null,
   });
+
+  // Backup / restore state
+  const [backupsOpen, setBackupsOpen] = useState(false);
+  const [backups, setBackups] = useState<BackupEntry[]>([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupBusy, setBackupBusy] = useState<string | null>(null);
+  const [backupMsg, setBackupMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const loadBackups = async () => {
+    try {
+      setBackupsLoading(true);
+      const r = await fetch(`${ELK_API_URL}/api/algorithm-backups`);
+      if (!r.ok) throw new Error('Failed to load backups');
+      const data = await r.json();
+      setBackups(data.backups || []);
+    } catch (err) {
+      setBackupMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Load failed' });
+    } finally {
+      setBackupsLoading(false);
+    }
+  };
+
+  const openBackups = () => {
+    setBackupsOpen(true);
+    setBackupMsg(null);
+    loadBackups();
+  };
+
+  const createBackup = async () => {
+    try {
+      setBackupBusy('create');
+      setBackupMsg(null);
+      const label = window.prompt(
+        'Optional label for this backup (letters/digits/dashes; leave blank for timestamp only):',
+        ''
+      );
+      if (label === null) {
+        setBackupBusy(null);
+        return;
+      }
+      const r = await fetch(`${ELK_API_URL}/api/algorithm-backups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(label ? { label } : {}),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Backup failed');
+      setBackupMsg({ kind: 'ok', text: `Backup saved: ${data.name} (${data.count} algorithms)` });
+      await loadBackups();
+    } catch (err) {
+      setBackupMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Backup failed' });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const restoreBaseline = async () => {
+    if (!window.confirm(
+      'Restore the GOLDEN baseline?\n\n' +
+      'This will REPLACE every algorithm with the original 343-doc factory seed. ' +
+      'A pre-restore snapshot of the current state will be saved automatically so you can undo.'
+    )) return;
+    try {
+      setBackupBusy('baseline');
+      setBackupMsg(null);
+      const r = await fetch(`${ELK_API_URL}/api/algorithm-backups/_restore_baseline`, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Restore failed');
+      setBackupMsg({ kind: 'ok', text: `Baseline restored: ${data.restored} algorithms` });
+      await loadBackups();
+      await loadAlgorithms();
+    } catch (err) {
+      setBackupMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Restore failed' });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const restoreFrom = async (name: string) => {
+    if (!window.confirm(
+      `Restore from "${name}"?\n\n` +
+      'This will REPLACE the current algorithm scorer state. ' +
+      'A pre-restore snapshot of the current state will be saved automatically.'
+    )) return;
+    try {
+      setBackupBusy(name);
+      setBackupMsg(null);
+      const r = await fetch(`${ELK_API_URL}/api/algorithm-backups/_restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Restore failed');
+      setBackupMsg({ kind: 'ok', text: `Restored ${data.restored} algorithms from ${name}` });
+      await loadBackups();
+      await loadAlgorithms();
+    } catch (err) {
+      setBackupMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Restore failed' });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const deleteBackup = async (name: string) => {
+    if (!window.confirm(`Delete backup "${name}"? This cannot be undone.`)) return;
+    try {
+      setBackupBusy(name);
+      const r = await fetch(`${ELK_API_URL}/api/algorithm-backups/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Delete failed');
+      setBackupMsg({ kind: 'ok', text: `Deleted ${name}` });
+      await loadBackups();
+    } catch (err) {
+      setBackupMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Delete failed' });
+    } finally {
+      setBackupBusy(null);
+    }
+  };
 
   // Load algorithms
   useEffect(() => {
@@ -200,15 +334,67 @@ export default function ELKScorerDashboard() {
               Manage algorithm base scores and quantum-safe classifications
             </p>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={openCreateModal}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
-          >
-            <Plus size={20} /> Add Algorithm
-          </motion.button>
+          <div className="flex items-center gap-2">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={createBackup}
+              disabled={backupBusy === 'create'}
+              title="Save a snapshot of the current algorithm catalog"
+              className="flex items-center gap-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 px-3 py-2 rounded-lg font-medium disabled:opacity-50"
+            >
+              <Archive size={18} /> {backupBusy === 'create' ? 'Saving…' : 'Backup'}
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={openBackups}
+              title="Browse and restore from saved backups"
+              className="flex items-center gap-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 px-3 py-2 rounded-lg font-medium"
+            >
+              <RotateCcw size={18} /> Restore…
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={restoreBaseline}
+              disabled={backupBusy === 'baseline'}
+              title="Reset to the immutable factory baseline (golden 343-doc seed)"
+              className="flex items-center gap-2 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/40 dark:hover:bg-amber-800/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 px-3 py-2 rounded-lg font-medium disabled:opacity-50"
+            >
+              <ShieldCheck size={18} /> {backupBusy === 'baseline' ? 'Restoring…' : 'Restore Baseline'}
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={openCreateModal}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+            >
+              <Plus size={20} /> Add Algorithm
+            </motion.button>
+          </div>
         </div>
+
+        {/* Backup status banner */}
+        {backupMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`rounded-lg p-3 mb-4 flex items-center justify-between gap-2 ${
+              backupMsg.kind === 'ok'
+                ? 'bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {backupMsg.kind === 'ok' ? <Check size={18} /> : <AlertCircle size={18} />}
+              <span className="text-sm">{backupMsg.text}</span>
+            </div>
+            <button onClick={() => setBackupMsg(null)} className="opacity-70 hover:opacity-100">
+              <X size={16} />
+            </button>
+          </motion.div>
+        )}
 
         {/* Filters */}
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 mb-6">
@@ -674,6 +860,121 @@ export default function ELKScorerDashboard() {
                   </>
                 )}
               </motion.button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Backups Modal */}
+      {backupsOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setBackupsOpen(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto"
+          >
+            <div className="flex justify-between items-center p-5 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Archive size={20} /> Algorithm Scorer Backups
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Stored on the host at <code>./algo-backups/</code> — survives Elasticsearch volume wipes.
+                </p>
+              </div>
+              <button onClick={() => setBackupsOpen(false)} className="text-slate-500 hover:text-slate-800 dark:hover:text-white">
+                <X size={22} />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              {backupsLoading ? (
+                <div className="text-center py-8 text-slate-500">Loading backups…</div>
+              ) : backups.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">No backups found</div>
+              ) : (
+                backups.map((b) => {
+                  const busy = backupBusy === b.name;
+                  return (
+                    <div
+                      key={b.name}
+                      className={`border rounded-lg p-4 flex items-start justify-between gap-4 ${
+                        b.is_baseline
+                          ? 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20'
+                          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white break-all">
+                            {b.name}
+                          </span>
+                          {b.is_baseline && (
+                            <span className="text-[10px] uppercase tracking-wide bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 px-2 py-0.5 rounded-full font-semibold">
+                              Baseline
+                            </span>
+                          )}
+                          {b.is_auto && (
+                            <span className="text-[10px] uppercase tracking-wide bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-2 py-0.5 rounded-full font-semibold">
+                              Auto
+                            </span>
+                          )}
+                          {b.name.startsWith('pre-restore-') && (
+                            <span className="text-[10px] uppercase tracking-wide bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-semibold">
+                              Pre-Restore
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                          {b.count != null && <span className="font-semibold">{b.count} algorithms</span>}
+                          {b.count != null && ' • '}
+                          {(b.size_bytes / 1024).toFixed(1)} KB
+                          {' • '}
+                          {new Date(b.created_at || b.modified_at).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => restoreFrom(b.name)}
+                          disabled={busy}
+                          title="Replace the live algorithm scorer with this backup"
+                          className="flex items-center gap-1 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-1.5 rounded"
+                        >
+                          <RotateCcw size={14} /> Restore
+                        </button>
+                        {!b.is_baseline && (
+                          <button
+                            onClick={() => deleteBackup(b.name)}
+                            disabled={busy}
+                            title="Delete this backup file"
+                            className="flex items-center gap-1 text-sm bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/60 disabled:opacity-50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 px-3 py-1.5 rounded"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/40 sticky bottom-0">
+              <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                <Download size={12} />
+                Baseline cannot be deleted. Auto-snapshot is refreshed on every edit.
+              </div>
+              <button
+                onClick={loadBackups}
+                disabled={backupsLoading}
+                className="text-sm bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 px-3 py-1.5 rounded disabled:opacity-50"
+              >
+                Refresh
+              </button>
             </div>
           </motion.div>
         </motion.div>

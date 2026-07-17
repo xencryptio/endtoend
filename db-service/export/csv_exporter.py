@@ -15,9 +15,9 @@ class DatabaseCSVExporter:
     def __init__(self):
         # Fix spaces in URLs
         self.databases = {
-            'scandb': os.getenv("DATABASE_URL", "postgresql://scanuser:scanpass@postgres:5432/scandb"),
-            'repo_scanner_db': os.getenv("REPO_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db"),
-            'system_scanner_db': os.getenv("SYSTEM_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db")
+            'scandb': os.getenv("DATABASE_URL", "sqlite:////data/scandb.db"),
+            'repo_scanner_db': os.getenv("REPO_SCANNER_DB_URL", "sqlite:////data/repo_scanner.db"),
+            'system_scanner_db': os.getenv("SYSTEM_SCANNER_DB_URL", "sqlite:////data/system_scanner.db")
         }
         self.engines = {}
         self.sessions = {}

@@ -1,0 +1,12 @@
+# Tracked by git (pushed to GitHub):
+#   baseline.json      — immutable golden seed; never delete
+#   snapshot-*.json    — user-triggered backups via UI "Backup" button
+#   pre-restore-*.json — auto-saved before any restore operation
+#
+# NOT tracked (changes too often to be useful in git history):
+#   auto-last.json     — rolling snapshot written on every create/edit/delete
+*
+!.gitignore
+!baseline.json
+!snapshot-*.json
+!pre-restore-*.json

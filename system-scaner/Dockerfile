@@ -5,8 +5,8 @@
 # Use a lightweight Python base image
 FROM python:3.11-slim
 
-# Install postgresql-client for pg_isready
-RUN apt-get update && apt-get install -y postgresql-client curl
+# Minimal runtime tools
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -15,17 +15,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
-# Copy the wait-for-db.sh script and make it executable
-COPY wait-for-db.sh /usr/local/bin/wait-for-db.sh
-RUN chmod +x /usr/local/bin/wait-for-db.sh
-
 # --- Copy all application code and folders ---
 # Copy all Python files from system-scaner directory
 COPY *.py .
-COPY alembic.ini .
-COPY wait-for-db.sh .
-COPY alembic ./alembic
 COPY agents ./agents
+
+# Mount-point for shared SQLite volume.
+RUN mkdir -p /data
 
 # --- FIX: Update hardcoded API URLs (skip dashboard.html) ---
 # Removes old URL only from Linux Agent/crypto-agent.service
@@ -36,5 +32,5 @@ RUN if [ -f "agents/linux/crypto-agent.service" ]; then \
 # Expose the port for FastAPI app
 EXPOSE 9000
 
-# Use wait-for-db.sh, run migrations, then start the application
-CMD /usr/local/bin/wait-for-db.sh db-service && alembic upgrade head && uvicorn api_server:app --host 0.0.0.0 --port 9000
+# Tables are auto-created at app startup via Base.metadata.create_all() — no alembic.
+CMD ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "9000"]

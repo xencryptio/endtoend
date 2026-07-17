@@ -36,32 +36,23 @@ import {
 } from "@/components/ui/sidebar";
 
 // -------------------
-// Menu Config
+// Menu Config — all dashboards are now ELK-backed
 // -------------------
 const menuItems = [
-  { title: "Dashboard", url: "/", icon: Home },
-  { title: "PQC Analysis", url: "/pqc-dashboard", icon: BarChart3 },
-  { title: "Applications", url: "/applications", icon: Server },
-  { title: "Vulnerabilities", url: "/vulnerabilities", icon: Shield },
-  { title: "Profile", url: "/profile", icon: User },
-  { title: "Onboarding", url: "/onboarding", icon: ClipboardPlus },
+  { title: "Dashboard", url: "/elk/dashboard", icon: Home },
+  { title: "PQC Analyst", url: "/elk/analyst", icon: Sparkles },
+  { title: "Applications", url: "/elk/applications", icon: Server },
+  { title: "Vulnerabilities", url: "/elk/vulnerabilities", icon: ShieldAlert },
+  { title: "Onboarding", url: "/elk/onboarding", icon: ClipboardPlus },
   { title: "Scan Center", url: "/scans", icon: ScanLine },
+  { title: "Scan Results", url: "/elk/results", icon: Database },
+  { title: "Scan History", url: "/elk/history", icon: History },
+  { title: "Algorithm Scorer", url: "/elk/scorer", icon: Activity },
   { title: "Readiness Assessment", url: "/Readinessanalysis", icon: ClipboardCheck },
   { title: "Migration Assist", url: "/migrationAssist", icon: ArrowRightLeft },
   { title: "Integration", url: "/integration", icon: Link2 },
+  { title: "Profile", url: "/profile", icon: User },
   { title: "Settings", url: "/settings", icon: Settings },
-];
-
-// 🆕 ELK-backed menu (parallel to legacy Postgres pages)
-const elkMenuItems = [
-  { title: "PQC Analyst", url: "/elk/analyst", icon: Sparkles },
-  { title: "Algorithm Scorer", url: "/elk/scorer", icon: Database },
-  { title: "ELK Dashboard", url: "/elk/dashboard", icon: Activity },
-  { title: "ELK Onboarding", url: "/elk/onboarding", icon: ClipboardPlus },
-  { title: "ELK Applications", url: "/elk/applications", icon: Server },
-  { title: "ELK Results", url: "/elk/results", icon: Database },
-  { title: "ELK Vulnerabilities", url: "/elk/vulnerabilities", icon: ShieldAlert },
-  { title: "Scan History", url: "/elk/history", icon: History },
 ];
 
 // -------------------
@@ -113,14 +104,6 @@ const NavigationContent = ({
   return (
     <div className="space-y-4">
       {renderItems(menuItems)}
-      <div>
-        {!isCollapsed && (
-          <p className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-purple-600">
-            ELK · Audit Trail
-          </p>
-        )}
-        {renderItems(elkMenuItems)}
-      </div>
     </div>
   );
 };

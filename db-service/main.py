@@ -31,6 +31,13 @@ from database import get_scandb_session, get_repo_scanner_session, get_system_sc
 setup_logging("DB-SERVICE", logging.DEBUG)
 log = logging.getLogger(__name__)
 
+# Auto-create tables on startup (replaces alembic for SQLite drop-in DBs).
+try:
+    models.Base.metadata.create_all(bind=engine)
+    log.info("✅ Database tables ensured via metadata.create_all()")
+except Exception as e:  # pragma: no cover - startup diagnostic
+    log.exception(f"⚠️  Could not auto-create tables: {e}")
+
 app = FastAPI(title="Scan Storage Service", version="1.0")
 app.middleware("http")(correlation_middleware)
 

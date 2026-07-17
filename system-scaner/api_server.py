@@ -652,10 +652,11 @@ AGENT_FOLDERS = {
     "linux": "agents/linux",
     "windows": "agents/windows"
 }
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scanuser:scanpass@localhost:5432/system_scanner_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/system_scanner.db")
 
 # --- SQLAlchemy Setup ---
-engine = create_engine(DATABASE_URL)
+_sqlite_kwargs = {"connect_args": {"check_same_thread": False}} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, **_sqlite_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

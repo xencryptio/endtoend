@@ -9,10 +9,11 @@ from datetime import datetime
 import uuid
 from typing import List, Dict, Any
 
-# --- Database Connection Details ---
-SCANDB_URL = "postgresql://scanuser:scanpass@postgres:5432/scandb"
-REPO_SCANNER_DB_URL = "postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db"
-SYSTEM_SCANNER_DB_URL = "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db"
+# --- Database Connection Details (default to shared SQLite files) ---
+import os as _os
+SCANDB_URL = _os.getenv("DATABASE_URL", "sqlite:////data/scandb.db")
+REPO_SCANNER_DB_URL = _os.getenv("REPO_SCANNER_DB_URL", "sqlite:////data/repo_scanner.db")
+SYSTEM_SCANNER_DB_URL = _os.getenv("SYSTEM_SCANNER_DB_URL", "sqlite:////data/system_scanner.db")
 
 # --- Engine and Session Creation ---
 # ... (database connection setup remains the same) ...

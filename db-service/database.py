@@ -4,20 +4,24 @@ from sqlalchemy.orm import sessionmaker
 import os
 
 # Get database URL from environment variable
+# Default: file-based SQLite stored on the shared `scanner-data` volume.
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://scanuser:scanpass@postgres:5432/scandb"
+    "DATABASE_URL",
+    "sqlite:////data/scandb.db",
 )
 
 print(f"📡 Using database URL: {DATABASE_URL}")  # Add this debug line
 
+
+def _engine_kwargs(url: str):
+    """SQLite requires `check_same_thread=False` for FastAPI's threaded use."""
+    if url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+    return {"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20}
+
+
 # Create SQLAlchemy engine
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,  # Verify connections before using
-    pool_size=10,
-    max_overflow=20
-)
+engine = create_engine(DATABASE_URL, **_engine_kwargs(DATABASE_URL))
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -39,11 +43,11 @@ def get_db():
 
 # --- Additional Database Connections ---
 
-REPO_SCANNER_DB_URL = os.getenv("REPO_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/repo_scanner_db")
-SYSTEM_SCANNER_DB_URL = os.getenv("SYSTEM_SCANNER_DB_URL", "postgresql://scanuser:scanpass@postgres:5432/system_scanner_db")
+REPO_SCANNER_DB_URL = os.getenv("REPO_SCANNER_DB_URL", "sqlite:////data/repo_scanner.db")
+SYSTEM_SCANNER_DB_URL = os.getenv("SYSTEM_SCANNER_DB_URL", "sqlite:////data/system_scanner.db")
 
-repo_scanner_engine = create_engine(REPO_SCANNER_DB_URL)
-system_scanner_engine = create_engine(SYSTEM_SCANNER_DB_URL)
+repo_scanner_engine = create_engine(REPO_SCANNER_DB_URL, **_engine_kwargs(REPO_SCANNER_DB_URL))
+system_scanner_engine = create_engine(SYSTEM_SCANNER_DB_URL, **_engine_kwargs(SYSTEM_SCANNER_DB_URL))
 
 RepoScannerSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=repo_scanner_engine)
 SystemScannerSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=system_scanner_engine)
