@@ -7,7 +7,6 @@ import {
   ArrowRightLeft,
   Menu,
   ScanLine,
-  User,
   Computer,
   ClipboardCheck,
   ClipboardPlus,
@@ -51,7 +50,6 @@ const menuItems = [
   { title: "Readiness Assessment", url: "/Readinessanalysis", icon: ClipboardCheck },
   { title: "Migration Assist", url: "/migrationAssist", icon: ArrowRightLeft },
   { title: "Integration", url: "/integration", icon: Link2 },
-  { title: "Profile", url: "/profile", icon: User },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 

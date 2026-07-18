@@ -86,6 +86,96 @@ def _safe_search(index: str, body: Dict[str, Any]) -> Dict[str, Any]:
         return {"hits": {"hits": [], "total": {"value": 0}}, "aggregations": {}}
 
 
+def _has_real_data(obj: Dict[str, Any]) -> bool:
+    """Check if a dict has actual scan data (not just flat scalar fields)."""
+    if not isinstance(obj, dict):
+        return False
+    tls = obj.get("tls_configuration")
+    cert = obj.get("certificate_chain")
+    pqc = obj.get("pqc_analysis")
+    # Real data: tls_configuration or certificate_chain are dicts, OR
+    # pqc_analysis is a dict with components/overall_score as actual dict/number
+    if isinstance(tls, dict) and tls:
+        return True
+    if isinstance(cert, dict) and cert:
+        return True
+    if isinstance(pqc, dict) and (isinstance(pqc.get("components"), dict) or isinstance(pqc.get("overall_score"), (int, float))):
+        return True
+    return False
+
+
+def _find_real_raw_response(obj: Any, depth: int = 0) -> Optional[Dict[str, Any]]:
+    """Recursively search for a raw_response dict that contains real scan data."""
+    if depth > 8 or not isinstance(obj, dict):
+        return None
+    # Check if this object itself has real data
+    if _has_real_data(obj):
+        return obj
+    # Check if it has a raw_response key that contains real data
+    inner = obj.get("raw_response")
+    if isinstance(inner, dict):
+        result = _find_real_raw_response(inner, depth + 1)
+        if result:
+            return result
+    # Also check "raw" field
+    raw_field = obj.get("raw")
+    if isinstance(raw_field, dict):
+        result = _find_real_raw_response(raw_field, depth + 1)
+        if result:
+            return result
+    return None
+
+
+def _normalize_scan_result(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize ES document structure for frontend consumption.
+    For domain scans, find and expose the real raw_response containing
+    tls_configuration, certificate_chain, and pqc_analysis.
+    
+    The ELK document structure is:
+      doc["raw"] = scan_data sent to elk-indexer
+      doc["raw"]["raw_response"] = actual TLS/PQC data dict
+    
+    elk-sync may overwrite docs with flat data. We dig recursively to find
+    the level that contains the actual nested structures.
+    """
+    if doc.get("asset_type") != "domain":
+        return doc
+    
+    # First: try doc["raw"]["raw_response"] — the canonical path for new scans
+    raw_outer = doc.get("raw", {})
+    if isinstance(raw_outer, dict):
+        inner_rr = raw_outer.get("raw_response")
+        if isinstance(inner_rr, dict) and _has_real_data(inner_rr):
+            doc["raw_response"] = inner_rr
+            return doc
+    
+    # Second: recursively search the entire doc for a dict with real data
+    found = _find_real_raw_response(doc)
+    if found:
+        doc["raw_response"] = found
+        return doc
+    
+    # Fallback: construct minimal raw_response from flat top-level fields
+    doc["raw_response"] = {
+        "domain": doc.get("url", ""),
+        "url": doc.get("url", ""),
+        "request_id": doc.get("request_id", ""),
+        "status": doc.get("status", ""),
+        "scan_status": doc.get("scan_status", ""),
+        "pqc_analysis": {
+            "overall_score": doc.get("pqc_overall_score") or 0,
+            "overall_grade": doc.get("pqc_overall_grade") or "F",
+        },
+        "tls_configuration": {},
+        "certificate_chain": {},
+        "signature_algorithms": {},
+        "scanner_report": {},
+    }
+    
+    return doc
+
+
 @app.get("/health")
 def health():
     try:
@@ -111,7 +201,8 @@ def dashboard():
             "collapse": {"field": "asset_id"},
         }
         result = _safe_search(ALL_INDICES, body)
-        latest_docs = [h["_source"] for h in result["hits"]["hits"]]
+        # ✅ CRITICAL FIX: Normalize results
+        latest_docs = [_normalize_scan_result(h["_source"]) for h in result["hits"]["hits"]]
 
         domains = [d for d in latest_docs if d.get("asset_type") == "domain"]
         repos = [d for d in latest_docs if d.get("asset_type") == "repo"]
@@ -166,10 +257,12 @@ def latest_results(
         "collapse": {"field": "asset_id"},
     }
     result = _safe_search(index, body)
+    # ✅ CRITICAL FIX: Normalize results to ensure raw_response is properly positioned
+    normalized_results = [_normalize_scan_result(h["_source"]) for h in result["hits"]["hits"]]
     return {
         "type": type,
-        "count": len(result["hits"]["hits"]),
-        "results": [h["_source"] for h in result["hits"]["hits"]],
+        "count": len(normalized_results),
+        "results": normalized_results,
     }
 
 
@@ -194,11 +287,13 @@ def all_results(
         body["query"] = {"term": {"asset_id": asset_id}}
 
     result = _safe_search(index, body)
+    # ✅ CRITICAL FIX: Normalize results to ensure raw_response is properly positioned
+    normalized_results = [_normalize_scan_result(h["_source"]) for h in result["hits"]["hits"]]
     return {
         "type": type,
         "total": result["hits"]["total"]["value"],
-        "count": len(result["hits"]["hits"]),
-        "results": [h["_source"] for h in result["hits"]["hits"]],
+        "count": len(normalized_results),
+        "results": normalized_results,
     }
 
 
@@ -213,7 +308,8 @@ def asset_history(asset_id: str, size: int = Query(100, ge=1, le=500)):
         "query": {"term": {"asset_id": asset_id}},
     }
     result = _safe_search(ALL_INDICES, body)
-    hits = [h["_source"] for h in result["hits"]["hits"]]
+    # ✅ CRITICAL FIX: Normalize results
+    hits = [_normalize_scan_result(h["_source"]) for h in result["hits"]["hits"]]
 
     return {
         "asset_id": asset_id,
@@ -300,7 +396,8 @@ def get_asset(asset_id: str):
     hits = result["hits"]["hits"]
     if not hits:
         raise HTTPException(status_code=404, detail="Asset not found")
-    return hits[0]["_source"]
+    # ✅ CRITICAL FIX: Normalize result
+    return _normalize_scan_result(hits[0]["_source"])
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +443,58 @@ def stats():
         out["total"] = sum(out.values())
         return out
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# /api/elk/scan-by-request/{request_id} — fetch / delete by request_id
+# ---------------------------------------------------------------------------
+@app.get("/api/elk/scan-by-request/{request_id}")
+def get_scan_by_request(request_id: str):
+    """Return the latest domain scan document that matches a request_id."""
+    body = {
+        "size": 1,
+        "sort": [{"scanned_at": {"order": "desc"}}],
+        "query": {"term": {"request_id": request_id}},
+    }
+    result = _safe_search(INDEX_DOMAIN, body)
+    hits = result["hits"]["hits"]
+    if not hits:
+        raise HTTPException(status_code=404, detail=f"Scan not found: {request_id}")
+    return hits[0]["_source"]
+
+
+@app.delete("/api/elk/scan-by-request/{request_id}")
+def delete_scan_by_request(request_id: str):
+    """Delete all domain scan documents for a given request_id."""
+    try:
+        result = es.delete_by_query(
+            index=INDEX_DOMAIN,
+            body={"query": {"term": {"request_id": request_id}}},
+            refresh=True,
+        )
+        deleted = result.get("deleted", 0)
+        logger.info(f"Deleted {deleted} docs for request_id={request_id}")
+        return {"deleted": deleted, "request_id": request_id}
+    except Exception as e:
+        logger.exception(f"Delete failed for request_id={request_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/elk/scans/clear-all")
+def clear_all_domain_scans():
+    """Delete ALL domain scan documents from Elasticsearch. Irreversible."""
+    try:
+        result = es.delete_by_query(
+            index=INDEX_DOMAIN,
+            body={"query": {"match_all": {}}},
+            refresh=True,
+        )
+        deleted = result.get("deleted", 0)
+        logger.info(f"Cleared all domain scans: {deleted} docs deleted")
+        return {"deleted": deleted, "message": "All domain scans cleared"}
+    except Exception as e:
+        logger.exception("clear-all failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 

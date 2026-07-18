@@ -7,8 +7,10 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
-import { Shield, Sun, Moon, UserCircle } from "lucide-react";
+import { Shield, Sun, Moon, LogOut, UserCircle } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -17,9 +19,14 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const { theme, setTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { user, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
 
-  const toggleTheme = () => {
-    setTheme(theme === "dark" ? "light" : "dark");
+  const toggleTheme = () => setTheme(theme === "dark" ? "light" : "dark");
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -60,10 +67,8 @@ export function Layout({ children }: LayoutProps) {
                 </div>
               </div>
 
-              {/* Right Section: Live + Theme Toggle + User */}
+              {/* Right Section: Theme Toggle + User */}
               <div className="flex items-center gap-3">
-                
-
                 <Button
                   size="icon"
                   variant="ghost"
@@ -73,7 +78,31 @@ export function Layout({ children }: LayoutProps) {
                   {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
                 </Button>
 
-                <UserCircle className="w-8 h-8 text-muted-foreground" />
+                {isAuthenticated && user ? (
+                  <div className="flex items-center gap-2">
+                    <img
+                      src={user.picture}
+                      alt={user.name}
+                      referrerPolicy="no-referrer"
+                      className="w-8 h-8 rounded-full ring-2 ring-border"
+                    />
+                    <div className="hidden md:block text-right">
+                      <p className="text-xs font-medium leading-tight">{user.given_name}</p>
+                      <p className="text-xs text-muted-foreground leading-tight truncate max-w-[120px]">{user.email}</p>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Sign out"
+                      onClick={handleLogout}
+                      title="Sign out"
+                    >
+                      <LogOut size={16} />
+                    </Button>
+                  </div>
+                ) : (
+                  <UserCircle className="w-8 h-8 text-muted-foreground" />
+                )}
               </div>
             </motion.header>
 

@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import WebScan from "@/components/scan/webscan";
 import GitScan from "@/components/git-scan/git-scan";
 import { toast } from "sonner";
+import { connectSSEWithPost } from "@/lib/scanApi";
 
 // ============================================================================
 // CONSTANTS
@@ -44,6 +45,7 @@ const ONBOARDING_API  = (import.meta.env.VITE_ONBOARDING_API_URL   as string | u
 const SYSTEM_SCAN_API = (import.meta.env.VITE_SYSTEM_SCAN_API_URL  as string | undefined) || "http://localhost:9000";
 const SCAN_API        = (import.meta.env.VITE_SCAN_API_URL         as string | undefined) || "http://localhost:8000";
 const REPO_SCAN_API   = (import.meta.env.VITE_REPO_SCAN_API_URL    as string | undefined) || "http://localhost:8003";
+const ELK_QUERY_API   = (import.meta.env.VITE_ELK_QUERY_API_URL    as string | undefined) || "http://localhost:9101";
 
 // ============================================================================
 // TYPES
@@ -121,25 +123,44 @@ const InlineTLSHistory: React.FC<{ onView: (domain?: string) => void; refreshKey
   const [scans, setScans] = useState<TLSScanRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    fetch(`${SCAN_API}/results`)
-      .then(r => r.ok ? r.json() : [])
+  const loadScans = () => {
+    fetch(`${ELK_QUERY_API}/api/elk/results?type=domain&size=8`)
+      .then(r => r.ok ? r.json() : { results: [] })
       .then(d => {
         const arr: any[] = Array.isArray(d) ? d : (d?.results ?? []);
+        const mapStatus = (s: string) => {
+          const l = (s || '').toLowerCase();
+          if (l === 'completed') return 'completed';
+          if (l === 'failed') return 'failed';
+          if (l === 'in_progress') return 'in_progress';
+          return 'pending';
+        };
         setScans(arr.slice(0, 8).map((r: any) => ({
-          request_id: r.request_id || String(r.id),
-          url: r.url,
-          primary_domain: r.url,
-          scan_status: r.status === "processing" ? "in_progress" : (r.status ?? "pending"),
-          requested_at: r.created_at || r.requested_at || "",
-          quantum_score: r.pqc_analysis?.overall_score ?? r.quantum_score,
-          quantum_grade: r.pqc_analysis?.overall_grade ?? r.quantum_grade,
+          request_id: r.request_id || r.scan_id || String(r.id),
+          url: r.url || r.asset_label,
+          primary_domain: r.url || r.asset_label,
+          scan_status: mapStatus(r.scan_status || r.status),
+          requested_at: r.requested_at || r.scanned_at || "",
+          quantum_score: r.pqc_overall_score ?? r.raw?.pqc_analysis?.overall_score,
+          quantum_grade: r.pqc_overall_grade ?? r.raw?.pqc_analysis?.overall_grade,
         })));
       })
       .catch(() => setScans([]))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    loadScans();
   }, [refreshKey]);
+
+  // Auto-poll every 5s while any scan is in-progress
+  useEffect(() => {
+    const hasInProgress = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending');
+    if (!hasInProgress) return;
+    const interval = setInterval(loadScans, 5000);
+    return () => clearInterval(interval);
+  }, [scans]);
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
@@ -180,14 +201,26 @@ const InlineRepoHistory: React.FC<{ onView: (repo?: string) => void; refreshKey:
   const [scans, setScans] = useState<RepoScanRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
+  const loadRepoScans = () => {
     fetch(`${REPO_SCAN_API}/api/scans?limit=8`)
       .then(r => r.ok ? r.json() : [])
       .then(d => setScans(Array.isArray(d) ? d.slice(0, 8) : (d?.scans ?? []).slice(0, 8)))
       .catch(() => setScans([]))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    loadRepoScans();
   }, [refreshKey]);
+
+  // Auto-poll every 5s while any scan is in-progress
+  useEffect(() => {
+    const hasInProgress = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending');
+    if (!hasInProgress) return;
+    const interval = setInterval(loadRepoScans, 5000);
+    return () => clearInterval(interval);
+  }, [scans]);
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
@@ -308,6 +341,7 @@ const SingleAssetTab: React.FC<{
   const [repoVal,     setRepoVal]     = useState("");
   const [branchVal,   setBranchVal]   = useState("main");
   const [refreshKey,  setRefreshKey]  = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableBranches,    setAvailableBranches]    = useState<string[]>([]);
   const [isFetchingBranches,   setIsFetchingBranches]   = useState(false);
   const [showManualBranch,     setShowManualBranch]     = useState(false);
@@ -342,13 +376,40 @@ const SingleAssetTab: React.FC<{
     return () => clearTimeout(timer);
   }, [repoVal, assetType]);
 
-  const handleRun = () => {
+  const handleRun = async () => {
     if (assetType === "url") {
       if (!urlVal.trim()) { toast.error("Please enter a URL to scan"); return; }
-      onOpenWebScan(urlVal.trim());
+      const domain = urlVal.trim();
+      setIsSubmitting(true);
+      setUrlVal('');
+      toast.success(`Scan started for ${domain}`);
+      setRefreshKey(k => k + 1);
+      // Use exact same SSE function as New Scan page - run in background
+      connectSSEWithPost(
+        SCAN_API,
+        domain,
+        true,
+        (_requestId) => { setRefreshKey(k => k + 1); },
+        (_data) => { setRefreshKey(k => k + 1); },
+        (_data) => { setRefreshKey(k => k + 1); toast.success(`Scan completed for ${domain}`); },
+        (_err)  => { setRefreshKey(k => k + 1); }
+      );
+      setIsSubmitting(false);
     } else if (assetType === "repo") {
       if (!repoVal.trim()) { toast.error("Please enter a repository"); return; }
-      onOpenGitScan(repoVal.trim());
+      setIsSubmitting(true);
+      const repo = repoVal.trim();
+      setRepoVal('');
+      toast.success(`Repo scan started for ${repo}`);
+      setRefreshKey(k => k + 1);
+      fetch(`${REPO_SCAN_API}/api/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: repo, branch_name: branchVal || 'main' }),
+      })
+        .then(() => setRefreshKey(k => k + 1))
+        .catch(() => {})
+        .finally(() => setIsSubmitting(false));
     } else {
       if (!endpointVal.trim()) { toast.error("Please enter an IP or hostname"); return; }
       onOpenAssets();
@@ -431,8 +492,11 @@ const SingleAssetTab: React.FC<{
           </div>
         )}
 
-        <Button className="w-full mt-5 gap-2 font-medium" onClick={handleRun}>
-          <Play className="h-4 w-4 fill-white" /> Run Scan Now
+        <Button className="w-full mt-5 gap-2 font-medium" onClick={handleRun} disabled={isSubmitting}>
+          {isSubmitting
+            ? <><RefreshCw className="h-4 w-4 animate-spin" /> Submitting…</>
+            : <><Play className="h-4 w-4 fill-white" /> Run Scan Now</>
+          }
         </Button>
       </UnifiedCard>
 
@@ -968,7 +1032,7 @@ const Scan = () => {
   const handleBack = () => { setMainView("scan-center"); setAutoLoadDomain(undefined); setAutoLoadRepo(undefined); };
 
   if (mainView === "webscan-full") {
-    return <WebScan key="webscan" onBack={handleBack} apiBaseUrl={SCAN_API} autoScanUrl={autoLoadDomain} initialTab="history" />;
+    return <WebScan key="webscan" onBack={handleBack} apiBaseUrl={SCAN_API} autoScanUrl={autoLoadDomain} initialTab="scan" />;
   }
   if (mainView === "gitscan-full") {
     return <GitScan key="gitscan" onBack={handleBack} autoLoadRepo={autoLoadRepo as any} />;

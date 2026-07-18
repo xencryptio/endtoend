@@ -354,33 +354,9 @@ async def score_tls_scan_remote(transformed_result: Dict) -> Dict:
         logger.error(f"Scoring failed: {e}")
         return {"error": str(e)}
 
-# External/Mock Dependencies (replace with your actual imports if necessary)
-# NOTE: Assuming 'tls' and 'db_handler' are available or mocked for execution.
-try:
-    from db_handler import DatabaseHandler as AsyncDatabaseHandler
-except ImportError:
-    class MockDatabaseHandler:
-        def __init__(self):
-            self.enabled = False
-            self.db_service_url = "mock_url"
-        async def save_failed_scan(self, *args): return True
-        async def save_scan_result(self, *args): return True
-        async def get_scan_results(self, *args, **kwargs): return []
-        async def get_scan_by_url(self, *args): return None
-        async def get_scan_by_id(self, *args): return None
-        async def search_scans(self, *args, **kwargs): return []
-        async def _ensure_connected(self):
-            logger.warning("MockDatabaseHandler: _ensure_connected called, mock connection is disabled.")
-            self.enabled = False
-            return
-        async def delete_result_from_db(self, *args): return False
-        async def clear_all_from_db(self, *args): return {"deleted_results": 0}
-        async def get_statistics(self): return {}
-
-    AsyncDatabaseHandler = MockDatabaseHandler
-    logger.warning("Using MockDatabaseHandler. Ensure 'db_handler' module is installed for database functionality.")
-# Initialize database handler (add after pqc_analyzer initialization)
-db_handler = AsyncDatabaseHandler()
+# ELK handler — writes domain scan states directly to Elasticsearch (no SQLite dependency)
+from elk_handler import ElkHandler as _ElkHandler
+elk_handler = _ElkHandler()
 
 app = FastAPI(title="SSL Labs Scan Service", version="5.0")
 
@@ -1191,11 +1167,41 @@ def format_result_for_frontend(transformed_result: Dict[str, Any], request_id: s
         "pqc_overall_score": pqc_score,
         "pqc_overall_grade": pqc_grade,
         
-        # ✅ CRITICAL: Store COMPLETE transformed result in raw_response
-        "raw_response": transformed_result,
+        # ✅ CRITICAL: Store COMPLETE raw_response with all nested data properly structured
+        "raw_response": {
+            "request_id": transformed_result.get("request_id"),
+            "domain": transformed_result.get("domain", ""),
+            "url": transformed_result.get("domain", ""),
+            "status": "completed",
+            "scan_status": "completed",
+            "scan_type": "crypto_audit",
+            "server_ip": transformed_result.get("server_ip"),
+            "port": transformed_result.get("port", 443),
+            "requested_at": transformed_result.get("requested_at", datetime.now().isoformat()),
+            "execution_time_seconds": transformed_result.get("execution_time_seconds", 0),
+            
+            # ✅ TLS Configuration
+            "tls_configuration": tls_config,
+            
+            # ✅ Certificate Chain
+            "certificate_chain": cert_chain,
+            
+            # ✅ Signature Algorithms
+            "signature_algorithms": transformed_result.get("signature_algorithms", {}),
+            
+            # ✅ Scanner Report
+            "scanner_report": transformed_result.get("scanner_report", {}),
+            
+            # ✅ PQC Analysis - MOST IMPORTANT
+            "pqc_analysis": pqc_analysis,
+            
+            # ✅ Scan Metadata
+            "scan_metadata": transformed_result.get("scan_metadata", {}),
+        },
         
         "execution_time_seconds": 0  # Will be set by caller if needed, or default to 0
     }
+
 
 def handle_scan_with_backoff(
     domain: str,
@@ -1443,9 +1449,9 @@ async def process_single_domain(
 
     if save_to_db:
         try:
-            await db_handler.save_pending_scan(domain, request_id)
+            await elk_handler.save_submitted(domain, request_id)
         except Exception as pending_error:
-            logger.warning(f"Failed to create pending scan record for {domain}: {pending_error}")
+            logger.warning(f"Failed to create submitted scan record for {domain}: {pending_error}")
     
     if progress_tracker:
         progress_tracker.complete_phase(domain, "protocol_check")
@@ -1462,7 +1468,7 @@ async def process_single_domain(
         result = format_result_for_frontend(transformed_result, request_id)
         if save_to_db:
             try:
-                await db_handler.save_scan_result(result)
+                await elk_handler.save_completed(result)
             except Exception as save_error:
                 logger.error(f"Failed to save http_skipped result for {domain}: {save_error}")
         if progress_tracker:
@@ -1477,7 +1483,14 @@ async def process_single_domain(
         
         if not is_resolvable:
             raise APIError(status_code=503, error_code="dns_resolution_failed", message=error_msg)
-        
+
+        # Mark as in_progress — scanner is now actively running
+        if save_to_db:
+            try:
+                await elk_handler.save_in_progress(domain, request_id, scan_start_time.isoformat())
+            except Exception as _ipe:
+                logger.warning(f"Failed to save in_progress for {domain}: {_ipe}")
+
         # Run scanner (external by default)
         raw_result = await run_scanner(domain, timeout=timeout, progress_tracker=progress_tracker)
         
@@ -1527,10 +1540,10 @@ async def process_single_domain(
         
         logger.info(f"⏱️  Scan for {domain} took {execution_time:.2f} seconds")
         
-        # Save to database if requested (each scan is independent - no batch required)
+        # Save completed result to ELK (each scan is independent - no batch required)
         if save_to_db:
             try:
-                await db_handler.save_scan_result(result)
+                await elk_handler.save_completed(result)
                 logger.info(f"✅ Saved result for {domain}")
             except Exception as e:
                 logger.error(f"Failed to save result for {domain}: {e}")
@@ -1544,14 +1557,14 @@ async def process_single_domain(
         if save_to_db:
             try:
                 error_message = e.detail.get("message") if isinstance(e.detail, dict) else str(e)
-                await db_handler.save_failed_scan(domain, error_message, request_id)
+                await elk_handler.save_failed(domain, error_message, request_id)
             except Exception as save_error:
                 logger.error(f"Failed to save failed scan for {domain}: {save_error}")
         raise
     except Exception as e:
         if save_to_db:
             try:
-                await db_handler.save_failed_scan(domain, str(e), request_id)
+                await elk_handler.save_failed(domain, str(e), request_id)
             except Exception as save_error:
                 logger.error(f"Failed to save failed scan for {domain}: {save_error}")
         logger.exception(f"❌ Unexpected error scanning {domain}")
@@ -1601,12 +1614,12 @@ async def scan_domain(request: ScanRequest):
             domain = domains_to_scan[0]
             req_id = generate_scan_request_id(domain)
 
-            # Save pending record NOW so the caller can track it immediately
+            # Save submitted record NOW so the caller can track it immediately in ELK
             if request.save_to_db:
                 try:
-                    await db_handler.save_pending_scan(domain, req_id)
+                    await elk_handler.save_submitted(domain, req_id)
                 except Exception as _pe:
-                    logger.warning(f"Failed to create pending scan record for {domain}: {_pe}")
+                    logger.warning(f"Failed to create submitted scan record for {domain}: {_pe}")
 
             # Fire-and-forget: the scan lifecycle is now independent of this request
             async def _run_background_scan(d: str, rid: str, s2db: bool):
@@ -1731,9 +1744,17 @@ async def scan_domain(request: ScanRequest):
 async def scan_with_progress(request: ScanRequest):
     """Scan domains with live progress updates and retry logic. Each URL is independent."""
     
+    # 🔍 LOG INCOMING REQUEST
+    logger.info(f"[INCOMING] Raw domain string (before validation): {repr(request.domain)}")
+    
     async def event_stream():
         request_id = f"scan_{int(datetime.now().timestamp())}_{hash(request.domain) % 10000}"
         domains = [d.strip() for d in request.domain.split(',') if d.strip()]
+        
+        # 🔍 DEBUG: Log what domains are being processed
+        logger.info(f"[DEBUG] Raw request.domain after validation: {repr(request.domain)}")
+        logger.info(f"[DEBUG] Parsed domains list: {domains}")
+        logger.info(f"[DEBUG] Total domains to scan: {len(domains)}")
         
         # INITIALIZE TRACKER (no batch ID needed)
         tracker = ScanProgressTracker(len(domains), request_id)
@@ -1880,7 +1901,7 @@ async def get_scan_results(
     """Fetch all scan results from database."""
     logger.info("Entered /results endpoint")
     try:
-        results = await db_handler.get_scan_results(status=status, limit=limit, offset=offset)
+        results = await elk_handler.get_results(status=status, limit=limit, offset=offset)
         logger.info("Scan results retrieved successfully")
         return results
     except Exception as e:
@@ -1892,7 +1913,7 @@ async def get_result_by_url(url: str):
     """Get scan result for a specific URL."""
     logger.info(f"Entered /results/url/{url} endpoint")
     try:
-        result = await db_handler.get_scan_by_url(url)
+        result = await elk_handler.get_scan_by_url(url)
         if not result:
             raise APIError(status_code=404, error_code="result_not_found", message=f"No scan result found for URL: {url}")
         logger.info(f"Result for {url} retrieved successfully")
@@ -1903,175 +1924,15 @@ async def get_result_by_url(url: str):
         logger.exception(f"Result retrieval for {url} failed")
         raise APIError(status_code=500, error_code="result_retrieval_failed", message=f"Result retrieval failed: {str(e)}")
 
-@app.get("/results/{result_id}")
-async def get_result_by_id(result_id: int):
-    """Get a specific scan result by ID."""
-    logger.info(f"Entered /results/{result_id} endpoint")
-    try:
-        result = await db_handler.get_scan_by_id(result_id)
-        if not result:
-            raise APIError(status_code=404, error_code="result_not_found", message=f"Scan result {result_id} not found")
-        logger.info(f"Result {result_id} retrieved successfully")
-        return result
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception(f"Result {result_id} retrieval failed")
-        raise APIError(status_code=500, error_code="result_retrieval_failed", message=f"Result retrieval failed: {str(e)}")
-
-@app.get("/results/search")
-async def search_scan_results(
-    pqc_grade: Optional[str] = Query(None, description="Filter by PQC grade (A+, A, B, etc.)"),
-    quantum_ready: Optional[bool] = Query(None, description="Filter by quantum ready status"),
-    tls_version: Optional[str] = Query(None, description="Filter by TLS version"),
-    status: Optional[str] = Query(None, description="Filter by status"),
-    limit: int = Query(100, ge=1, le=500)
-):
-    """Search scan results with filters."""
-    logger.info("Entered /results/search endpoint")
-    try:
-        results = await db_handler.search_scans(
-            pqc_grade=pqc_grade,
-            quantum_ready=quantum_ready,
-            tls_version=tls_version,
-            status=status,
-            limit=limit
-        )
-        logger.info("Search results retrieved successfully")
-        return results
-    except Exception as e:
-        logger.exception("Search results retrieval failed")
-        raise APIError(status_code=500, error_code="results_search_failed", message=f"Search results retrieval failed: {str(e)}")
-
-@app.get("/statistics")
-async def get_statistics():
-    """Get scan statistics."""
-    logger.info("Entered /statistics endpoint")
-    try:
-        stats = await db_handler.get_statistics()
-        logger.info("Statistics retrieved successfully")
-        return stats
-    except Exception as e:
-        logger.exception("Statistics retrieval failed")
-        raise APIError(status_code=500, error_code="statistics_failed", message=f"Statistics retrieval failed: {str(e)}")
-
-@app.get("/debug/db-connection")
-async def debug_db_connection():
-    """Debug endpoint to test database connectivity."""
-    await db_handler._ensure_connected()
-    can_connect = db_handler.enabled
-    return {
-        "db_service_url": db_handler.db_service_url,
-        "db_enabled": db_handler.enabled,
-        "can_connect": can_connect,
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.post("/debug/test-save")
-async def debug_test_save():
-    """Test saving a dummy record to database."""
-    
-    # Try to save a result (no batch needed)
-    test_result = {
-        "request_id": f"test_{int(datetime.now().timestamp())}",
-        "url": "test.example.com",
-        "requested_at": datetime.now().isoformat(),
-        "execution_time_seconds": 1.5,
-        "tls_version": "TLS 1.3",
-        "cipher_suite_name": "TLS_AES_256_GCM_SHA384",
-        "pqc_overall_score": 85,
-        "pqc_overall_grade": "A",
-        "raw_response": {"test": "data"}
-    }
-    
-    result_saved = await db_handler.save_scan_result(test_result)
-    
-    return {
-        "result_saved": result_saved,
-        "db_enabled": db_handler.enabled
-    }
-
-# ============================================================ 
-# DELETE ENDPOINTS (Proxy to DB Service)
-# ============================================================ 
-
-@app.delete("/scans/result/{result_id}")
-async def delete_scan_result_endpoint(result_id: int = Path(..., description="Result ID to delete")):
-    """
-    Delete a single scan result.
-    This endpoint proxies to the db-service.
-    """
-    logger.info(f"Entered /scans/result/{result_id} for deletion")
-    try:
-        success = await db_handler.delete_result_from_db(result_id)
-        
-        if success:
-            logger.info(f"Scan result {result_id} deleted successfully")
-            return {
-                "message": "Scan result deleted successfully",
-                "result_id": result_id,
-                "timestamp": datetime.now().isoformat()
-            }
-        else:
-            raise APIError(status_code=404, error_code="result_not_found", message=f"Scan result with ID {result_id} not found or already deleted")
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception(f"Error deleting result: {str(e)}")
-        raise APIError(status_code=500, error_code="result_deletion_failed", message=f"Error deleting result: {str(e)}")
-
-
-@app.delete("/scans/clear-all")
-async def clear_all_scans_endpoint():
-    """
-    DANGER: Delete ALL scan results from database.
-    This operation cannot be undone.
-    This endpoint proxies to the db-service.
-    """
-    logger.info("Entered /scans/clear-all endpoint")
-    try:
-        result = await db_handler.clear_all_from_db()
-        
-        if "error" in result:
-            raise APIError(
-                status_code=500,
-                error_code="clear_all_failed",
-                message=result["error"]
-            )
-        
-        logger.info("All data cleared successfully")
-        return {
-            "message": "All scan results cleared from database",
-            "deleted_results": result.get("deleted_results", 0),
-            "timestamp": datetime.now().isoformat()
-        }
-    except APIError:
-        raise
-    except Exception as e:
-        logger.exception(f"Error clearing all data: {str(e)}")
-        raise APIError(
-            status_code=500,
-            error_code="clear_all_failed",
-            message=f"Error clearing all data: {str(e)}"
-        )
-
-
 # ============================================================ 
 # APPLICATION STARTUP
 # ============================================================
 
 @app.on_event("startup")
 async def startup_event():
-    """Startup handler: DB health check."""
+    """Startup handler."""
     logger.info("🚀 Starting scan-service (single-scan architecture)...")
-    logger.info(f"📊 Database URL: {db_handler.db_service_url}")
-
-    await db_handler._ensure_connected()
-
-    if db_handler.enabled:
-        logger.info("✅ Database connection established")
-    else:
-        logger.warning("⚠️ Database connection failed - results will not be saved!")
+    logger.info("✅ ELK-backed domain scanning active (no SQLite dependency)")
 
 
 if __name__ == "__main__":

@@ -89,6 +89,9 @@ services:
       - SCORING_SERVICE_URL=http://universal-scoring-service:9500
       - EXTERNAL_TLS_SCANNER_URL=http://ssl-tls-scanner-new:8010
       - USE_INTERNAL_SCANNER=false
+      - OQS_PQ_SCANNER_URL=http://oqs-pq-scanner:8011
+      - ELK_INDEXER_URL=http://elk-indexer:9100
+      - ELK_QUERY_URL=http://elk-query-api:9101
     networks:
       - xencrypt-network
     depends_on:
@@ -97,6 +100,12 @@ services:
       universal-scoring-service:
         condition: service_healthy
       ssl-tls-scanner-new:
+        condition: service_healthy
+      oqs-pq-scanner:
+        condition: service_healthy
+      elk-indexer:
+        condition: service_healthy
+      elk-query-api:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -204,6 +213,7 @@ services:
     build:
       context: ./repo_scanner
       dockerfile: Dockerfile
+    container_name: repo-scanner
     ports:
       - "8003:8001"
     volumes:
@@ -222,6 +232,12 @@ services:
         condition: service_healthy
       universal-scoring-service:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     logging:
       driver: json-file
       options:
@@ -284,6 +300,7 @@ services:
       - VITE_ONBOARDING_API_URL=http://${VM_HOST}:8008
       - VITE_ELK_QUERY_API_URL=http://${VM_HOST}:9101
       - VITE_KIBANA_URL=http://${VM_HOST}:5601
+      - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
     networks:
       - xencrypt-network
     depends_on:

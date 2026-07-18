@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { connectSSEWithPost } from "@/lib/scanApi";
 // Helper to fetch onboarding org/suborg/app/domain hierarchy
 const fetchOnboardingDomains = async () => {
   const DB_API_BASE = (import.meta.env.VITE_DB_API_URL as string | undefined) || 'http://localhost:8001';
@@ -59,6 +60,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { UnifiedBackButton, UnifiedResultCard, UnifiedCard, UnifiedFileInput, UnifiedActionLoading, UnifiedInlineRefresh } from "@/components/ui/unified";
 import ResultsDetailPage from "./ResultsDetailPage";
 import { apiFetch } from '@/lib/api';
+import { ELK_API_URL } from '@/api/elkClient';
 
 // ============================================================================
 // TYPE DEFINITIONS (Single Source of Truth)
@@ -75,18 +77,22 @@ export type ScanStatus = 'completed' | 'failed' | 'pending' | 'http_skipped';
  * Handles backend returning different formats and maps them to our strict union.
  */
 const normalizeScanStatus = (result: any): ScanStatus => {
-  // ✅ Map backend status values to frontend "completed"
-  if (result.scan_status === 'completed' || result.status === 'completed') {
-    return 'completed';
-  }
-  if (result.scan_status === 'failed') return 'failed';
-  if (result.scan_status === 'pending') return 'pending';
-  if (result.scan_status === 'http_skipped') return 'http_skipped';
-
-  // Fallback checks
-  if (result.status === 'pending' || result.status === 'processing') return 'pending';
-
+  const s = (result.scan_status || result.status || '').toLowerCase();
+  if (s === 'completed') return 'completed';
+  if (s === 'failed') return 'failed';
+  if (s === 'http_skipped') return 'http_skipped';
+  // ELK states: submitted → pending, in_progress → pending
+  if (s === 'pending' || s === 'submitted' || s === 'in_progress' || s === 'processing') return 'pending';
   return 'failed';
+};
+
+/** Map ELK/API status to the ScanResult.status union type. */
+const mapToScanResultStatus = (s: string): 'pending' | 'processing' | 'completed' | 'failed' => {
+  const l = (s || '').toLowerCase();
+  if (l === 'completed') return 'completed';
+  if (l === 'failed') return 'failed';
+  if (l === 'in_progress' || l === 'processing') return 'processing';
+  return 'pending'; // submitted, pending, unknown
 };
 
 // ============================================================================
@@ -482,7 +488,7 @@ const loadHistoricalScans = async (apiBaseUrl: string) => {
         url: result.url || 'Unknown URL',
         primary_domain: result.url,
         domain_list: [result.url].filter(Boolean),
-        status: result.status as 'pending' | 'processing' | 'completed' | 'failed',
+        status: mapToScanResultStatus(result.status || result.scan_status || ''),
         requested_at: result.created_at || result.requested_at,
         total_urls: 1, // Each result is a single URL
         execution_time_seconds: result.execution_time_seconds || 0,
@@ -563,93 +569,6 @@ const getStatusIcon = (status: string) => {
   }
 };
 
-const connectSSEWithPost = async (
-  apiBaseUrl: string,
-  domains: string,
-  saveToDb: boolean,
-  onStart: (requestId: string) => void,
-  onProgress: (data: any) => void,
-  onComplete: (data: any) => void,
-  onError: (error: string) => void
-) => {
-  try {
-    const normalizedBaseUrl = apiBaseUrl.replace(/\/$/, '');
-    const fullUrl = `${normalizedBaseUrl}/scan-with-progress`;  // ✅ CORRECT ENDPOINT
-
-    console.log('🔍 SSE Connection:', fullUrl);
-
-    const response = await fetch(fullUrl, {  // ✅ DO NOT use apiFetch (it parses JSON)
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream'
-      },
-      body: JSON.stringify({
-        domain: domains,
-        max_concurrent: 5,
-        save_to_db: saveToDb
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-
-    if (!reader) {
-      throw new Error('No response body');
-    }
-
-    let buffer = '';
-    let requestIdReceived = false;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            
-            // Extract request_id from FIRST event (no longer batch_id)
-            if (!requestIdReceived && (data.request_id || data.batch_id)) {
-              onStart(data.request_id || data.batch_id);
-              requestIdReceived = true;
-            }
-            
-            // Route events to appropriate handlers
-            if (data.type === 'progress_snapshot') {
-              onProgress(data);  // ✅ THIS UPDATES PROGRESS BAR
-            } else if (data.type === 'domain_complete') {
-              onProgress(data);
-            } else if (data.type === 'complete' || data.type === 'progress_summary') {
-              onComplete(data);
-              return;  // ✅ Exit SSE stream
-            } else if (data.type === 'cancelled') {
-              onComplete(data);
-              return;
-            }
-          } catch (err) {
-            console.error('Parse error:', err);
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error('SSE error:', err);
-    onError(err instanceof Error ? err.message : 'Unknown error');
-  }
-};
-
 // ============================================================================
 // MAIN WEBSCAN COMPONENT
 // ============================================================================
@@ -657,7 +576,7 @@ const connectSSEWithPost = async (
 const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, autoScanUrl, initialTab }) => {
   const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'onboarded'>(initialTab || 'scan');
   const [urls, setUrls] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
+  const [activeScanCount, setActiveScanCount] = useState(0); // ✅ Track number of active scans
   const [scanHistory, setScanHistory] = useState<ScanResult[]>([]);
   const [scanProgress, setScanProgress] = useState({ total: 0, completed: 0 });
   const [expandedSummary, setExpandedSummary] = useState<Set<string>>(new Set());
@@ -673,7 +592,13 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, a
   const [currentRound, setCurrentRound] = useState(1);const [viewingResultsFor, setViewingResultsFor] = useState<string | null>(null);
   const [expandedDomainUrl, setExpandedDomainUrl] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
-  const [hasAutoLoaded, setHasAutoLoaded] = useState(false); // Track if we've already auto-loaded
+  const [hasAutoLoaded, setHasAutoLoaded] = useState(false);
+
+  // History table state
+  const [histPage, setHistPage] = useState(1);
+  const HIST_PAGE_SIZE = 10;
+  const [histFilter, setHistFilter] = useState<'all' | 'completed' | 'in_progress' | 'submitted' | 'failed'>('all');
+  const [histSearch, setHistSearch] = useState('');
 
   // ✅ NEW: Track live SSE progress separately from database
   const [liveProgress, setLiveProgress] = useState<{[key: string]: {
@@ -738,24 +663,25 @@ const WebScan: React.FC<WebScanProps> = ({ onBack, apiBaseUrl, autoLoadDomain, a
         // Update scan history with latest status
         setScanHistory(prev => prev.map(scan => {
           if (scan.request_id === batchId) {
+            const newStatus = mapToScanResultStatus(matchingResult.status || matchingResult.scan_status || '');
             return {
               ...scan,
-              status: matchingResult.status,
+              status: newStatus,
               scan_status: normalizeScanStatus({ status: matchingResult.status }),
               total_urls: 1,
-              successful_count: matchingResult.status === 'completed' ? 1 : 0,
-              failed_count: matchingResult.status === 'failed' ? 1 : 0,
+              successful_count: newStatus === 'completed' ? 1 : 0,
+              failed_count: newStatus === 'failed' ? 1 : 0,
               execution_time_seconds: matchingResult.execution_time_seconds || scan.execution_time_seconds,
-              progressPercentage: matchingResult.status === 'completed' ? 100 : (matchingResult.status === 'processing' ? 50 : 0),
-              completedUrls: matchingResult.status === 'completed' ? 1 : 0
+              completedUrls: newStatus === 'completed' ? 1 : 0
             };
           }
           return scan;
         }));
 
         // ✅ STOP POLLING IF SCAN IS COMPLETE OR FAILED
-        if (matchingResult.status === 'completed' || matchingResult.status === 'failed') {
-          console.log(`✅ Scan ${batchId} finished with status: ${matchingResult.status}`);
+        const finalStatus = (matchingResult.status || matchingResult.scan_status || '').toLowerCase();
+        if (finalStatus === 'completed' || finalStatus === 'failed') {
+          console.log(`✅ Scan ${batchId} finished with status: ${finalStatus}`);
           stopPollingBatch(batchId);
         }
       } catch (error) {
@@ -943,7 +869,6 @@ const clearLiveProgress = (batchId: string) => {
 
         if (foundScan) {
           console.log('✅ Found matching domain in scan:', foundScan.request_id);
-          setActiveTab('history');
           setHasAutoLoaded(true);
           setViewingResultsFor(foundScan.request_id);
           return;
@@ -955,7 +880,6 @@ const clearLiveProgress = (batchId: string) => {
 
       if (matchingScan && matchingScan.status === 'completed') {
         console.log('✅ Found matching scan:', matchingScan.request_id);
-        setActiveTab('history');
         setHasAutoLoaded(true);
         
         // Show results immediately since details are already loaded
@@ -969,12 +893,7 @@ const clearLiveProgress = (batchId: string) => {
     }
   }, [autoLoadDomain, scanHistory, hasAutoLoaded]);
 
-  // ============================================================================
-  // NO localStorage STORAGE - DATABASE IS THE SOURCE OF TRUTH
-  // ============================================================================
-  // Removed: useEffect that saves/loads from localStorage
-  // Also removed: Auto-load execution times effect (caused infinite loop on refresh)
-  // Solution: Load execution times on-demand when user clicks "View Results"
+  
 
   const showMessage = (text: string, type: 'success' | 'error' | 'info' | 'warning') => {
     setMessage({ text, type });
@@ -996,85 +915,24 @@ const clearLiveProgress = (batchId: string) => {
   };
 
   const retryScan = async (scan: ScanResult) => {
-    setRetryingId(scan.request_id);
-    try {
-      // For single-scan architecture, just use the URL from the scan
-      showMessage(`Preparing retry for ${scan.url}...`, 'info');
-      
-      let domainsToRetry: string[] = [];
-      
-      // Single scan - use the URL directly
-      if (scan.url && !scan.url.startsWith('Batch')) {
-        domainsToRetry = [scan.url];
-        console.log(`📋 Found domain to retry:`, domainsToRetry);
-      }
-      
-      // If no domains found, check if scan.url is a valid domain
-      if (domainsToRetry.length === 0) {
-        if (scan.url && !scan.url.toLowerCase().startsWith('batch with')) {
-          domainsToRetry = [scan.url] as string[];
-          console.log(`📋 Using scan.url as fallback: ${scan.url}`);
-        } else {
-          showMessage(`Cannot retry: No valid domains found in scan`, 'error');
-          return;
-        }
-      }
-      
-      showMessage(`Retrying scan for ${domainsToRetry.length} domain(s)...`, 'info');
-      
-      // DELETE the old failed scan FIRST before creating new one
-      const idToDelete = scan.id;
-      console.log(`🗑️ Deleting old scan with ID: ${idToDelete}`);
-      console.log(`📌 Scan object before delete:`, { request_id: scan.request_id, id: scan.id, status: scan.status });
-      
-      const deleteSuccess = idToDelete ? await deleteScanResult(apiBaseUrl, idToDelete) : false;
-      console.log(`✅ Delete success: ${deleteSuccess}`);
-      
-      if (deleteSuccess) {
-        showMessage(`Old failed scan removed`, 'success');
-        // Update UI to remove the deleted scan immediately
-        console.log(`📝 Filtering out scan with request_id: ${scan.request_id}`);
-        setScanHistory(prevHistory => {
-          const filtered = prevHistory.filter(s => {
-            console.log(`  Comparing: ${s.request_id} vs ${scan.request_id}`);
-            return s.request_id !== scan.request_id;
-          });
-          console.log(`📊 History before filter: ${prevHistory.length}, after filter: ${filtered.length}`);
-          return filtered;
-        });
-      } else {
-        console.warn('❌ Could not delete old scan, proceeding with retry anyway');
-      }
-      
-      // Create new scan request with actual domains
-      const response = await apiFetch(`${apiBaseUrl}/scan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          domain: domainsToRetry.join(','),
-          max_concurrent: 5,
-          save_to_db: true
-        })
-      });
-
-      console.log('✅ Retry scan completed:', response);
-      showMessage(`Retry scan completed successfully!`, 'success');
-      
-      // Switch to history tab and refresh
-      setActiveTab('history');
-      setTimeout(async () => {
-        const historicalScans = await loadHistoricalScans(apiBaseUrl);
-        console.log(`📊 Refreshed history with ${historicalScans.length} scans`);
-        if (historicalScans && historicalScans.length > 0) {
-          setScanHistory(historicalScans);
-        }
-      }, 1000);
-    } catch (error) {
-      console.error('Error retrying scan:', error);
-      showMessage('Failed to retry scan', 'error');
-    } finally {
-      setRetryingId(null);
+    // Determine domain to retry
+    const domain = scan.url?.replace(/^https?:\/\//, '').replace(/\/$/, '') || '';
+    if (!domain) {
+      showMessage('Cannot retry: no domain found', 'error');
+      return;
     }
+
+    // Delete the old stuck record from ELK first
+    if (scan.request_id && !scan.request_id.startsWith('temp_')) {
+      try {
+        await apiFetch(`${ELK_API_URL}/api/elk/scan-by-request/${scan.request_id}`, { method: 'DELETE' });
+        setScanHistory(prev => prev.filter(s => s.request_id !== scan.request_id));
+      } catch { /* ignore delete errors */ }
+    }
+
+    // Re-use the same SSE submit path so progress is tracked properly
+    const dummyEvent = { preventDefault: () => {} } as React.FormEvent;
+    handleScanSubmit(dummyEvent, domain);
   };
 
   const processFileUrls = async (file: File): Promise<string[]> => {
@@ -1166,8 +1024,16 @@ const clearLiveProgress = (batchId: string) => {
   // NEW QUEUE-BASED SCANNING (Database is source of truth)
   // ============================================================================
   
+  // ✅ NEW: Reset stuck scan counter
+  const resetScanCounter = () => {
+    setActiveScanCount(0);
+    showMessage('Ready for new scan', 'info');
+  };
+
   const handleScanSubmit = async (e: React.FormEvent, directUrl?: string) => {
     e.preventDefault();
+    
+    // ✅ ALLOW CONCURRENT SCANS - multiple scans can run at the same time
     
     const sourceUrls = directUrl || urls;
     const urlList = sourceUrls
@@ -1180,7 +1046,10 @@ const clearLiveProgress = (batchId: string) => {
       return;
     }
 
-    setIsScanning(true);
+    // ✅ INCREMENT active scan count
+    setActiveScanCount(prev => prev + 1);
+    // ✅ IMMEDIATELY RESET to normal state
+    setActiveScanCount(0);
     setUrls('');
     showMessage(`Starting scan for ${urlList.length} URL(s)...`, 'info');
 
@@ -1204,7 +1073,7 @@ const clearLiveProgress = (batchId: string) => {
     };
 
     setScanHistory(prev => [optimisticScan, ...prev]);
-    setActiveTab('history');  // ✅ Switch to history BEFORE starting scan
+    // ✅ DO NOT redirect - user can navigate manually if they want
 
     try {
       // ✅ CRITICAL: Use SSE endpoint instead of blocking POST
@@ -1265,7 +1134,6 @@ const clearLiveProgress = (batchId: string) => {
         // ✅ ON COMPLETE: Load final results from database
         async (data: any) => {
           console.log('✅ Scan complete:', data);
-          setIsScanning(false);
           setIsCancelling(false);
           setCurrentRequestId(null);
           
@@ -1307,7 +1175,6 @@ const clearLiveProgress = (batchId: string) => {
         // ✅ ON ERROR: Handle failures
         (error: string) => {
           console.error('❌ Scan failed:', error);
-          setIsScanning(false);
           setIsCancelling(false);
           setCurrentRequestId(null);
           
@@ -1317,7 +1184,6 @@ const clearLiveProgress = (batchId: string) => {
       );
     } catch (error) {
       console.error('❌ SSE connection failed:', error);
-      setIsScanning(false);
       setScanHistory(prev => prev.filter(s => !s.request_id.startsWith('temp_')));
       showMessage('Failed to connect to scan service', 'error');
     }
@@ -1596,19 +1462,21 @@ const clearLiveProgress = (batchId: string) => {
                 </div>
               </div>
 
-              <Button
-                onClick={handleScanSubmit}
-                disabled={isScanning || (!urls && !uploadedFile)}
-                size="lg"
-                className="w-full"
-              >
-                <UnifiedActionLoading
-                  isLoading={isScanning}
-                  loadingText="Submitting Scan..."
-                  defaultText="Start Crypto Scan"
-                  icon={<Shield className="w-5 h-5 mr-2" />}
-                />
-              </Button>
+              <div className="flex gap-3">
+                <Button
+                  onClick={handleScanSubmit}
+                  disabled={!urls && !uploadedFile}
+                  size="lg"
+                  className="w-full"
+                >
+                  <UnifiedActionLoading
+                    isLoading={false}
+                    loadingText="Submitting Scan..."
+                    defaultText="Start Crypto Scan"
+                    icon={<Shield className="w-5 h-5 mr-2" />}
+                  />
+                </Button>
+              </div>
             </UnifiedCard>
           </motion.div>
         )}
@@ -1620,478 +1488,259 @@ const clearLiveProgress = (batchId: string) => {
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="space-y-6"
+            className="space-y-4"
           >
-            <div className="flex items-center justify-between">
-              <div>
+            {/* Header + controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex-1">
                 <h3 className="text-lg font-semibold">Scan History</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {scanHistory.length} total scans
-                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">{scanHistory.length} scans in Elasticsearch</p>
               </div>
-              <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  onClick={async () => {
-                    showMessage('Refreshing scan history from database...', 'info');
-                    try {
-                      const historicalScans = await loadHistoricalScans(apiBaseUrl);
-                      if (historicalScans && historicalScans.length > 0) {
-                        setScanHistory(historicalScans);
-                        showMessage('Scan history refreshed', 'success');
-                      } else {
-                        showMessage('No scan history found', 'info');
-                      }
-                    } catch (error) {
-                      console.error('Error refreshing scan history:', error);
-                      showMessage('Failed to refresh scan history', 'error');
-                    }
-                  }}
-                  size="sm"
+              <div className="flex flex-wrap gap-2 items-center">
+                {/* Search */}
+                <input
+                  type="text"
+                  placeholder="Search domain…"
+                  value={histSearch}
+                  onChange={e => { setHistSearch(e.target.value); setHistPage(1); }}
+                  className="h-8 px-3 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring w-44"
+                />
+                {/* Status filter */}
+                <select
+                  value={histFilter}
+                  onChange={e => { setHistFilter(e.target.value as any); setHistPage(1); }}
+                  className="h-8 px-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 >
-                  <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+                  <option value="all">All statuses</option>
+                  <option value="completed">Completed</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="submitted">Submitted</option>
+                  <option value="failed">Failed</option>
+                </select>
+                {/* Refresh */}
+                <Button variant="outline" size="sm" onClick={async () => {
+                  showMessage('Refreshing…', 'info');
+                  const h = await loadHistoricalScans(apiBaseUrl);
+                  if (h.length > 0) { setScanHistory(h); showMessage('Refreshed', 'success'); }
+                  else showMessage('No scans found', 'info');
+                }}>
+                  <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
                 </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={async () => {
-                    showMessage('Clearing all scan history...', 'info');
-                    
-                    try {
-                      const success = await clearAllScans(apiBaseUrl);
-                      
-                      if (success) {
-                        setScanHistory([]);
-                        showMessage('All scan history deleted successfully', 'success');
-                      } else {
-                        showMessage('Failed to clear all scans', 'error');
-                      }
-                    } catch (error) {
-                      console.error('Error during clear all:', error);
-                      showMessage('Error clearing scan history', 'error');
-                    }
-                  }}
-                  size="sm"
-                >
+                {/* Clear all */}
+                <Button variant="outline" size="sm" onClick={async () => {
+                  if (!confirm('Delete ALL scan history from Elasticsearch? This cannot be undone.')) return;
+                  showMessage('Clearing…', 'info');
+                  try {
+                    await apiFetch(`${ELK_API_URL}/api/elk/scans/clear-all`, { method: 'DELETE' });
+                    setScanHistory([]);
+                    showMessage('All scan history deleted', 'success');
+                  } catch { showMessage('Failed to clear history', 'error'); }
+                }}>
                   Clear All
                 </Button>
               </div>
             </div>
 
-            {scanHistory.length === 0 ? (
-              <UnifiedCard padding="spacious" className="flex items-center justify-center py-12">
-                <p className="text-muted-foreground">No scans found</p>
-              </UnifiedCard>
-            ) : (
-              <div className="space-y-4">
-                {/* Each scan is now an individual domain scan (single-scan architecture) */}
-                {scanHistory.map((scan) => {
-                  // In single-scan architecture, each scan IS an individual domain
-                  // Mark it as such for proper display
-                  return {
-                    ...scan,
-                    parentBatch: scan,
-                    domainIndex: 0,
-                    isIndividualDomain: true // All scans are individual domains now
-                  };
-                }).filter(item => item && item.parentBatch).map((scan) => {
-                  const isIndividualDomain = true; // Single-scan architecture - always individual
-                  const parentBatch = scan.parentBatch || scan;
-                  
-                  const executionTime = (() => {
-                    // For individual domain scans, show their execution time
-                    if (isIndividualDomain && scan.execution_time_seconds) {
-                      return `${scan.execution_time_seconds.toFixed(2)}s`;
-                    }
-                    
-                    if (scan.detailedResults && scan.detailedResults.length > 0) {
-                      const totalTime = scan.detailedResults.reduce((sum, result) => {
-                        return sum + (result.execution_time_seconds || 0);
-                      }, 0);
-              
-                      return totalTime > 0 
-                        ? `${totalTime.toFixed(2)}s`
-                        : 'N/A';
-                    }
-              
-                    // Show execution time if available, otherwise N/A
-                    if (scan.execution_time_seconds !== undefined && scan.execution_time_seconds > 0) {
-                      return `${scan.execution_time_seconds.toFixed(2)}s`;
-                    }
-                    return 'N/A';
-                  })();
+            {/* Table */}
+            {(() => {
+              // Filter + search
+              const filtered = scanHistory.filter(s => {
+                const matchSearch = !histSearch || (s.url || '').toLowerCase().includes(histSearch.toLowerCase());
+                const rawStatus = (s.status || s.scan_status || '').toLowerCase();
+                const elkStatus = rawStatus === 'processing' ? 'in_progress' : rawStatus;
+                const matchFilter = histFilter === 'all' || elkStatus === histFilter;
+                return matchSearch && matchFilter;
+              });
 
-                  const deleteLogic = async () => {
-                    // Delete the individual scan result
-                    const resultId = scan.id || parentBatch.id;
-                    showMessage('Deleting scan result...', 'info');
-                    
-                    if (!resultId) {
-                      showMessage('Cannot delete: no result ID', 'error');
-                      return;
-                    }
-                    
-                    const success = await deleteScanResult(apiBaseUrl, resultId);
-                    
-                    if (success) {
-                      setScanHistory(prev => 
-                        prev.filter(s => s.request_id !== parentBatch.request_id)
-                      );
-                      showMessage('Scan result deleted successfully', 'success');
-                    } else {
-                      showMessage('Failed to delete scan result', 'error');
-                    }
-                  };
+              const totalPages = Math.max(1, Math.ceil(filtered.length / HIST_PAGE_SIZE));
+              const safePage = Math.min(histPage, totalPages);
+              const pageItems = filtered.slice((safePage - 1) * HIST_PAGE_SIZE, safePage * HIST_PAGE_SIZE);
 
-                  // Determine quantum readiness status for completed scans
-                  const getQuantumStatus = () => {
-                    // Handle HTTP skipped explicitly
-                    if (scan.scan_status === 'http_skipped') return 'HTTP/UNREACHABLE';
-                    // Handle failed scans
-                    if (scan.status === 'failed') return 'FAILED';
+              const gradeBadge = (grade?: string) => {
+                if (!grade || grade === 'N/A') return <span className="text-muted-foreground text-xs">—</span>;
+                const colors: Record<string, string> = {
+                  'A+': 'bg-emerald-500/15 text-emerald-600 border-emerald-200',
+                  A: 'bg-emerald-500/15 text-emerald-600 border-emerald-200',
+                  B: 'bg-blue-500/15 text-blue-600 border-blue-200',
+                  C: 'bg-amber-500/15 text-amber-600 border-amber-200',
+                  D: 'bg-orange-500/15 text-orange-600 border-orange-200',
+                  F: 'bg-red-500/15 text-red-600 border-red-200',
+                };
+                const cls = colors[grade.toUpperCase()] || colors.F;
+                return <span className={`text-xs font-bold px-2 py-0.5 rounded border ${cls}`}>{grade}</span>;
+              };
 
-                    if (scan.status !== 'completed') return scan.status.toUpperCase();
+              const statusBadge = (scan: typeof scanHistory[0]) => {
+                const raw = (scan.status || scan.scan_status || '').toLowerCase();
+                const s = raw === 'processing' ? 'in_progress' : raw;
+                const cfg: Record<string, { label: string; cls: string; dot: string }> = {
+                  completed:   { label: 'Completed',   cls: 'bg-emerald-500/10 text-emerald-600 border-emerald-200', dot: 'bg-emerald-500' },
+                  in_progress: { label: 'In Progress', cls: 'bg-blue-500/10 text-blue-600 border-blue-200',         dot: 'bg-blue-500 animate-pulse' },
+                  submitted:   { label: 'Submitted',   cls: 'bg-slate-500/10 text-slate-600 border-slate-200',      dot: 'bg-slate-400' },
+                  pending:     { label: 'Submitted',   cls: 'bg-slate-500/10 text-slate-600 border-slate-200',      dot: 'bg-slate-400' },
+                  failed:      { label: 'Failed',      cls: 'bg-red-500/10 text-red-600 border-red-200',            dot: 'bg-red-500' },
+                };
+                const { label, cls, dot } = cfg[s] || { label: s.toUpperCase(), cls: 'bg-muted text-muted-foreground border-border', dot: 'bg-muted-foreground' };
+                return (
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded border ${cls}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                    {label}
+                  </span>
+                );
+              };
 
-                    // For individual domains, check their specific quantum analysis
-                    if (isIndividualDomain && scan.raw_response?.pqc_analysis) {
-                      return scan.raw_response.pqc_analysis.quantum_ready ? 'QUANTUM READY' : 'NOT QUANTUM READY';
-                    }
-                    
-                    // Check if any detailed result has quantum analysis
-                    if (scan.detailedResults && scan.detailedResults.length > 0) {
-                      const hasQuantumReady = scan.detailedResults.some(result => 
-                        result.raw_response?.pqc_analysis?.quantum_ready === true
-                      );
-                      const hasQuantumNotReady = scan.detailedResults.some(result => 
-                        result.raw_response?.pqc_analysis?.quantum_ready === false
-                      );
-                      
-                      // If all are quantum ready
-                      if (hasQuantumReady && !hasQuantumNotReady) return 'QUANTUM READY';
-                      // If some or all are not quantum ready
-                      if (hasQuantumNotReady) return 'NOT QUANTUM READY';
-                    }
-                    
-                    return scan.status.toUpperCase();
-                  };
+              if (filtered.length === 0) {
+                return (
+                  <UnifiedCard padding="spacious" className="flex items-center justify-center py-12">
+                    <p className="text-muted-foreground text-sm">
+                      {histSearch || histFilter !== 'all' ? 'No scans match the current filter.' : 'No scans found.'}
+                    </p>
+                  </UnifiedCard>
+                );
+              }
 
-                  // For domain-wise display, show the actual domain
-                  const domainLabel = isIndividualDomain 
-                    ? scan.url
-                    : (scan.primary_domain ||
-                      (scan.domain_list && scan.domain_list.length === 1 ? scan.domain_list[0] : undefined) ||
-                      (scan.detailedResults && scan.detailedResults.length === 1 ? scan.detailedResults[0].url : undefined));
-                  
-                  const shouldShowDomainHint = !domainLabel && scan.total_urls === 1;
-                  
-                                    // Generate unique key for domain-wise display
-                                    // Use database ID if available for guaranteed uniqueness
-                                    const uniqueKey = isIndividualDomain
-                                      ? (scan.id
-                                          ? `result-${scan.id}`
-                                          : `${parentBatch.request_id}-${scan.domainIndex}-${Date.now()}-${Math.random()}`)
-                                      : (scan.id
-                                          ? `batch-result-${scan.id}`
-                                          : scan.request_id);
-                  // Prepare metrics for individual domains (null-safe pqc_analysis)
-                  const pqcAnalysis = scan.raw_response?.pqc_analysis;
-                  const pqcScore = pqcAnalysis && typeof pqcAnalysis.overall_score === 'number'
-                    ? pqcAnalysis.overall_score.toFixed(1)
-                    : 'N/A';
-                  const pqcGrade = pqcAnalysis?.overall_grade || 'N/A';
-                  const quantumStatus = pqcAnalysis?.quantum_ready === true ? 'Quantum Ready' : 'Not Ready';
+              return (
+                <div className="space-y-3">
+                  {/* Table */}
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/50 border-b border-border">
+                          <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Domain</th>
+                          <th className="text-center px-3 py-2.5 font-medium text-muted-foreground text-xs">Score</th>
+                          <th className="text-center px-3 py-2.5 font-medium text-muted-foreground text-xs">Grade</th>
+                          <th className="text-center px-3 py-2.5 font-medium text-muted-foreground text-xs">Status</th>
+                          <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs hidden md:table-cell">Scanned</th>
+                          <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs hidden lg:table-cell">Time</th>
+                          <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {pageItems.map((scan, idx) => {
+                          const pqcA = scan.raw_response?.pqc_analysis;
+                          const score = pqcA?.overall_score ?? scan.raw_response?.pqc_overall_score ?? (scan as any).pqc_overall_score;
+                          const grade = pqcA?.overall_grade ?? scan.raw_response?.pqc_overall_grade ?? (scan as any).pqc_overall_grade;
+                          const rawStatus = (scan.status || '').toLowerCase();
+                          const isDone = rawStatus === 'completed';
+                          const isBusy = rawStatus === 'processing' || rawStatus === 'pending';
 
-                  // Notices from PQC scorer + TLS grader
-                  const scorerNotices: Array<{type: string; severity: string; message: string}> =
-                    pqcAnalysis?.notices ?? [];
-                  const graderNotices: string[] =
-                    scan.raw_response?.scanner_report?.endpoints?.[0]?.gradeNotices ?? [];
+                          const fmtTime = (s: string) => {
+                            if (!s) return '—';
+                            try {
+                              const ms = Date.now() - new Date(s).getTime();
+                              if (ms < 60000) return 'just now';
+                              if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
+                              if (ms < 86400000) return `${Math.floor(ms / 3600000)}h ago`;
+                              return `${Math.floor(ms / 86400000)}d ago`;
+                            } catch { return '—'; }
+                          };
 
-                  return (
-                                        <UnifiedResultCard
-                                          key={uniqueKey}
-                                          className={scan.status === 'processing' ? 'animate-pulse bg-gradient-to-r from-transparent via-primary/5 to-transparent bg-[length:1000px_100%]' : ''}
-                                          title={isIndividualDomain ? scan.url : `Request ID: ${scan.request_id}`}
-                                          description={isIndividualDomain ? '' : new Date(scan.requested_at || parentBatch.requested_at).toLocaleString()}
-                                          status={
-                                            scan.status === 'completed' ? 'success' :
-                                            scan.status === 'failed' || scan.error_message ? 'error' :
-                                            scan.status === 'processing' ? 'info' : 'warning'
-                                          }
-                                          statusLabel={getQuantumStatus()}
-                                          icon={getStatusIcon(scan.status)}
-                                          metrics={isIndividualDomain ? [
-                                            { 
-                                              label: "PQC Score", 
-                                              value: pqcScore,
-                                              valueClassName: getGradeColor(pqcGrade)
-                                            },
-                                            { 
-                                              label: "PQC Grade", 
-                                              value: pqcGrade,
-                                              valueClassName: getGradeColor(pqcGrade)
-                                            },
-                                            { 
-                                              label: "Status", 
-                                              value: quantumStatus,
-                                              valueClassName: pqcAnalysis?.quantum_ready ? 'text-success' : 'text-destructive'
-                                            }
-                                          ] : [
-                                            { label: "URLs", value: scan.total_urls },
-                                            // ✅ SHOW LIVE PROGRESS FOR PROCESSING SCANS
-                                            ...(scan.status === 'processing' || scan.status === 'pending' ? [{
-                                              label: "Progress",
-                                              value: `${scan.completedUrls || 0}/${scan.total_urls}`,
-                                              valueClassName: 'text-primary'
-                                            }] : []),
-                                            { label: "Execution Time", value: executionTime }
-                                          ]}
-                                          actions={[
-                                            ...((scan.status === 'completed' || scan.scan_status === 'http_skipped' || (scan.status === 'failed' && (isIndividualDomain || (scan.detailedResults && scan.detailedResults.length > 0)))) ? [{
-                                              label: "View Results",
-                                              icon: <Eye size={16} />,
-                                              onClick: () => {
-                                                if (isIndividualDomain) {
-                                                  // For individual domains, directly open the domain detail modal
-                                                  setExpandedDomainUrl(scan.url);
-                                                  handleViewScanDetails(parentBatch.request_id);
-                                                } else {
-                                                  // For single scans, show the scan results page
-                                                  handleViewScanDetails(scan.request_id);
-                                                }
-                                              },
-                                              variant: "outline" as const
-                                            }] : []),
-                                            ...((scan.status === 'failed' || scan.status === 'pending' || scan.status === 'processing') ? [{
-                                              label: retryingId === parentBatch.request_id ? "Retrying..." : "Retry",
-                                              icon: retryingId === parentBatch.request_id ? <RefreshCw size={16} className="animate-spin" /> : <RotateCcw size={16} />,
-                                              onClick: () => retryScan(parentBatch),
-                                              variant: "outline" as const,
-                                              disabled: retryingId === parentBatch.request_id
-                                            }] : []),
-                                            {
-                                              label: "Delete",
-                                              icon: <Trash2 size={16} />,
-                                              onClick: deleteLogic,
-                                              variant: "destructive" as const
-                                            }
-                                          ]}
-                                        >
-                                          {/* Grade notices (SSL Labs-style) */}
-                                          {isIndividualDomain && scan.status === 'completed' && (scorerNotices.length > 0 || graderNotices.length > 0) && (
-                                            <div className="mt-3 space-y-1.5">
-                                              {scorerNotices.map((n, i) => (
-                                                <div
-                                                  key={i}
-                                                  className={`flex items-start gap-2 text-xs px-3 py-2 rounded-md
-                                                    ${n.severity === 'warning'
-                                                      ? 'bg-warning/10 text-warning dark:bg-warning/20'
-                                                      : 'bg-primary/5 text-muted-foreground'}`}
-                                                >
-                                                  <span className="mt-0.5 shrink-0">{n.severity === 'warning' ? '⚠' : 'ℹ'}</span>
-                                                  <span>{n.message}</span>
-                                                </div>
-                                              ))}
-                                              {graderNotices
-                                              .filter(msg => !scorerNotices.some(n => n.message.startsWith(msg.slice(0, 20))))
-                                              // Suppress stale "does not support PQC" notice when the scorer has confirmed hybrid_ready
-                                              .filter(msg => !(pqcAnalysis?.hybrid_ready === true && msg.includes('does not support PQC')))
-                                              .map((msg, i) => (
-                                                <div
-                                                  key={`g${i}`}
-                                                  className="flex items-start gap-2 text-xs px-3 py-2 rounded-md bg-muted/50 text-muted-foreground"
-                                                >
-                                                  <span className="mt-0.5 shrink-0">ℹ</span>
-                                                  <span>{msg}</span>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
+                          return (
+                            <tr key={scan.request_id || idx} className="hover:bg-muted/30 transition-colors">
+                              {/* Domain */}
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2 max-w-xs">
+                                  <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  <span className="truncate font-medium text-sm" title={scan.url}>{scan.url || '—'}</span>
+                                </div>
+                              </td>
+                              {/* Score */}
+                              <td className="px-3 py-3 text-center">
+                                {isDone && score != null
+                                  ? <span className="font-semibold tabular-nums">{Number(score).toFixed(0)}</span>
+                                  : <span className="text-muted-foreground text-xs">—</span>}
+                              </td>
+                              {/* Grade */}
+                              <td className="px-3 py-3 text-center">
+                                {isDone ? gradeBadge(grade) : <span className="text-muted-foreground text-xs">—</span>}
+                              </td>
+                              {/* Status */}
+                              <td className="px-3 py-3 text-center">{statusBadge(scan)}</td>
+                              {/* Scanned at */}
+                              <td className="px-4 py-3 text-right text-xs text-muted-foreground hidden md:table-cell">
+                                {fmtTime(scan.requested_at)}
+                              </td>
+                              {/* Exec time */}
+                              <td className="px-4 py-3 text-right text-xs text-muted-foreground hidden lg:table-cell">
+                                {scan.execution_time_seconds ? `${Number(scan.execution_time_seconds).toFixed(1)}s` : '—'}
+                              </td>
+                              {/* Actions */}
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {isDone && (
+                                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1"
+                                      onClick={() => handleViewScanDetails(scan.request_id)}>
+                                      <Eye className="h-3 w-3" /> View
+                                    </Button>
+                                  )}
+                                  {isBusy && (
+                                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1"
+                                      onClick={() => retryScan(scan)}
+                                      disabled={retryingId === scan.request_id}>
+                                      {retryingId === scan.request_id
+                                        ? <RefreshCw className="h-3 w-3 animate-spin" />
+                                        : <RotateCcw className="h-3 w-3" />}
+                                      Retry
+                                    </Button>
+                                  )}
+                                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                    onClick={async () => {
+                                      if (!scan.request_id || scan.request_id.startsWith('temp_')) {
+                                        setScanHistory(prev => prev.filter(s => s.request_id !== scan.request_id));
+                                        return;
+                                      }
+                                      try {
+                                        await apiFetch(`${ELK_API_URL}/api/elk/scan-by-request/${scan.request_id}`, { method: 'DELETE' });
+                                        setScanHistory(prev => prev.filter(s => s.request_id !== scan.request_id));
+                                        showMessage('Deleted', 'success');
+                                      } catch { showMessage('Delete failed', 'error'); }
+                                    }}>
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
 
-                                          {!isIndividualDomain && (domainLabel || shouldShowDomainHint) && (
-                                            <div className="mb-3 text-sm">
-                                              <span className="font-semibold text-foreground">Domain:</span>{' '}
-                                              <span className="text-muted-foreground break-all">
-                                                {domainLabel || 'Load results to view domain'}
-                                              </span>
-                                            </div>
-                                          )}
-                    
-                    
-                                          {/* ✅ Progress bar for processing scans */}
-                                          {(scan.status === 'processing' || scan.status === 'pending') && (
-                                            <div className="mt-4 space-y-2">
-                                              {(() => {
-                                                const requestId = scan.request_id;
-                                                const progress = getProgressForScan(requestId, scan);
-                                                
-                                                return (
-                                                  <>
-                                                    <div className="flex items-center justify-between text-sm">
-                                                      <span className="text-muted-foreground">
-                                                        {activeSSEConnections.has(requestId) ? (
-                                                          <UnifiedInlineRefresh 
-                                                            isRefreshing={true} 
-                                                            size="sm" 
-                                                            label={
-                                                              progress.current_phase 
-                                                                ? `${progress.current_phase.replace(/_/g, ' ')}...`
-                                                                : 'Scanning...'
-                                                            }
-                                                            className="text-primary" 
-                                                          />
-                                                        ) : (
-                                                          'Pending...'
-                                                        )}
-                                                      </span>
-                                                      <div className="flex items-center gap-2">
-                                                        <span className="font-medium">
-                                                          {progress.percentage.toFixed(0)}%
-                                                        </span>
-                                                        {progress.eta_seconds && progress.eta_seconds > 0 && (
-                                                          <span className="text-xs text-muted-foreground">
-                                                            ETA: {progress.eta_seconds}s
-                                                          </span>
-                                                        )}
-                                                      </div>
-                                                    </div>
-                                                    
-                                                    {/* ✅ Show current domain being scanned */}
-                                                    {progress.current_domain && (
-                                                      <div className="text-xs text-muted-foreground">
-                                                        Scanning: {progress.current_domain}
-                                                      </div>
-                                                    )}
-                                                    
-                                                    {/* ✅ Smooth progress bar */}
-                                                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                                                      <motion.div
-                                                        className="bg-primary h-full rounded-full"
-                                                        initial={{ width: 0 }}
-                                                        animate={{ width: `${progress.percentage}%` }}
-                                                        transition={{ duration: 0.5, ease: "easeInOut" }}
-                                                      />
-                                                    </div>
-                                                    
-                                                    {/* ✅ Domain breakdown */}
-                                                    {scan.total_urls > 1 && (
-                                                      <div className="mt-3 text-xs text-muted-foreground space-y-1">
-                                                        <div className="flex justify-between">
-                                                          <span>✅ Successful:</span>
-                                                          <span className="font-medium text-success">{scan.successful_count || 0}</span>
-                                                        </div>
-                                                        <div className="flex justify-between">
-                                                          <span>❌ Failed:</span>
-                                                          <span className="font-medium text-destructive">{scan.failed_count || 0}</span>
-                                                        </div>
-                                                        <div className="flex justify-between">
-                                                          <span>⏳ Remaining:</span>
-                                                          <span className="font-medium text-warning">
-                                                            {scan.total_urls - (progress.completed || 0)}
-                                                          </span>
-                                                        </div>
-                                                      </div>
-                                                    )}
-                                                  </>
-                                                );
-                                              })()}
-                                            </div>
-                                          )}
-                                          
-                                          {/* PROGRESS DISPLAY */}
-                                          {scan.status === 'processing' && expandedProgress.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
-                                            <motion.div
-                                                initial={{ opacity: 0, height: 0 }}
-                                                animate={{ opacity: 1, height: 'auto' }}
-                                                exit={{ opacity: 0, height: 0 }}
-                                                className="mt-4 col-span-full"
-                                            >
-                                              <ProgressDisplay 
-                                                scanProgress={scanProgress} 
-                                                domainProgress={domainProgress}
-                                                processingDomains={processingDomains}
-                                                onCancel={handleCancelScan}
-                                                roundHistory={roundHistory}
-                                                isCancelling={isCancelling}
-                                                currentRound={currentRound}
-                                                isActiveProgress={true}
-                                              />
-                                            </motion.div>
-                                          )}
-                    
-                                          {/* SUMMARY DISPLAY */}
-                                          {(scan.status === 'completed' || scan.status === 'failed') && 
-                                            expandedSummary.has(isIndividualDomain ? parentBatch.request_id : scan.request_id) && (
-                                              <motion.div
-                                                initial={{ opacity: 0, height: 0 }}
-                                                animate={{ opacity: 1, height: 'auto' }}
-                                                exit={{ opacity: 0, height: 0 }}
-                                                className="mt-4 col-span-full border-t pt-4"
-                                              >
-                                                {/* For individual domains, show their specific results */}
-                                                {isIndividualDomain ? (
-                                                  <ProgressDisplay 
-                                                    scanProgress={{ 
-                                                      total: 1, 
-                                                      completed: 1 
-                                                    }}
-                                                    domainProgress={{
-                                                      [scan.url]: {
-                                                        status: scan.scan_status?.toLowerCase() === 'completed' 
-                                                          ? 'completed' 
-                                                          : scan.scan_status?.toLowerCase() === 'http_skipped' 
-                                                          ? 'http_skipped' 
-                                                          : 'failed',
-                                                        duration: scan.execution_time_seconds,
-                                                        error: scan.error_message,
-                                                        round: 1
-                                                      }
-                                                    }}
-                                                    processingDomains={{}}
-                                                    roundHistory={[]}
-                                                    isActiveProgress={false}
-                                                  />
-                                                ) : (
-                                                  <ProgressDisplay 
-                                                    scanProgress={{ 
-                                                      total: scan.total_urls, 
-                                                      completed: scan.total_urls 
-                                                    }}
-                                                    domainProgress={(() => {
-                                                      const progress: {[key: string]: DomainProgressInfo} = {};
-                                                      
-                                                      scan.detailedResults?.forEach((result) => {
-                                                        const domain = result.url;
-                                                        
-                                                        const scanStatus = result.scan_status?.toLowerCase();
-                                                        let status = 'failed';
-                                                        if (scanStatus === 'completed') {
-                                                          status = 'completed';
-                                                        } else if (scanStatus === 'http_skipped') {
-                                                          status = 'http_skipped';
-                                                        }
-                                                        
-                                                        progress[domain] = {
-                                                          status: status,
-                                                          duration: result.execution_time_seconds,
-                                                          error: result.error_message,
-                                                          round: (result as any).round || 1
-                                                        };
-                                                      });
-                                                      
-                                                      return progress;
-                                                    })()}
-                                                    processingDomains={{}}
-                                                    roundHistory={[]}
-                                                    isActiveProgress={false}
-                                                  />
-                                                )}
-                                              </motion.div>
-                                            )}
-                                        </UnifiedResultCard>
-                  )
-                })}
-              </div>
-            )}
+                  {/* Pagination */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>
+                        {(safePage - 1) * HIST_PAGE_SIZE + 1}–{Math.min(safePage * HIST_PAGE_SIZE, filtered.length)} of {filtered.length}
+                      </span>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+                          disabled={safePage <= 1}
+                          onClick={() => setHistPage(p => Math.max(1, p - 1))}>
+                          ‹ Prev
+                        </Button>
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                          const start = Math.max(1, Math.min(safePage - 2, totalPages - 4));
+                          const p = start + i;
+                          return (
+                            <Button key={p} size="sm"
+                              variant={p === safePage ? 'default' : 'outline'}
+                              className="h-7 w-7 p-0 text-xs"
+                              onClick={() => setHistPage(p)}>
+                              {p}
+                            </Button>
+                          );
+                        })}
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+                          disabled={safePage >= totalPages}
+                          onClick={() => setHistPage(p => Math.min(totalPages, p + 1))}>
+                          Next ›
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </motion.div>
         )}
 

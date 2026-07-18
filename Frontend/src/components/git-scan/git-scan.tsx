@@ -517,22 +517,19 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
         return;
       }
   
+      // ✅ Reset button immediately - don't block on loadHistory
+      setIsScanning(false);
+
       if (data.cached) {
         showStatusMessage('✓ Using cached scan results', 'success');
       } else {
         showStatusMessage('✓ Scan queued successfully! Auto-refreshing...', 'success');
-        setAutoRefresh(true); // Start auto-refresh
-        
-        // Stop auto-refresh after 5 minutes
+        setAutoRefresh(true);
         setTimeout(() => setAutoRefresh(false), 300000);
       }
-  
-      await loadHistory();
 
-      // Force another refresh after 2 seconds to catch quick completions
-      setTimeout(() => {
-        loadHistory();
-      }, 2000);
+      loadHistory();
+      setTimeout(() => loadHistory(), 2000);
     } catch (error: any) {
       if (error.name === 'TimeoutError') {
         showStatusMessage('Request timeout - Please check if the backend is running', 'error');
@@ -541,8 +538,7 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
       } else {
         showStatusMessage(error.message, 'error');
       }
-    } finally {
-      setTimeout(() => setIsScanning(false), 2000);
+      setIsScanning(false);
     }
   };
 
