@@ -1,18 +1,18 @@
-﻿"""
+"""
 Independent Repository Cryptographic Scoring Engine
 ====================================================
 Purpose-built for source code analysis. Does NOT share logic with the
-TLS/domain scoring engine â€” repo scanning has fundamentally different
+TLS/domain scoring engine "" repo scanning has fundamentally different
 semantics (static code patterns vs. live protocol negotiation).
 
 Scoring Philosophy for Source Code:
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-â€¢ Source code uses algorithms directly â€” no "negotiation" or "preference".
+â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+* Source code uses algorithms directly "" no "negotiation" or "preference".
   Every algorithm found in active code contributes equally weighted by
   its occurrence count.
-â€¢ Quantum readiness is measured by what % of crypto operations use
+* Quantum readiness is measured by what % of crypto operations use
   quantum-safe primitives.
-â€¢ The score reflects HOW HARD it will be to migrate to PQC, not whether
+* The score reflects HOW HARD it will be to migrate to PQC, not whether
   the code is "secure today" (which depends on deployment context).
 
 Grade Thresholds (Quantum Readiness Scale):
@@ -22,10 +22,10 @@ Grade Thresholds (Quantum Readiness Scale):
   B   >= 70  Some PQC usage, strong classical defaults
   B-  >= 62  Good classical crypto, PQC migration started
   C+  >= 55  Adequate classical, no PQC
-  C   >= 45  Mixed â€” some deprecated algorithms present
+  C   >= 45  Mixed "" some deprecated algorithms present
   C-  >= 38  Weak classical crypto, migration needed
   D   >= 28  Significant deprecated/broken algorithms
-  F   <  28  Critical â€” broken crypto throughout
+  F   <  28  Critical "" broken crypto throughout
 """
 
 import logging
@@ -37,9 +37,9 @@ CACHE_TTL_SECONDS = 300  # safety-net: force reload every 5 min even without a v
 
 logger = logging.getLogger(__name__)
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# ALGORITHM SCORE TABLE â€” Quantum Readiness scores for source code context
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*
+# ALGORITHM SCORE TABLE "" Quantum Readiness scores for source code context
+# â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*
 # Unlike TLS scoring, source code scores are CONTEXT-FREE (no negotiation
 # priority, no certificate chain analysis). Each algorithm gets a fixed
 # base score representing its quantum readiness posture.
@@ -53,14 +53,14 @@ logger = logging.getLogger(__name__)
 #
 # All algorithm scores are stored in Elasticsearch index: crypto-algorithm-scores
 # Edit via the ELK Algorithm Scorer UI at /elk/scorer.
-# No hardcoded fallback — ES is the single source of truth.
+# No hardcoded fallback -- ES is the single source of truth.
 
 
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# CATEGORY WEIGHTS â€” how much each category matters for overall repo score
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*
+# CATEGORY WEIGHTS "" how much each category matters for overall repo score
+# â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*â*
 # Different from TLS weights because source code has different risk profile:
 # - Asymmetric crypto (kex + signature) is the PRIMARY quantum risk
 # - Symmetric is less critical (already Grover-safe at 256-bit)
@@ -123,12 +123,12 @@ class RepoScoringEngine:
     Scores are based on quantum readiness of algorithms found in source code.
     Each algorithm gets a fixed score based on its quantum resistance category:
     
-    - fully_resistant: PQC algorithms (Kyber, Dilithium, etc.) â†’ 78-96
-    - grover_resistant: Symmetric/hash with adequate key sizes â†’ 45-75
-    - vulnerable: Classical asymmetric (RSA, ECDH, ECDSA) â†’ 15-38
-    - deprecated: Broken algorithms (DES, MD5, SHA-1, RC4) â†’ 0-8
-    - construction: MACs/KDFs (safety depends on params) â†’ 48-65
-    - mode: Cipher modes (secondary concern) â†’ 5-70
+    - fully_resistant: PQC algorithms (Kyber, Dilithium, etc.) â†' 78-96
+    - grover_resistant: Symmetric/hash with adequate key sizes â†' 45-75
+    - vulnerable: Classical asymmetric (RSA, ECDH, ECDSA) â†' 15-38
+    - deprecated: Broken algorithms (DES, MD5, SHA-1, RC4) â†' 0-8
+    - construction: MACs/KDFs (safety depends on params) â†' 48-65
+    - mode: Cipher modes (secondary concern) â†' 5-70
     """
 
     def __init__(self):
@@ -139,9 +139,11 @@ class RepoScoringEngine:
 
     def _refresh_cache(self) -> None:
         """Load/reload algorithm scores from ES and update the in-memory cache."""
+        print("[REPO_SCORING] _refresh_cache called")
         new_table = self._load_from_es()
         self.scores_table = new_table
         self._cache_loaded_at = time.time()
+        print(f"[REPO_SCORING] _refresh_cache completed. Table has {len(self.scores_table)} entries")
 
     def _get_scores_version(self) -> float:
         """
@@ -162,6 +164,7 @@ class RepoScoringEngine:
         """Load algorithm scores from Elasticsearch. Falls back to empty dict if ES unavailable."""
         import os
         es_url = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+        print(f"[REPO_SCORING] Loading algorithms from ES at {es_url}")
         try:
             from elasticsearch import Elasticsearch
             es = Elasticsearch([es_url], request_timeout=5)
@@ -196,12 +199,13 @@ class RepoScoringEngine:
                         }
                     entry["variants"] = variants
                 table[name] = entry
+            print(f"[REPO_SCORING] Loaded {len(table)} algorithm scores from Elasticsearch")
             logger.info("Loaded %d algorithm scores from Elasticsearch", len(table))
             return table
         except Exception as exc:
             logger.error(
                 "CRITICAL: Could not load algorithm scores from ES: %s. "
-                "Scoring table is EMPTY — ensure ES is reachable.", exc
+                "Scoring table is EMPTY -- ensure ES is reachable.", exc
             )
             return {}
 
@@ -210,7 +214,7 @@ class RepoScoringEngine:
         Score all algorithms found in a repository scan.
         
         Args:
-            algorithms_dict: Dict mapping algorithm name â†’ {
+            algorithms_dict: Dict mapping algorithm name â†' {
                 "category": str, "occurrences": int, "files": [...],
                 "key_size": int|None, "quantum_resistance_type": str,
                 "is_pqc": bool, "commented_occurrences": int,
@@ -221,10 +225,11 @@ class RepoScoringEngine:
             Dict with scored algorithms, category scores, overall score,
             migration plan, and quantum readiness details.
         """
+        print(f"[REPO_SCORING] score_algorithms called with {len(algorithms_dict)} algorithms. Table has {len(self.scores_table)} entries")
         if not algorithms_dict:
             return self._empty_result()
 
-        # Check the ES version marker — reload immediately if scores changed via UI,
+        # Check the ES version marker -- reload immediately if scores changed via UI,
         # or fall back to the safety-net TTL if the marker is unavailable.
         es_version = self._get_scores_version()
         scores_changed = es_version > self._cache_loaded_at
@@ -285,10 +290,17 @@ class RepoScoringEngine:
 
     def _score_single(self, algo_name: str, algo_data: Dict) -> Dict:
         """Score a single algorithm."""
-        info = self.scores_table.get(algo_name, None)
+        # Table keys are UPPERCASE, so normalize the lookup
+        lookup_key = algo_name.upper()
+        info = self.scores_table.get(lookup_key, None)
+        
+        # DEBUG: Log what we're looking for and what we have
+        if algo_name in ["SHA-256", "AES", "Rainbow"]:
+            print(f"[SCORING] Looking up '{algo_name}' -> key '{lookup_key}' -> found: {info is not None}")
+            print(f"[SCORING] Table has {len(self.scores_table)} entries. Sample keys: {list(self.scores_table.keys())[:10]}")
 
         if info is None:
-            # Unknown algorithm â€” try fuzzy match
+            # Unknown algorithm "" try fuzzy match
             info = self._fuzzy_lookup(algo_name)
 
         key_size = algo_data.get("key_size")
@@ -344,7 +356,7 @@ class RepoScoringEngine:
         return {
             "base_score": 40, "category": "symmetric",
             "quantum_safe": False, "resistance": "unknown",
-            "reason": f"Unknown algorithm '{name}' â€” review manually",
+            "reason": f"Unknown algorithm '{name}' "" review manually",
             "migration": f"Manually assess '{name}' for quantum readiness.",
         }
 
@@ -381,8 +393,8 @@ class RepoScoringEngine:
         Core principle: this is a QUANTUM READINESS tool.
         The score = quantum readiness percentage, adjusted by:
           - Deprecated penalty (MD5/DES/RC4 actively reduce score)
-          - Vulnerable cap (RSA/ECDSA in code â†’ can't reach A+)
-          - PQC bonus (using NIST PQC standards â†’ extra credit)
+          - Vulnerable cap (RSA/ECDSA in code â†' can't reach A+)
+          - PQC bonus (using NIST PQC standards â†' extra credit)
         
         This ensures QR% and score always tell the same story.
         """
@@ -393,7 +405,7 @@ class RepoScoringEngine:
         qsafe_occ = sum(a["occurrences"] for a in scored_algos.values() if a["quantum_safe"])
         qr_pct = (qsafe_occ / total_occ * 100)
 
-        # Start from QR% â€” the score IS quantum readiness
+        # Start from QR% "" the score IS quantum readiness
         base = qr_pct
 
         # PQC bonus: using actual NIST PQC standards (Kyber, Dilithium, etc.)
@@ -409,20 +421,20 @@ class RepoScoringEngine:
         if deprecated_algos:
             dep_occ = sum(a["occurrences"] for a in deprecated_algos)
             dep_ratio = dep_occ / total_occ
-            # Penalty scales with usage: 3% deprecated â†’ -3, 30% â†’ -15
+            # Penalty scales with usage: 3% deprecated â†' -3, 30% â†' -15
             base -= min(dep_ratio * 50, 25)
 
         # Quantum-vulnerable cap: having RSA/ECDSA/DH in active code
-        # means you're NOT fully quantum ready â€” cap the score
+        # means you're NOT fully quantum ready "" cap the score
         vulnerable_algos = [a for a in scored_algos.values()
                            if a["quantum_resistance_type"] == "vulnerable"]
         if vulnerable_algos:
             vuln_occ = sum(a["occurrences"] for a in vulnerable_algos)
             vuln_ratio = vuln_occ / total_occ
             if vuln_ratio > 0.2:
-                base = min(base, 55)   # Heavy vulnerable usage â†’ C+ max
+                base = min(base, 55)   # Heavy vulnerable usage â†' C+ max
             else:
-                base = min(base, 75)   # Some vulnerable usage â†’ B max
+                base = min(base, 75)   # Some vulnerable usage â†' B max
 
         return max(0, min(100, round(base, 2)))
 
@@ -451,7 +463,7 @@ class RepoScoringEngine:
             risk_reason = f"Quantum-vulnerable algorithms in use with no PQC alternatives: {', '.join(vulnerable_algos[:5])}"
         elif has_vulnerable and has_pqc:
             risk_level = "medium"
-            risk_reason = "PQC migration in progress â€” some classical algorithms remain"
+            risk_reason = "PQC migration in progress "" some classical algorithms remain"
         elif has_pqc:
             risk_level = "low"
             risk_reason = "PQC algorithms deployed. Codebase is quantum-ready."
@@ -542,7 +554,7 @@ class RepoScoringEngine:
                     "affected_files": total_files,
                     "occurrences": total_occ,
                     "replacement": "ML-KEM-768 (FIPS 203) or hybrid X25519+ML-KEM-768",
-                    "effort": "High â€” requires library upgrades and protocol changes",
+                    "effort": "High "" requires library upgrades and protocol changes",
                     "impact": "Eliminates quantum vulnerability in key exchange",
                     "nist_ref": "NIST FIPS 203 (ML-KEM), CISA PQC Migration Guidance 2024",
                     "code_example": (
@@ -572,7 +584,7 @@ class RepoScoringEngine:
                     "affected_files": total_files,
                     "occurrences": total_occ,
                     "replacement": "ML-DSA-65 (FIPS 204) or hybrid ECDSA+ML-DSA",
-                    "effort": "High â€” requires library upgrades and certificate changes",
+                    "effort": "High "" requires library upgrades and certificate changes",
                     "impact": "Eliminates quantum vulnerability in digital signatures",
                     "nist_ref": "NIST FIPS 204 (ML-DSA), NIST FIPS 205 (SLH-DSA)",
                     "code_example": (
@@ -665,7 +677,7 @@ class RepoScoringEngine:
             "affected_files": 0,
             "occurrences": 0,
             "replacement": "Cryptographic abstraction layer",
-            "effort": "High â€” architectural change",
+            "effort": "High "" architectural change",
             "impact": "Enables rapid future algorithm migration",
             "nist_ref": "CISA Quantum-Readiness Roadmap 2023, NISTIR 8547",
         })
@@ -698,7 +710,7 @@ class RepoScoringEngine:
                      if a["quantum_resistance_type"] == "vulnerable"]
         if vulnerable:
             vulns.append(
-                f"Quantum-vulnerable algorithms ({len(vulnerable)}): {', '.join(vulnerable[:5])} â€” "
+                f"Quantum-vulnerable algorithms ({len(vulnerable)}): {', '.join(vulnerable[:5])} "" "
                 "will be broken by Shor's algorithm"
             )
 
@@ -709,7 +721,7 @@ class RepoScoringEngine:
         # Check for ECB mode
         ecb = scored_algos.get("ECB")
         if ecb and ecb["occurrences"] > 0:
-            vulns.append("ECB cipher mode detected â€” leaks plaintext patterns. Never use for encryption.")
+            vulns.append("ECB cipher mode detected "" leaks plaintext patterns. Never use for encryption.")
 
         return vulns
 
@@ -726,7 +738,7 @@ class RepoScoringEngine:
             "Blowfish": "AES-256-GCM",
             "IDEA": "AES-256-GCM",
             "CAST5": "AES-256-GCM",
-            "DSA": "Ed25519 (interim) â†’ ML-DSA (PQC)",
+            "DSA": "Ed25519 (interim) â†' ML-DSA (PQC)",
             "Rainbow": "ML-DSA (Dilithium)",
             "SIKE": "ML-KEM (Kyber)",
             "ECB": "GCM or CCM mode",
@@ -737,11 +749,11 @@ class RepoScoringEngine:
         """Get NIST reference for algorithm deprecation."""
         refs = {
             "DES": "NIST SP 800-131A Rev 2 (2019)",
-            "3DES": "NIST SP 800-131A Rev 2 â€” deprecated after 2023",
-            "RC4": "RFC 7465 â€” Prohibiting RC4 Cipher Suites",
+            "3DES": "NIST SP 800-131A Rev 2 "" deprecated after 2023",
+            "RC4": "RFC 7465 "" Prohibiting RC4 Cipher Suites",
             "MD5": "NIST SP 800-131A Rev 2",
-            "SHA-1": "NIST SP 800-131A Rev 2 â€” prohibited for digital signatures",
-            "DSA": "FIPS 186-5 â€” DSA dropped for new signatures",
+            "SHA-1": "NIST SP 800-131A Rev 2 "" prohibited for digital signatures",
+            "DSA": "FIPS 186-5 "" DSA dropped for new signatures",
             "Rainbow": "Ward Beullens key recovery attack (2022)",
             "SIKE": "Castryck-Decru attack (2022)",
         }
@@ -753,13 +765,13 @@ class RepoScoringEngine:
         critical = sum(1 for s in steps if s["priority"] == "CRITICAL")
 
         if critical > 3 or total_occ > 200:
-            return "High â€” significant codebase changes required"
+            return "High "" significant codebase changes required"
         if critical > 0 or total_occ > 50:
-            return "Medium â€” focused refactoring needed"
-        return "Low â€” minor adjustments"
+            return "Medium "" focused refactoring needed"
+        return "Low "" minor adjustments"
 
     def _empty_result(self) -> Dict:
-        """Return empty scoring result â€” no crypto code found means no quantum risk."""
+        """Return empty scoring result "" no crypto code found means no quantum risk."""
         return {
             "overall_score": 85,
             "overall_grade": "A",
@@ -771,7 +783,7 @@ class RepoScoringEngine:
             "quantum_readiness_detail": {
                 "quantum_readiness_percentage": 100,
                 "risk_level": "low",
-                "risk_reason": "No cryptographic algorithm usage found in code â€” no quantum migration needed",
+                "risk_reason": "No cryptographic algorithm usage found in code "" no quantum migration needed",
                 "migration_status": "not_applicable",
                 "migration_note": "No direct cryptographic operations found. If the app uses crypto via external services/APIs, those should be assessed separately.",
             },

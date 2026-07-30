@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { GoogleLogin, CredentialResponse } from "@react-oauth/google";
 import { motion } from "framer-motion";
-import { Shield, Lock, Cpu, GitBranch, Globe, CheckCircle } from "lucide-react";
+import { Shield, Lock, Cpu, GitBranch, Globe, CheckCircle, Zap, Server, Lock as LockIcon, Code2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
@@ -10,20 +10,25 @@ import { toast } from "sonner";
 const FeaturePill = ({
   icon,
   label,
+  description,
   delay,
 }: {
   icon: React.ReactNode;
   label: string;
+  description?: string;
   delay: number;
 }) => (
   <motion.div
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay, duration: 0.5 }}
-    className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-3 py-1.5 text-xs text-slate-300"
+    className="flex flex-col gap-1 bg-gradient-to-br from-white/8 to-white/3 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 hover:border-white/20 hover:bg-white/12 transition-all"
   >
-    {icon}
-    {label}
+    <div className="flex items-center gap-2">
+      {icon}
+      <span className="font-semibold">{label}</span>
+    </div>
+    {description && <p className="text-xs text-slate-400">{description}</p>}
   </motion.div>
 );
 
@@ -38,7 +43,7 @@ const LoginPage = () => {
   const handleSuccess = (response: CredentialResponse) => {
     if (response.credential) {
       login(response.credential);
-      toast.success("Welcome to Quantum Shield");
+      toast.success("Welcome to XENCRYPT - Your Quantum-Safe Future Starts Now");
       navigate("/elk/dashboard", { replace: true });
     }
   };
@@ -72,43 +77,88 @@ const LoginPage = () => {
 
         {/* Logo */}
         <div className="relative z-10 flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center shadow-lg shadow-purple-900/40">
-            <Shield className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-900/60 animate-pulse">
+            <Zap className="w-5 h-5 text-white" />
           </div>
-          <span className="text-white font-semibold text-lg">Quantum Shield</span>
+          <div className="flex flex-col">
+            <span className="text-white font-bold text-xl tracking-wide">XENCRYPT</span>
+            <span className="text-xs text-cyan-400 font-semibold">Post-Quantum Ready</span>
+          </div>
         </div>
 
         {/* Main copy */}
-        <div className="relative z-10 space-y-6">
+        <div className="relative z-10 space-y-8">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.6 }}
           >
-            <h1 className="text-4xl xl:text-5xl font-bold text-white leading-tight">
-              Post-Quantum
+            <h1 className="text-5xl xl:text-6xl font-black text-white leading-tight">
+              Prepare Your
               <br />
-              <span className="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-                Crypto Auditing
+              <span className="bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
+                IT Assets for Tomorrow
               </span>
             </h1>
-            <p className="mt-4 text-slate-400 text-base leading-relaxed max-w-sm">
-              Scan TLS endpoints, GitHub repositories, and system agents for
-              cryptographic vulnerabilities and quantum readiness.
+            <p className="mt-6 text-slate-300 text-lg leading-relaxed max-w-lg font-light">
+              Scan your <span className="font-semibold text-cyan-300">Domains</span> • <span className="font-semibold text-blue-300">Repositories</span> • <span className="font-semibold text-purple-300">Servers</span> • <span className="font-semibold text-indigo-300">Endpoints</span> for cryptographic vulnerabilities and Post-Quantum readiness.
+            </p>
+            <p className="mt-4 text-slate-400 text-sm">
+              Ensure your organization is quantum-safe before threats emerge.
             </p>
           </motion.div>
 
-          <div className="flex flex-wrap gap-2">
-            <FeaturePill icon={<Globe className="h-3.5 w-3.5 text-blue-400" />}   label="TLS / SSL scanning"    delay={0.35} />
-            <FeaturePill icon={<GitBranch className="h-3.5 w-3.5 text-emerald-400" />} label="Repo code analysis" delay={0.45} />
-            <FeaturePill icon={<Cpu className="h-3.5 w-3.5 text-violet-400" />}   label="System endpoint audit"  delay={0.55} />
-            <FeaturePill icon={<CheckCircle className="h-3.5 w-3.5 text-amber-400" />} label="PQC scoring"       delay={0.65} />
-          </div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4, duration: 0.6 }}
+            className="space-y-3"
+          >
+            <p className="text-xs uppercase tracking-wider text-cyan-400 font-semibold">🔐 What We Scan</p>
+            <div className="grid grid-cols-2 gap-3">
+              <FeaturePill 
+                icon={<Globe className="h-4 w-4 text-cyan-400" />}
+                label="TLS Endpoints"
+                description="Detect weak encryption protocols"
+                delay={0.5}
+              />
+              <FeaturePill 
+                icon={<GitBranch className="h-4 w-4 text-blue-400" />}
+                label="Code Repositories"
+                description="Audit dependencies & packages"
+                delay={0.6}
+              />
+              <FeaturePill 
+                icon={<Server className="h-4 w-4 text-purple-400" />}
+                label="System Agents"
+                description="Monitor OS & infrastructure"
+                delay={0.7}
+              />
+              <FeaturePill 
+                icon={<Cpu className="h-4 w-4 text-indigo-400" />}
+                label="PQC Scoring"
+                description="Quantum readiness analysis"
+                delay={0.8}
+              />
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.9, duration: 0.5 }}
+            className="pt-4"
+          >
+            <p className="text-xs text-slate-500 flex items-center gap-2">
+              <span className="inline-block w-1.5 h-1.5 bg-cyan-500 rounded-full"></span>
+              Supported by industry-leading PQC standards
+            </p>
+          </motion.div>
         </div>
 
         {/* Footer */}
         <p className="relative z-10 text-xs text-slate-600">
-          © 2026 Quantum Shield · Post-Quantum Cryptography Platform
+          © 2026 XENCRYPT · Post-Quantum Cryptography Platform
         </p>
       </motion.div>
 
@@ -125,19 +175,22 @@ const LoginPage = () => {
         >
           {/* Mobile logo (hidden on lg) */}
           <div className="lg:hidden flex items-center gap-3 mb-10 justify-center">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center">
-              <Shield className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-900/60 animate-pulse">
+              <Zap className="w-5 h-5 text-white" />
             </div>
-            <span className="text-white font-semibold text-lg">Quantum Shield</span>
+            <div className="flex flex-col">
+              <span className="text-white font-bold text-lg tracking-wide">XENCRYPT</span>
+              <span className="text-xs text-cyan-400 font-semibold">Post-Quantum Ready</span>
+            </div>
           </div>
 
           {/* Card */}
           <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-8 shadow-2xl backdrop-blur-sm">
 
             <div className="mb-8">
-              <h2 className="text-2xl font-bold text-white">Sign in</h2>
-              <p className="text-sm text-slate-400 mt-1.5">
-                Use your Google account to access the platform
+              <h2 className="text-2xl font-bold text-white">Join XENCRYPT</h2>
+              <p className="text-sm text-slate-400 mt-2">
+                Start your quantum-safe transformation today. Secure sign-in with your Google account.
               </p>
             </div>
 
@@ -145,7 +198,7 @@ const LoginPage = () => {
             <div className="flex items-center gap-3 mb-6">
               <div className="flex-1 h-px bg-white/8" />
               <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Lock className="h-3 w-3" /> Secure sign-in
+                <LockIcon className="h-3 w-3" /> Enterprise-Grade Security
               </span>
               <div className="flex-1 h-px bg-white/8" />
             </div>
@@ -165,18 +218,27 @@ const LoginPage = () => {
             </div>
 
             {/* Trust note */}
-            <div className="mt-6 flex items-start gap-2.5 p-3.5 bg-white/[0.03] rounded-xl border border-white/[0.06]">
-              <CheckCircle className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Your Google account is only used for authentication. No data is
-                shared outside this platform.
-              </p>
-            </div>
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+              className="mt-6 flex items-start gap-2.5 p-4 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-xl border border-cyan-500/20"
+            >
+              <CheckCircle className="h-4 w-4 text-cyan-400 mt-0.5 shrink-0" />
+              <div className="flex flex-col gap-1">
+                <p className="text-xs text-slate-200 font-semibold leading-relaxed">
+                  100% Secure & Compliant
+                </p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Your Google account is used only for authentication. We never store or share your personal data.
+                </p>
+              </div>
+            </motion.div>
           </div>
 
           {/* Below-card note */}
-          <p className="text-center text-xs text-slate-600 mt-5">
-            By signing in you agree to our security audit terms.
+          <p className="text-center text-xs text-slate-500 mt-6">
+            By signing in, you agree to XENCRYPT's <span className="text-cyan-400 hover:underline cursor-pointer">Security Audit Terms</span> and <span className="text-cyan-400 hover:underline cursor-pointer">Privacy Policy</span>
           </p>
         </motion.div>
       </div>

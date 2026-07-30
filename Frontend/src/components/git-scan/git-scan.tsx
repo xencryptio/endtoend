@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, Trash2, RotateCcw, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { RefreshCw, Shield, AlertTriangle, Clock, Package, XCircle, CheckCircle, ArrowLeft, Eye, Loader2, Trash2, RotateCcw, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, GitBranch } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -67,99 +67,107 @@ interface ScanRowProps {
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50];
 const DEFAULT_PAGE_SIZE = 10;
 
+const fmtAgo = (s: string) => {
+  if (!s) return '—';
+  try {
+    const ms = Date.now() - new Date(s).getTime();
+    if (ms < 60000) return 'just now';
+    if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
+    if (ms < 86400000) return `${Math.floor(ms / 3600000)}h ago`;
+    return `${Math.floor(ms / 86400000)}d ago`;
+  } catch { return '—'; }
+};
+
+const repoGradeBadge = (grade: string | null | undefined) => {
+  if (!grade) return <span className="text-muted-foreground text-xs">—</span>;
+  const colors: Record<string, string> = {
+    A: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+    B: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    C: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+    D: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+    F: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  };
+  const cls = colors[grade.toUpperCase()] ?? 'bg-muted text-muted-foreground';
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${cls}`}>{grade}</span>;
+};
+
+const repoStatusBadge = (status: string) => {
+  const map: Record<string, { label: string; cls: string }> = {
+    completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+    cached:    { label: 'Cached',    cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+    in_progress: { label: 'In Progress', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+    pending:   { label: 'Queued',    cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
+    failed:    { label: 'Failed',    cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  };
+  const { label, cls } = map[status] ?? { label: status, cls: 'bg-muted text-muted-foreground' };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{label}</span>;
+};
+
 const ScanRow = React.memo<ScanRowProps>(({ scan, onView, onRetry, onDelete, retryingId, deletingId }) => {
   const canView = scan.scan_status === 'completed' || scan.scan_status === 'cached';
+  const isBusy  = scan.scan_status === 'failed' || scan.scan_status === 'in_progress' || scan.scan_status === 'pending';
+  const score   = scan.overall_security_score != null ? `${Math.round(scan.overall_security_score)}` : null;
   const fileCountDisplay =
     scan.scan_status === 'in_progress' && scan.total_files_to_scan > 0
       ? `${scan.total_files || 0} / ${scan.total_files_to_scan}`
-      : scan.total_files || '-';
-
-  const getStatusBadge = () => {
-    switch (scan.scan_status) {
-      case 'pending': return 'warning';
-      case 'in_progress': return 'info';
-      case 'completed': return 'success';
-      case 'failed': return 'error';
-      case 'cached': return 'success';
-      default: return 'neutral';
-    }
-  };
-
-  const getStatusLabel = () => {
-    switch (scan.scan_status) {
-      case 'pending': return 'Queued';
-      case 'in_progress': return 'In Progress';
-      case 'completed': return 'Completed';
-      case 'failed': return 'Failed';
-      case 'cached': return 'Cached';
-      default: return scan.scan_status || 'Unknown';
-    }
-  };
-
-  const getStatusIcon = () => {
-    switch (scan.scan_status) {
-      case 'pending': return <Clock className="h-5 w-5" />;
-      case 'in_progress': return <RefreshCw className="h-5 w-5 animate-spin" />;
-      case 'completed':
-      case 'cached': return <CheckCircle className="h-5 w-5" />;
-      case 'failed': return <XCircle className="h-5 w-5" />;
-      default: return <Shield className="h-5 w-5" />;
-    }
-  };
-
-  const quantumReadinessDisplay = scan.quantum_readiness_percentage !== undefined && scan.quantum_readiness_percentage !== null
-    ? `${Math.round(scan.quantum_readiness_percentage)}%`
-    : 'N/A';
-  const riskLevelDisplay = scan.overall_grade ?? 'N/A';
-  const securityScoreDisplay = scan.overall_security_score !== undefined && scan.overall_security_score !== null
-    ? `${Math.round(scan.overall_security_score)}/100`
-    : 'N/A';
+      : scan.total_files ? String(scan.total_files) : '—';
 
   return (
-    <UnifiedResultCard
-      key={scan.id}
-      title={formatRepoName(scan.repo_url)}
-      description={`${scan.platform || 'Unknown'} • Branch: ${scan.branch_name || 'main'} • ${fileCountDisplay} files`}
-      status={getStatusBadge()}
-      statusLabel={getStatusLabel()}
-      icon={getStatusIcon()}
-      metrics={[
-        { label: "Quantum Readiness", value: quantumReadinessDisplay, valueClassName: "text-primary" },
-        { label: "Risk Level", value: riskLevelDisplay, valueClassName: "text-warning" },
-        { label: "Security Score", value: securityScoreDisplay, valueClassName: "text-success" }
-      ]}
-      actions={[
-        ...(canView ? [{
-          label: "View Results",
-          icon: <Eye className="w-4 h-4 mr-2" />,
-          onClick: () => onView(scan.id),
-          variant: "outline" as const
-        }] : []),
-        ...((scan.scan_status === 'failed' || scan.scan_status === 'in_progress' || scan.scan_status === 'pending') ? [{
-          label: retryingId === scan.id ? "Retrying..." : "Retry",
-          icon: retryingId === scan.id ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />,
-          onClick: () => onRetry(scan),
-          variant: "outline" as const,
-          disabled: retryingId === scan.id
-        }] : []),
-        {
-          label: "Delete",
-          icon: deletingId === scan.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />,
-          onClick: () => onDelete(scan.id),
-          variant: "destructive" as const,
-          disabled: deletingId === scan.id
-        }
-      ]}
-    >
-      {scan.scan_status === 'failed' && scan.error_detail ? (
-        <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2 mb-2">
-          <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>{scan.error_detail}</span>
+    <tr className="hover:bg-muted/30 transition-colors">
+      {/* Repository */}
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2 max-w-xs">
+          <GitBranch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="truncate font-medium text-sm" title={scan.repo_url}>{formatRepoName(scan.repo_url)}</span>
         </div>
-      ) : scan.current_status ? (
-        <div className="text-sm text-muted-foreground mb-2">{scan.current_status}</div>
-      ) : null}
-    </UnifiedResultCard>
+        {scan.scan_status === 'failed' && scan.error_detail && (
+          <p className="text-xs text-destructive mt-0.5 truncate max-w-xs" title={scan.error_detail}>{scan.error_detail}</p>
+        )}
+      </td>
+      {/* Branch */}
+      <td className="px-3 py-3 text-xs text-muted-foreground hidden sm:table-cell">
+        {scan.branch_name || 'main'}
+      </td>
+      {/* Score */}
+      <td className="px-3 py-3 text-center">
+        {score != null
+          ? <span className="font-semibold tabular-nums">{score}</span>
+          : <span className="text-muted-foreground text-xs">—</span>}
+      </td>
+      {/* Grade */}
+      <td className="px-3 py-3 text-center">{repoGradeBadge(scan.overall_grade)}</td>
+      {/* Status */}
+      <td className="px-3 py-3 text-center">{repoStatusBadge(scan.scan_status)}</td>
+      {/* Files */}
+      <td className="px-3 py-3 text-center text-xs text-muted-foreground hidden md:table-cell">{fileCountDisplay}</td>
+      {/* Scanned at */}
+      <td className="px-4 py-3 text-right text-xs text-muted-foreground hidden lg:table-cell">{fmtAgo(scan.last_scanned || scan.created_at)}</td>
+      {/* Actions */}
+      <td className="px-4 py-3 text-right">
+        <div className="flex items-center justify-end gap-1.5">
+          {canView && (
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => onView(scan.id)}>
+              <Eye className="h-3 w-3" /> View
+            </Button>
+          )}
+          {isBusy && (
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1"
+              onClick={() => onRetry(scan)} disabled={retryingId === scan.id}>
+              {retryingId === scan.id
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <RotateCcw className="h-3 w-3" />}
+              Retry
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+            onClick={() => onDelete(scan.id)} disabled={deletingId === scan.id}>
+            {deletingId === scan.id
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <Trash2 className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
+      </td>
+    </tr>
   );
 });
 ScanRow.displayName = 'ScanRow';
@@ -950,18 +958,34 @@ const CryptoScanner: React.FC<CryptoScannerProps> = ({ onBack, autoLoadRepo }) =
                 </div>
               ) : (
                 <>
-                  <div className="space-y-4">
-                    {paginatedScans.map((scan) => (
-                      <ScanRow
-                        key={scan.id}
-                        scan={scan}
-                        onView={handleViewResults}
-                        onRetry={retryScan}
-                        onDelete={deleteScan}
-                        retryingId={retryingId}
-                        deletingId={deletingId}
-                      />
-                    ))}
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/50 border-b border-border">
+                          <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Repository</th>
+                          <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-xs hidden sm:table-cell">Branch</th>
+                          <th className="text-center px-3 py-2.5 font-medium text-muted-foreground text-xs">Score</th>
+                          <th className="text-center px-3 py-2.5 font-medium text-muted-foreground text-xs">Grade</th>
+                          <th className="text-center px-3 py-2.5 font-medium text-muted-foreground text-xs">Status</th>
+                          <th className="text-center px-3 py-2.5 font-medium text-muted-foreground text-xs hidden md:table-cell">Files</th>
+                          <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs hidden lg:table-cell">Scanned</th>
+                          <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {paginatedScans.map((scan) => (
+                          <ScanRow
+                            key={scan.id}
+                            scan={scan}
+                            onView={handleViewResults}
+                            onRetry={retryScan}
+                            onDelete={deleteScan}
+                            retryingId={retryingId}
+                            deletingId={deletingId}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
 
                   {/* Pagination controls */}

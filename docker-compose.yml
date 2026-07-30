@@ -218,20 +218,21 @@ services:
       - "8003:8001"
     volumes:
       - ./repo_scanner:/app
-      - scanner-data:/data
     environment:
-      - DATABASE_URL=sqlite:////data/repo_scanner.db
       - UVICORN_LOG_LEVEL=debug
       - SCORING_SERVICE_URL=http://universal-scoring-service:9500
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELK_INDEXER_URL=http://elk-indexer:9100
+      - ELK_QUERY_API_URL=http://elk-query-api:9101
     networks:
       - xencrypt-network
     restart: always
     depends_on:
-      db-service:
-        condition: service_healthy
       universal-scoring-service:
         condition: service_healthy
+      elk-indexer:
+        condition: service_started
+      elk-query-api:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s

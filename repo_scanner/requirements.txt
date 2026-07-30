@@ -1,6 +1,5 @@
 fastapi
 uvicorn[standard]
-SQLAlchemy
 requests
 httpx
-elasticsearch>=8.0,<9.0
+elasticsearch

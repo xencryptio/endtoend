@@ -1,6 +1,7 @@
 """
 Enhanced GitHub Repository Cryptographic Algorithm Scanner
-With PostgreSQL caching, hash-based deduplication, job queue, and REST API
+Elasticsearch-backed: no SQLite dependency. Active scans tracked in-memory;
+completed scans persisted to Elasticsearch via elk-indexer.
 """
 
 import logging
@@ -20,16 +21,12 @@ import requests
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional, Any
-from fastapi import FastAPI, HTTPException, status, Request # Import Request and status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError # Import RequestValidationError
-from fastapi.responses import JSONResponse # Import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
-import uvicorn 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, Float, JSON
-from sqlalchemy.orm import sessionmaker, relationship, Session
-from sqlalchemy.ext.declarative import declarative_base
-from contextlib import contextmanager
+import uvicorn
 from logging_config import setup_logging
 from exceptions import APIError
 from logging_middleware import correlation_middleware
@@ -39,100 +36,156 @@ from repo_scoring import RepoScoringEngine
 setup_logging("REPO-SCANNER", logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# --- SQLAlchemy Setup ---
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/repo_scanner.db")
-_sqlite_kwargs = {"connect_args": {"check_same_thread": False}} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, **_sqlite_kwargs)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+# --- Elasticsearch / ELK service URLs ---
+ELK_INDEXER_URL = os.getenv("ELK_INDEXER_URL", "http://elk-indexer:9100")
+ELK_QUERY_API_URL = os.getenv("ELK_QUERY_API_URL", "http://elk-query-api:9101")
 
-# --- SQLAlchemy Models ---
-class Repository(Base):
-    __tablename__ = "repositories"
-    id = Column(Integer, primary_key=True, index=True)
-    repo_url = Column(String, index=True, nullable=False)
-    repo_hash = Column(String, nullable=False, index=True)
-    branch_name = Column(String, default='main', nullable=False)
-    platform = Column(String, default='GitHub', nullable=False)
-    last_scanned = Column(DateTime, default=datetime.utcnow)
-    scan_status = Column(String, default='pending', nullable=False)
-    total_files = Column(Integer, default=0)
-    total_algorithms = Column(Integer, default=0)
-    quantum_safe_count = Column(Integer, default=0)  # ✅ RENAMED from pqc_safe_count
-    quantum_vulnerable_count = Column(Integer, default=0)  # ✅ RENAMED from pqc_vulnerable_count
-    current_status = Column(String, default='Queued for scanning')
-    total_files_to_scan = Column(Integer, default=0)
-    overall_security_score = Column(Float, nullable=True)
-    overall_grade = Column(String, nullable=True)
-    migration_plan = Column(JSON, nullable=True)
-    quantum_readiness_detail = Column(JSON, nullable=True)
-    critical_vulnerabilities = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    scan_results = relationship("ScanResult", back_populates="repository", cascade="all, delete-orphan")
+# ---------------------------------------------------------------------------
+# In-memory active scan store
+# Active scans (pending / in_progress / recently failed) live here.
+# Completed scans are persisted to Elasticsearch and removed from this dict.
+# ---------------------------------------------------------------------------
+_active_scans: Dict[int, dict] = {}   # scan_id → scan_record
+_active_scan_lock = threading.Lock()
 
-    __table_args__ = (
-        UniqueConstraint('repo_url', 'repo_hash', 'branch_name', name='uix_repo_url_hash_branch'),
-    )
+# Monotonically-increasing ID generator seeded from current time so that IDs
+# remain unique across service restarts.
+_scan_id_counter: int = int(time.time())
+_scan_id_counter_lock = threading.Lock()
 
+def _new_scan_id() -> int:
+    global _scan_id_counter
+    with _scan_id_counter_lock:
+        _scan_id_counter += 1
+        return _scan_id_counter
 
-class ScanResult(Base):
-    __tablename__ = "scan_results"
-    id = Column(Integer, primary_key=True, index=True)
-    repo_id = Column(Integer, ForeignKey("repositories.id"), nullable=False)
-    algorithm = Column(String, nullable=False)
-    algorithm_type = Column(String, nullable=True)
-    category = Column(String, nullable=False)
-    # ✅ REMOVED: is_quantum_resistant (replaced by quantum_resistance_type)
-    is_pqc = Column(Boolean, default=False)  # True ONLY for actual PQC algorithms
-    occurrences = Column(Integer, nullable=False)
-    files_affected = Column(Integer, nullable=False)
-    base_score = Column(Float, nullable=True)
-    final_score = Column(Float, nullable=True)
-    grade = Column(String, nullable=True)
-    security_level = Column(String, nullable=True)
-    quantum_safe = Column(Boolean, default=False)  # ✅ PRIMARY field: Is it actually quantum-safe?
-    quantum_safety_reason = Column(String, nullable=True)  # ✅ NEW: Why is it safe/unsafe?
-    quantum_resistance_type = Column(String, nullable=True)  # ✅ NEW: fully_resistant/grover_resistant/vulnerable/deprecated
-    deprecated = Column(Boolean, default=False)
-    weighted_score = Column(Float, nullable=True)
-    # Comment-aware counts (added by comment-aware scanner)
-    commented_occurrences = Column(Integer, nullable=True, default=0)  # occurrences inside comments
-    repository = relationship("Repository", back_populates="scan_results")
-    findings = relationship("Finding", back_populates="scan_result", cascade="all, delete-orphan")
+# ---------------------------------------------------------------------------
+# Elasticsearch helpers
+# ---------------------------------------------------------------------------
 
-class Finding(Base):
-    __tablename__ = "findings"
-    id = Column(Integer, primary_key=True, index=True)
-    scan_result_id = Column(Integer, ForeignKey("scan_results.id"), nullable=False)
-    file_path = Column(String, nullable=False)
-    line_number = Column(Integer, nullable=False)
-    context = Column(Text)
-    match_text = Column(String)
-    scan_result = relationship("ScanResult", back_populates="findings")
-
-class CategoryScore(Base):
-    __tablename__ = "category_scores"
-    id = Column(Integer, primary_key=True, index=True)
-    repo_id = Column(Integer, ForeignKey("repositories.id"), nullable=False)
-    category_type = Column(String, nullable=False)  # 'kex', 'signature', 'symmetric', 'hash'
-    score = Column(Float, nullable=False)
-    grade = Column(String, nullable=False)
-    algorithm_count = Column(Integer, nullable=False)
-    best_algorithm = Column(String, nullable=True)
-    worst_algorithm = Column(String, nullable=True)
-    repository = relationship("Repository", backref="category_scores")
+def _post_completed_to_elk(scan_id: int, repo_url: str, branch_name: str, scan_data: dict) -> dict:
+    """POST a completed (or failed) repo scan to elk-indexer for persistence."""
+    payload = {
+        "repo_url": repo_url,
+        "branch_name": branch_name,
+        "organization_id": "default",
+        "scan_data": {**scan_data, "id": scan_id},
+    }
+    resp = requests.post(f"{ELK_INDEXER_URL}/index/repo", json=payload, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
 
 
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-@contextmanager
-def get_db():
-    db = SessionLocal()
+def _get_completed_scans_from_es(size: int = 500) -> List[dict]:
+    """Return all completed repo scan documents from elk-query-api."""
     try:
-        yield db
-    finally:
-        db.close()
+        resp = requests.get(
+            f"{ELK_QUERY_API_URL}/api/elk/results/all?type=repo&size={size}",
+            timeout=15,
+        )
+        if resp.ok:
+            return resp.json().get("results", [])
+    except Exception as exc:
+        logger.warning(f"ES read failed (elk-query-api): {exc}")
+    return []
+
+
+def _get_es_scan_by_source_id(source_id: int) -> Optional[dict]:
+    """Find a single completed scan in ES by its integer source_id."""
+    results = _get_completed_scans_from_es(size=1000)
+    target = str(source_id)
+    for r in results:
+        if str(r.get("source_id", "")) == target:
+            return r
+    return None
+
+
+def _check_es_cache(repo_url: str, branch_name: str, repo_hash: str) -> Optional[dict]:
+    """Return a cached ES doc if an identical scan already exists, else None."""
+    results = _get_completed_scans_from_es(size=1000)
+    for r in results:
+        if (r.get("repo_url") == repo_url
+                and r.get("branch_name") == branch_name
+                and r.get("repo_hash") == repo_hash):
+            return r
+    return None
+
+
+def _delete_from_elk(source_id: int) -> bool:
+    """Delete a scan from Elasticsearch by source_id via elk-indexer."""
+    try:
+        resp = requests.delete(f"{ELK_INDEXER_URL}/index/repo/{source_id}", timeout=15)
+        return resp.ok
+    except Exception as exc:
+        logger.warning(f"ES delete failed for source_id={source_id}: {exc}")
+        return False
+
+
+def _delete_all_from_elk() -> int:
+    """Delete all repo scans from Elasticsearch."""
+    try:
+        resp = requests.delete(f"{ELK_INDEXER_URL}/index/repo", timeout=15)
+        if resp.ok:
+            return resp.json().get("deleted", 0)
+    except Exception as exc:
+        logger.warning(f"ES delete-all failed: {exc}")
+    return 0
+
+
+def _es_to_list_item(r: dict) -> dict:
+    """Convert an ES document (from elk-query-api) to AllScansResponse format."""
+    raw = r.get("raw") or {}
+    try:
+        scan_id = int(r.get("source_id", 0))
+    except (TypeError, ValueError):
+        scan_id = 0
+    return {
+        "id": scan_id,
+        "repo_url": r.get("repo_url", ""),
+        "repo_hash": r.get("repo_hash") or raw.get("repo_hash", ""),
+        "branch_name": r.get("branch_name", ""),
+        "platform": r.get("platform") or raw.get("platform", ""),
+        "last_scanned": r.get("last_scanned") or r.get("scanned_at"),
+        "scan_status": r.get("scan_status", "completed"),
+        "total_files": r.get("total_files") or raw.get("total_files", 0),
+        "quantum_safe_count": r.get("quantum_safe_count", 0),
+        "quantum_vulnerable_count": r.get("quantum_vulnerable_count", 0),
+        "current_status": r.get("current_status") or raw.get("current_status", "Scan completed"),
+        "total_files_to_scan": r.get("total_files_to_scan") or raw.get("total_files_to_scan", 0),
+        "overall_security_score": r.get("overall_security_score") or r.get("overall_score"),
+        "overall_grade": r.get("overall_grade"),
+        "quantum_readiness_percentage": r.get("quantum_readiness_percentage", 0.0),
+        "error_detail": None,
+    }
+
+
+def _es_to_detail(r: dict, source_id: int) -> dict:
+    """Convert an ES document to ScanDetailsResponse format."""
+    raw = r.get("raw") or {}
+    return {
+        "repo_id": source_id,
+        "repo_url": r.get("repo_url", ""),
+        "repo_hash": r.get("repo_hash") or raw.get("repo_hash", ""),
+        "branch_name": r.get("branch_name", ""),
+        "platform": r.get("platform") or raw.get("platform", ""),
+        "last_scanned": r.get("last_scanned") or r.get("scanned_at") or datetime.utcnow().isoformat(),
+        "scan_status": r.get("scan_status", "completed"),
+        "total_files": r.get("total_files") or raw.get("total_files", 0),
+        "total_algorithms": r.get("total_algorithms", 0),
+        "quantum_safe_count": r.get("quantum_safe_count", 0),
+        "quantum_vulnerable_count": r.get("quantum_vulnerable_count", 0),
+        "true_pqc_count": raw.get("true_pqc_count", 0),
+        "current_status": r.get("current_status") or raw.get("current_status", "Scan completed"),
+        "total_files_to_scan": r.get("total_files_to_scan") or raw.get("total_files_to_scan", 0),
+        "overall_security_score": r.get("overall_security_score") or r.get("overall_score") or raw.get("overall_score"),
+        "overall_grade": r.get("overall_grade") or raw.get("overall_grade"),
+        "quantum_readiness_percentage": r.get("quantum_readiness_percentage", 0.0),
+        "algorithms": raw.get("algorithms", {}),
+        "category_scores": raw.get("category_scores"),
+        "migration_plan": raw.get("migration_plan"),
+        "quantum_readiness_detail": raw.get("quantum_readiness_detail"),
+        "critical_vulnerabilities": raw.get("critical_vulnerabilities"),
+    }
 
 
 # --- Remote Scoring Configuration ---
@@ -1109,367 +1162,6 @@ class RepoUrlParser:
 
         return True, "Valid URL"
 
-class Database:
-    """PostgreSQL database manager for scan results with job queue"""
-
-    def get_cached_scan(self, db: Session, repo_url: str, repo_hash: str, branch_name: str) -> Optional[Dict]:
-        """Check if completed scan exists for this repo hash and branch"""
-        repo = db.query(Repository).filter(
-            Repository.repo_url == repo_url,
-            Repository.repo_hash == repo_hash,
-            Repository.branch_name == branch_name,
-            Repository.scan_status == 'completed'
-        ).order_by(Repository.last_scanned.desc()).first()
-
-        if repo:
-            return {
-                'id': repo.id,
-                'repo_url': repo.repo_url,
-                'branch_name': repo.branch_name,
-                'platform': repo.platform,
-                'last_scanned': repo.last_scanned,
-                'scan_status': 'cached',
-                'total_files': repo.total_files,
-                'total_algorithms': repo.total_algorithms,
-                'quantum_safe_count': repo.quantum_safe_count,
-                'quantum_vulnerable_count': repo.quantum_vulnerable_count,
-                'current_status': 'Using cached results',
-                'total_files_to_scan': repo.total_files_to_scan,
-                'cached': True
-            }
-        return None
-
-    def create_scan_record(self, db: Session, repo_url: str, repo_hash: str, branch_name: str, platform: str) -> int:
-        """Create initial scan record with 'pending' status"""
-        repo = db.query(Repository).filter(
-            Repository.repo_url == repo_url,
-            Repository.branch_name == branch_name
-        ).first()
-
-        if repo:
-            repo.repo_hash = repo_hash
-            repo.platform = platform
-            repo.scan_status = 'pending'
-            repo.current_status = 'Queued for scanning'
-            repo.created_at = datetime.utcnow()
-        else:
-            repo = Repository(
-                repo_url=repo_url,
-                repo_hash=repo_hash,
-                branch_name=branch_name,
-                platform=platform,
-                scan_status='pending',
-                current_status='Queued for scanning'
-            )
-            db.add(repo)
-        db.commit()
-        db.refresh(repo)
-        return repo.id
-
-    def create_failed_scan_record(self, db: Session, repo_url: str, branch_name: str, platform: str, error_message: str) -> int:
-        """Create (or update) a scan record with 'failed' status for a clone/network error."""
-        import hashlib as _hashlib
-        # Try to find the most-recent existing record for this URL+branch so retry updates in-place
-        existing = (
-            db.query(Repository)
-            .filter(Repository.repo_url == repo_url, Repository.branch_name == branch_name)
-            .order_by(Repository.created_at.desc())
-            .first()
-        )
-        if existing and existing.scan_status in ('failed', 'pending'):
-            existing.scan_status = 'failed'
-            existing.current_status = error_message
-            existing.last_scanned = datetime.utcnow()
-            db.commit()
-            db.refresh(existing)
-            return existing.id
-
-        # Generate a unique placeholder hash so the unique constraint passes
-        placeholder_hash = 'failed_' + _hashlib.md5(
-            f"{repo_url}{branch_name}{datetime.utcnow().isoformat()}".encode()
-        ).hexdigest()[:12]
-        repo = Repository(
-            repo_url=repo_url,
-            repo_hash=placeholder_hash,
-            branch_name=branch_name,
-            platform=platform,
-            scan_status='failed',
-            current_status=error_message,
-            last_scanned=datetime.utcnow(),
-        )
-        db.add(repo)
-        db.commit()
-        db.refresh(repo)
-        return repo.id
-
-    def get_pending_scans(self, db: Session) -> List[Dict]:
-        """Get all pending scans ordered by creation time"""
-        scans = db.query(Repository).filter(Repository.scan_status == 'pending').order_by(Repository.created_at.asc()).all()
-        return [
-            {
-                'id': scan.id,
-                'repo_url': scan.repo_url,
-                'repo_hash': scan.repo_hash,
-                'branch_name': scan.branch_name,
-                'platform': scan.platform,
-                'created_at': scan.created_at
-            } for scan in scans
-        ]
-
-    def mark_scan_processing(self, db: Session, repo_id: int):
-        """Mark scan as currently processing"""
-        repo = db.query(Repository).filter(Repository.id == repo_id).first()
-        if repo:
-            repo.scan_status = 'in_progress'
-            repo.current_status = 'Cloning repository...'
-            repo.last_scanned = datetime.utcnow()
-            db.commit()
-
-    def update_scan_progress(self, db: Session, repo_id: int, current_scanned: int, total_files_to_scan: int, status_message: str):
-        """Update the scan's live progress status"""
-        repo = db.query(Repository).filter(Repository.id == repo_id).first()
-        if repo:
-            repo.current_status = status_message
-            repo.total_files = current_scanned
-            repo.total_files_to_scan = total_files_to_scan
-            db.commit()
-
-    def save_scan_results(self, db: Session, repo_id: int, scan_data: Dict):
-        """Update scan record with complete results"""
-        repo = db.query(Repository).filter(Repository.id == repo_id).first()
-        if not repo:
-            return
-
-        repo.scan_status = 'completed'
-        repo.total_files = scan_data['total_files']
-        repo.total_algorithms = scan_data['total_algorithms']
-        # ✅ CORRECTED: Use new field names
-        repo.quantum_safe_count = scan_data.get('quantum_safe_count', 0)  # Actually quantum-safe
-        repo.quantum_vulnerable_count = scan_data.get('quantum_vulnerable_count', 0)  # Actually vulnerable
-        repo.last_scanned = datetime.utcnow()
-        repo.overall_security_score = scan_data.get('overall_score')
-        repo.overall_grade = scan_data.get('overall_grade')
-        repo.migration_plan = scan_data.get('migration_plan')
-        repo.quantum_readiness_detail = scan_data.get('quantum_readiness_detail')
-        repo.critical_vulnerabilities = scan_data.get('critical_vulnerabilities')
-        repo.current_status = 'Scan completed successfully'
-
-        # Delete old scan results
-        db.query(CategoryScore).filter(CategoryScore.repo_id == repo_id).delete()
-        db.query(ScanResult).filter(ScanResult.repo_id == repo_id).delete()
-
-        for algo, data in scan_data['algorithms'].items():
-            scan_result = ScanResult(
-                repo_id=repo_id,
-                algorithm=algo,
-                algorithm_type=data.get('algorithm_type'),
-                category=data['category'],
-                is_pqc=data.get('is_pqc', False),
-                occurrences=data['occurrences'],          # real (non-commented) count
-                commented_occurrences=data.get('commented_occurrences', 0),
-                files_affected=len(data['files']),
-                # Scoring data
-                base_score=data.get('base_score'),
-                final_score=data.get('final_score'),
-                grade=data.get('grade'),
-                security_level=data.get('security_level'),
-                quantum_safe=data.get('quantum_safe', False),
-                quantum_safety_reason=data.get('quantum_safety_reason'),
-                quantum_resistance_type=data.get('quantum_resistance_type'),
-                deprecated=data.get('deprecated', False),
-                weighted_score=data.get('weighted_score'),
-            )
-            db.add(scan_result)
-            db.flush()  # To get scan_result.id
-
-            for finding in data['findings'][:100]:
-                # Postgres TEXT/VARCHAR cannot store NUL (0x00) bytes; binary
-                # files can produce them when matched by regex. Strip defensively.
-                ctx_raw = finding.get('context') or ''
-                match_raw = finding.get('match') or ''
-                ctx_clean = ctx_raw.replace('\x00', '')[:200]
-                match_clean = match_raw.replace('\x00', '')
-
-                new_finding = Finding(
-                    scan_result_id=scan_result.id,
-                    file_path=finding['file'],
-                    line_number=finding['line'],
-                    context=ctx_clean,
-                    match_text=match_clean
-                )
-                db.add(new_finding)
-        
-        # NEW: Save category scores
-        category_scores = scan_data.get('category_scores', {})
-        for cat_type, cat_data in category_scores.items():
-            category_score = CategoryScore(
-                repo_id=repo_id,
-                category_type=cat_type,
-                score=cat_data['score'],
-                grade=cat_data['grade'],
-                algorithm_count=cat_data['algorithm_count'],
-                best_algorithm=cat_data.get('best_algorithm'),
-                worst_algorithm=cat_data.get('worst_algorithm')
-            )
-            db.add(category_score)
-        db.commit()
-
-    def mark_scan_failed(self, db: Session, repo_id: int, error_message: str = None):
-        """Mark a scan as failed"""
-        # If a prior insert raised, the session is in a rollback-required state.
-        # Roll back first so subsequent queries don't hit PendingRollbackError.
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        repo = db.query(Repository).filter(Repository.id == repo_id).first()
-        if repo:
-            repo.scan_status = 'failed'
-            repo.current_status = f"Failed: {error_message}" if error_message else "Scan failed unexpectedly"
-            db.commit()
-
-    def get_scan_details(self, db: Session, repo_id: int) -> Dict:
-        """Retrieve complete scan details"""
-        repo = db.query(Repository).filter(Repository.id == repo_id).first()
-        if not repo:
-            raise ValueError(f"Scan ID {repo_id} not found.")
-
-        algorithms = {}
-        for sr in repo.scan_results:
-            algorithms[sr.algorithm] = {
-                'category': sr.category,
-                'algorithm_type': sr.algorithm_type,
-                'is_pqc': sr.is_pqc,
-                'occurrences': sr.occurrences,                  # real (non-commented)
-                'commented_occurrences': sr.commented_occurrences or 0,
-                'files_affected': sr.files_affected,
-                'base_score': sr.base_score,
-                'final_score': sr.final_score,
-                'grade': sr.grade,
-                'deprecated': sr.deprecated,
-                'security_level': sr.security_level,
-                'quantum_safe': sr.quantum_safe,
-                'quantum_safety_reason': sr.quantum_safety_reason,
-                'quantum_resistance_type': sr.quantum_resistance_type,
-                'weighted_score': sr.weighted_score,
-            }
-
-        # ... category scores code (keep as is) ...
-        # NEW: Get category scores
-        category_scores = {}
-        for cs in repo.category_scores:
-            category_scores[cs.category_type] = {
-                'score': cs.score,
-                'grade': cs.grade,
-                'algorithm_count': cs.algorithm_count,
-                'best_algorithm': cs.best_algorithm,
-                'worst_algorithm': cs.worst_algorithm
-            }
-
-        # ✅ CORRECTED: Quantum Readiness Calculation
-        # Based on OCCURRENCES of quantum-safe algorithms
-        total_crypto_occurrences = sum(sr.occurrences for sr in repo.scan_results)
-        quantum_safe_occurrences = sum(
-            sr.occurrences for sr in repo.scan_results
-            if sr.quantum_safe == True  # Already correctly calculated
-        )
-        quantum_readiness_percentage = (
-            (quantum_safe_occurrences / total_crypto_occurrences * 100)
-            if total_crypto_occurrences > 0 else 0
-        )
-
-        # ✅ CORRECTED: Count by ACTUAL quantum safety
-        quantum_safe_count = sum(1 for sr in repo.scan_results if sr.quantum_safe == True)
-        quantum_vulnerable_count = sum(1 for sr in repo.scan_results if sr.quantum_safe == False)
-        true_pqc_count = sum(1 for sr in repo.scan_results if sr.is_pqc == True)
-
-
-        return {
-            'repo_id': repo.id,
-            'repo_url': repo.repo_url,
-            'repo_hash': repo.repo_hash,
-            'branch_name': repo.branch_name,
-            'platform': repo.platform,
-            'last_scanned': repo.last_scanned,
-            'scan_status': repo.scan_status,
-            'total_files': repo.total_files,
-            'total_algorithms': len(repo.scan_results),
-            # ✅ CORRECTED: Use new field names
-            'quantum_safe_count': quantum_safe_count,  # Actually quantum-safe
-            'quantum_vulnerable_count': quantum_vulnerable_count,  # Actually vulnerable
-            'true_pqc_count': true_pqc_count,
-            'current_status': repo.current_status,
-            'overall_security_score': repo.overall_security_score,
-            'overall_grade': repo.overall_grade,
-            # ✓✓✓ THIS IS THE KEY FIX
-            'quantum_readiness_percentage': round(quantum_readiness_percentage, 2),
-            'total_files_to_scan': repo.total_files_to_scan,
-            'algorithms': algorithms,
-            'category_scores': category_scores,
-            'migration_plan': repo.migration_plan,
-            'quantum_readiness_detail': repo.quantum_readiness_detail,
-            'critical_vulnerabilities': repo.critical_vulnerabilities,
-        }
-
-    def get_all_scans(self, db: Session, limit: int = 100, offset: int = 0) -> List[Dict]:
-        """Get list of scans with pagination to avoid large payloads"""
-        limit = max(1, min(limit, 500))  # safety bounds
-        offset = max(0, offset)
-        from sqlalchemy import func as _sqlfunc
-        scans = (
-            db.query(Repository)
-            .order_by(_sqlfunc.coalesce(Repository.last_scanned, Repository.created_at).desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
-        result = []
-        for scan in scans:
-            # Calculate quantum readiness percentage for each scan
-            total_crypto_occurrences = sum(sr.occurrences for sr in scan.scan_results)
-            quantum_safe_occurrences = sum(
-                sr.occurrences for sr in scan.scan_results
-                if sr.quantum_safe == True
-            )
-            quantum_readiness_percentage = (
-                (quantum_safe_occurrences / total_crypto_occurrences * 100)
-                if total_crypto_occurrences > 0 else 0
-            )
-            
-            result.append({
-                'id': scan.id,
-                'repo_url': scan.repo_url,
-                'repo_hash': scan.repo_hash,
-                'branch_name': scan.branch_name,
-                'platform': scan.platform,
-                'last_scanned': scan.last_scanned,
-                'scan_status': scan.scan_status,
-                'total_files': scan.total_files,
-                'quantum_safe_count': scan.quantum_safe_count,
-                'quantum_vulnerable_count': scan.quantum_vulnerable_count,
-                'current_status': scan.current_status,
-                'total_files_to_scan': scan.total_files_to_scan,
-                'overall_security_score': scan.overall_security_score,
-                'overall_grade': scan.overall_grade,
-                'quantum_readiness_percentage': round(quantum_readiness_percentage, 2),
-                'error_detail': scan.current_status if scan.scan_status == 'failed' else None,
-            })
-        return result
-
-    def delete_all_scans(self, db: Session) -> Dict[str, int]:
-        """Delete all scans and associated data"""
-        deleted_findings = db.query(Finding).delete()
-        deleted_results = db.query(ScanResult).delete()
-        deleted_category_scores = db.query(CategoryScore).delete()
-        deleted_repos = db.query(Repository).delete()
-        db.commit()
-        return {
-            "findings": deleted_findings,
-            "scan_results": deleted_results,
-            "category_scores": deleted_category_scores,
-            "repositories": deleted_repos,
-        }
-
 
 class CryptoScanner:
     """Enhanced crypto scanner with hash calculation and file listing"""
@@ -1763,143 +1455,203 @@ class CryptoScanner:
 
 
 async def process_scan_job(repo_id: int, repo_url: str, branch_name: str):
-    """Process a single scan job"""
+    """Process a single scan job — saves results to Elasticsearch via elk-indexer."""
+    print(f"[PROCESS_SCAN_JOB] Starting for repo_id={repo_id}, url={repo_url}, branch={branch_name}")
     temp_dir = None
-    
-    with get_db() as db:
+    try:
+        # Mark as in_progress
+        with _active_scan_lock:
+            if repo_id in _active_scans:
+                _active_scans[repo_id]["scan_status"] = "in_progress"
+                _active_scans[repo_id]["current_status"] = "Cloning repository..."
+                _active_scans[repo_id]["last_scanned"] = datetime.utcnow().isoformat()
+
+        # Clone repository
+        temp_dir = tempfile.mkdtemp()
+        subprocess.run(
+            ['git', 'clone', '--depth', '1', '--branch', branch_name, repo_url, temp_dir],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+
+        scanner = CryptoScanner(temp_dir)
+        all_files_to_scan = scanner.get_all_code_files()
+        total_files = len(all_files_to_scan)
+
+        with _active_scan_lock:
+            if repo_id in _active_scans:
+                _active_scans[repo_id]["current_status"] = f"Preparing to scan branch {branch_name}..."
+                _active_scans[repo_id]["total_files_to_scan"] = total_files
+
+        scanned_count = 0
+        for file_path in all_files_to_scan:
+            file_results = scanner.scan_file(file_path)
+            for algo, occurrences in file_results.items():
+                scanner.findings[algo].extend(occurrences)
+            scanned_count += 1
+            if scanned_count % 10 == 0 or scanned_count == total_files:
+                with _active_scan_lock:
+                    if repo_id in _active_scans:
+                        _active_scans[repo_id]["current_status"] = f"Scanning files... ({scanned_count}/{total_files})"
+                        _active_scans[repo_id]["total_files"] = scanned_count
+            scanner.file_count = scanned_count
+
+        results = scanner.get_results()
+
         try:
-            # Mark as processing
-            db_manager.mark_scan_processing(db, repo_id)
-            
-            # Clone repository
-            temp_dir = tempfile.mkdtemp()
-            subprocess.run(
-                ['git', 'clone', '--depth', '1', '--branch', branch_name, repo_url, temp_dir],
-                check=True,
-                capture_output=True,
-                timeout=300 # 5 minute timeout for cloning
-            )
-            
-            # Initialize scanner
-            scanner = CryptoScanner(temp_dir)
-            
-            # Get all files
-            all_files_to_scan = scanner.get_all_code_files()
-            total_files = len(all_files_to_scan)
-            db_manager.update_scan_progress(db, repo_id, 0, total_files, f'Preparing to scan branch {branch_name}...')
-
-            # Perform scan
-            scanned_count = 0
-            for file_path in all_files_to_scan:
-                file_results = scanner.scan_file(file_path)
-                for algo, occurrences in file_results.items():
-                    scanner.findings[algo].extend(occurrences)
-                
-                scanned_count += 1
-                if scanned_count % 10 == 0 or scanned_count == total_files:
-                    db_manager.update_scan_progress(
-                        db,
-                        repo_id, 
-                        scanned_count, 
-                        total_files, 
-                        f'Scanning files... ({scanned_count}/{total_files})'
-                    )
-                scanner.file_count = scanned_count
-                
-            # Get results and score them using local independent scoring engine
-            results = scanner.get_results()
-            
+            print("[APP] Creating RepoScoringEngine...")
             scoring_engine = RepoScoringEngine()
+            print("[APP] RepoScoringEngine created successfully")
             scoring_response = scoring_engine.score_algorithms(results['algorithms'])
-
-            # Merge scored data back — local engine returns algorithm_scores as a dict
-            scored_results = {}
-            for algo_name, algo_score in scoring_response.get("algorithm_scores", {}).items():
-                if algo_name in results['algorithms']:
-                    original_data = results['algorithms'][algo_name]
-                    scored_results[algo_name] = {**original_data, **algo_score}
-
-            results['algorithms'] = scored_results
-            results['overall_score'] = scoring_response.get('overall_score')
-            results['overall_grade'] = scoring_response.get('overall_grade')
-            results['category_scores'] = scoring_response.get('category_scores')
-            results['migration_plan'] = scoring_response.get('migration_plan')
-            results['quantum_readiness_detail'] = scoring_response.get('quantum_readiness_detail')
-            results['critical_vulnerabilities'] = scoring_response.get('critical_vulnerabilities')
-            results['total_files'] = scanned_count
-            # Calculate correct counts AFTER scoring
-            results['quantum_safe_count'] = scoring_response.get('quantum_safe_count', 0)
-            results['quantum_vulnerable_count'] = scoring_response.get('quantum_vulnerable_count', 0)
-            
-            db_manager.save_scan_results(db, repo_id, results)
-            
-            logger.info(f"✓ Scan completed for repo ID {repo_id}: {repo_url}")
-            
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode() if e.stderr else str(e)
-            if 'did not match any remote' in error_msg or 'not found' in error_msg.lower():
-                error_msg = f"Branch '{branch_name}' not found in repository"
-            else:
-                error_msg = f"Failed to clone repository: {error_msg}"
-            logger.error(f"✗ Scan failed for ID {repo_id}: {error_msg}")
-            db_manager.mark_scan_failed(db, repo_id, error_msg)
-        except subprocess.TimeoutExpired:
-            error_msg = "Repository clone timed out (exceeded 5 minutes)"
-            logger.error(f"✗ Scan failed for ID {repo_id}: {error_msg}")
-            db_manager.mark_scan_failed(db, repo_id, error_msg)
         except Exception as e:
-            logger.error(f"✗ Scan failed for ID {repo_id}: {e}", exc_info=True)
-            db_manager.mark_scan_failed(db, repo_id, str(e))
-        finally:
-            if temp_dir:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            print(f"[APP] ERROR creating/using RepoScoringEngine: {e}")
+            import traceback
+            traceback.print_exc()
+            scoring_response = {"algorithm_scores": {}}
+
+        scored_results = {}
+        for algo_name, algo_score in scoring_response.get("algorithm_scores", {}).items():
+            if algo_name in results['algorithms']:
+                original_data = results['algorithms'][algo_name]
+                scored_results[algo_name] = {**original_data, **algo_score}
+
+        results['algorithms'] = scored_results
+        results['overall_score'] = scoring_response.get('overall_score')
+        results['overall_grade'] = scoring_response.get('overall_grade')
+        results['category_scores'] = scoring_response.get('category_scores')
+        results['migration_plan'] = scoring_response.get('migration_plan')
+        results['quantum_readiness_detail'] = scoring_response.get('quantum_readiness_detail')
+        results['critical_vulnerabilities'] = scoring_response.get('critical_vulnerabilities')
+        results['total_files'] = scanned_count
+        results['quantum_safe_count'] = scoring_response.get('quantum_safe_count', 0)
+        results['quantum_vulnerable_count'] = scoring_response.get('quantum_vulnerable_count', 0)
+
+        # Get platform from active_scans record
+        platform = "GitHub"
+        with _active_scan_lock:
+            if repo_id in _active_scans:
+                platform = _active_scans[repo_id].get("platform", "GitHub")
+
+        repo_hash = scanner.get_repo_hash()
+
+        # Compute quantum readiness percentage
+        algorithms = results['algorithms']
+        total_occ = sum(a.get('occurrences', 0) for a in algorithms.values())
+        safe_occ = sum(a.get('occurrences', 0) for a in algorithms.values() if a.get('quantum_safe', False))
+        qr_pct = round((safe_occ / total_occ * 100) if total_occ > 0 else 0, 2)
+        true_pqc_count = sum(1 for a in algorithms.values() if a.get('is_pqc', False))
+
+        scan_data = {
+            "id": repo_id,
+            "repo_url": repo_url,
+            "repo_hash": repo_hash,
+            "branch_name": branch_name,
+            "platform": platform,
+            "scan_status": "completed",
+            "current_status": "Scan completed successfully",
+            "total_files": scanned_count,
+            "total_files_to_scan": total_files,
+            "total_algorithms": len(algorithms),
+            "quantum_safe_count": results.get('quantum_safe_count', 0),
+            "quantum_vulnerable_count": results.get('quantum_vulnerable_count', 0),
+            "true_pqc_count": true_pqc_count,
+            "overall_security_score": results.get('overall_score'),
+            "overall_grade": results.get('overall_grade'),
+            "quantum_readiness_percentage": qr_pct,
+            "last_scanned": datetime.utcnow().isoformat(),
+            "algorithms": algorithms,
+            "category_scores": results.get('category_scores'),
+            "migration_plan": results.get('migration_plan'),
+            "quantum_readiness_detail": results.get('quantum_readiness_detail'),
+            "critical_vulnerabilities": results.get('critical_vulnerabilities'),
+        }
+
+        # Persist to Elasticsearch
+        _post_completed_to_elk(repo_id, repo_url, branch_name, scan_data)
+
+        # Remove from active_scans — it's now in ES
+        with _active_scan_lock:
+            _active_scans.pop(repo_id, None)
+
+        logger.info(f"✓ Scan completed and indexed to ES: {repo_url} (ID: {repo_id})")
+
+    except subprocess.CalledProcessError as e:
+        error_msg = e.stderr.decode(errors='replace') if e.stderr else str(e)
+        if 'did not match any remote' in error_msg or 'not found' in error_msg.lower():
+            error_msg = f"Branch '{branch_name}' not found in repository"
+        else:
+            error_msg = f"Failed to clone repository: {error_msg[:300]}"
+        logger.error(f"✗ Scan failed (ID {repo_id}): {error_msg}")
+        with _active_scan_lock:
+            if repo_id in _active_scans:
+                _active_scans[repo_id]["scan_status"] = "failed"
+                _active_scans[repo_id]["current_status"] = error_msg
+                _active_scans[repo_id]["error_detail"] = error_msg
+
+    except subprocess.TimeoutExpired:
+        error_msg = "Repository clone timed out (exceeded 5 minutes)"
+        logger.error(f"✗ Scan timed out (ID {repo_id})")
+        with _active_scan_lock:
+            if repo_id in _active_scans:
+                _active_scans[repo_id]["scan_status"] = "failed"
+                _active_scans[repo_id]["current_status"] = error_msg
+                _active_scans[repo_id]["error_detail"] = error_msg
+
+    except Exception as e:
+        logger.error(f"✗ Scan error (ID {repo_id}): {e}", exc_info=True)
+        with _active_scan_lock:
+            if repo_id in _active_scans:
+                _active_scans[repo_id]["scan_status"] = "failed"
+                _active_scans[repo_id]["current_status"] = f"Failed: {str(e)[:200]}"
+                _active_scans[repo_id]["error_detail"] = str(e)
+
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # ===========================================
 # 🚀 MULTI-SCAN QUEUE WORKER IMPLEMENTATION
 # ===========================================
 
-MAX_CONCURRENT_SCANS = 3   # You can tune this safely
-active_scans = set()
-lock = threading.Lock()
+MAX_CONCURRENT_SCANS = 3
+_processing_ids: set = set()
+_processing_lock = threading.Lock()
 
 
 def process_scan_wrapper(repo_id: int, repo_url: str, branch_name: str):
-    """Wrapper to ensure cleanup of active_scans set even on error."""
+    """Wrapper to ensure cleanup of _processing_ids set even on error."""
     try:
         asyncio.run(process_scan_job(repo_id, repo_url, branch_name))
     finally:
-        with lock:
-            active_scans.discard(repo_id)
-        logger.info(f"✅ Completed and released repo ID {repo_id}")
+        with _processing_lock:
+            _processing_ids.discard(repo_id)
+        logger.info(f"✅ Completed and released scan ID {repo_id}")
 
 
 def job_queue_worker():
-    """Multi-threaded queue worker for concurrent scans."""
+    """Multi-threaded queue worker — polls in-memory active_scans for pending jobs."""
     logger.info(f"🔄 Job queue worker started (max {MAX_CONCURRENT_SCANS} concurrent scans)")
 
     while True:
         try:
-            with get_db() as db:
-                pending_scans = db_manager.get_pending_scans(db)
+            with _active_scan_lock:
+                pending = [(sid, s) for sid, s in _active_scans.items() if s["scan_status"] == "pending"]
 
-            if not pending_scans:
-                time.sleep(3)
-                continue
-
-            for scan in pending_scans:
-                with lock:
-                    if scan['id'] in active_scans:
+            for scan_id, scan in pending:
+                with _processing_lock:
+                    if scan_id in _processing_ids:
                         continue
-                    if len(active_scans) >= MAX_CONCURRENT_SCANS:
-                        break  # Respect concurrency limit
-                    active_scans.add(scan['id'])
+                    if len(_processing_ids) >= MAX_CONCURRENT_SCANS:
+                        break
+                    _processing_ids.add(scan_id)
 
-                logger.info(f"⚙️  Starting scan: {scan['repo_url']} (Branch: {scan['branch_name']}, Platform: {scan['platform']}, ID: {scan['id']})")
+                logger.info(f"⚙️  Starting scan: {scan['repo_url']} (Branch: {scan['branch_name']}, ID: {scan_id})")
 
                 thread = threading.Thread(
                     target=process_scan_wrapper,
-                    args=(scan['id'], scan['repo_url'], scan['branch_name']),
+                    args=(scan_id, scan['repo_url'], scan['branch_name']),
                     daemon=True
                 )
                 thread.start()
@@ -2188,7 +1940,6 @@ class GitHubBranchFetcher:
         except requests.exceptions.RequestException as e:
             return {"error": f"Bitbucket API error: {e}"}
 
-db_manager = Database()
 url_parser = RepoUrlParser()
 
 # Start job queue worker in background thread
@@ -2272,312 +2023,388 @@ async def fetch_branches_endpoint(scan_request: ScanRequest):
         message=f'Found {result["total_count"]} branches in {platform} repository'
     )
 
+def _process_pending_scans_worker():
+    """Background worker: processes pending scans (clone → hash → cache check → queue)."""
+    import time as time_module
+    while True:
+        try:
+            time_module.sleep(0.5)  # Poll every 500ms
+            
+            with _active_scan_lock:
+                pending_ids = [sid for sid, s in _active_scans.items() if s.get('scan_status') == 'cloning']
+            
+            for pending_id in pending_ids:
+                with _active_scan_lock:
+                    if pending_id not in _active_scans or _active_scans[pending_id].get('scan_status') != 'cloning':
+                        continue
+                    rec = _active_scans[pending_id]
+                
+                normalized_url = rec['repo_url']
+                branch_name = rec['branch_name']
+                temp_dir = None
+                
+                try:
+                    # Clone to get hash
+                    temp_dir = tempfile.mkdtemp()
+                    subprocess.run(
+                        ['git', 'clone', '--depth', '1', '--branch', branch_name, normalized_url, temp_dir],
+                        check=True, capture_output=True, timeout=60,
+                    )
+                    temp_scanner = CryptoScanner(temp_dir)
+                    repo_hash = temp_scanner.get_repo_hash()
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    temp_dir = None
+                    
+                    # Update record with hash
+                    with _active_scan_lock:
+                        if pending_id in _active_scans:
+                            _active_scans[pending_id]['repo_hash'] = repo_hash
+                    
+                    # Check ES cache
+                    cached = _check_es_cache(normalized_url, branch_name, repo_hash)
+                    if cached:
+                        # Cache hit: move to 'cached' and return cached data
+                        with _active_scan_lock:
+                            if pending_id in _active_scans:
+                                try:
+                                    source_id = int(cached.get("source_id", 0))
+                                except (TypeError, ValueError):
+                                    source_id = 0
+                                details = _es_to_detail(cached, source_id)
+                                _active_scans[pending_id]['scan_status'] = 'completed'
+                                _active_scans[pending_id]['current_status'] = 'Scan completed (from cache)'
+                                # Merge cached data into record
+                                _active_scans[pending_id].update(details)
+                        continue
+                    
+                    # Check for active duplicate by hash
+                    with _active_scan_lock:
+                        dup_found = False
+                        for sid, s in _active_scans.items():
+                            if sid != pending_id and s['repo_url'] == normalized_url and s['branch_name'] == branch_name and s.get('repo_hash') == repo_hash:
+                                dup_found = True
+                                break
+                        
+                        if not dup_found and pending_id in _active_scans:
+                            # Move to 'pending' queue for job worker to pick up
+                            _active_scans[pending_id]['scan_status'] = 'pending'
+                            _active_scans[pending_id]['current_status'] = 'Queued for scanning'
+                
+                except subprocess.CalledProcessError as e:
+                    if temp_dir:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                    raw = e.stderr.decode(errors='replace') if e.stderr else ''
+                    if 'did not match any remote' in raw or ('not found' in raw.lower() and 'branch' in raw.lower()):
+                        error_msg = f"Branch '{branch_name}' not found in repository"
+                    elif 'repository' in raw.lower() and ('not found' in raw.lower() or '404' in raw):
+                        error_msg = f"Repository not found"
+                    elif 'could not read username' in raw.lower() or 'authentication failed' in raw.lower():
+                        error_msg = f"Repository not found or is private"
+                    else:
+                        error_msg = raw.strip()[:200] if raw.strip() else "Clone failed"
+                    
+                    with _active_scan_lock:
+                        if pending_id in _active_scans:
+                            _active_scans[pending_id]['scan_status'] = 'failed'
+                            _active_scans[pending_id]['current_status'] = error_msg
+                            _active_scans[pending_id]['error_detail'] = error_msg
+                
+                except Exception as ex:
+                    logger.error(f"Pending scan worker error (ID {pending_id}): {ex}")
+                    with _active_scan_lock:
+                        if pending_id in _active_scans:
+                            _active_scans[pending_id]['scan_status'] = 'failed'
+                            _active_scans[pending_id]['current_status'] = str(ex)[:200]
+        
+        except Exception as ex:
+            logger.error(f"Pending scans worker crashed: {ex}", exc_info=True)
+
+
+# Start pending scans worker thread (after function definition)
+pending_worker_thread = threading.Thread(target=_process_pending_scans_worker, daemon=True)
+pending_worker_thread.start()
+
+
 @app.post('/api/scan', status_code=status.HTTP_200_OK)
 async def scan_repository_endpoint(scan_request: ScanRequest):
-    """Queue a scan request (checks cache first)"""
+    """Queue a scan request — return IMMEDIATELY, cloning happens async in background."""
     repo_url = scan_request.repo_url
-    branch_name = scan_request.branch_name or 'main'  # Default to 'main'
-    branch_name = branch_name.strip()
+    branch_name = (scan_request.branch_name or 'main').strip()
 
     if not repo_url:
         raise APIError(status_code=400, error_code="repo_url_required", message='repo_url is required')
 
-    # Validate URL
     is_valid, validation_msg = url_parser.validate_url(repo_url)
     if not is_valid:
         raise APIError(status_code=400, error_code="invalid_repo_url", message=validation_msg)
 
-    # Normalize URL and detect platform
     normalized_url = url_parser.normalize_url(repo_url)
     platform = url_parser.detect_platform(normalized_url)
 
-    temp_dir = None
+    # Create scan record in 'cloning' state — worker will do the actual clone
+    scan_id = _new_scan_id()
+    now = datetime.utcnow()
+    scan_record = {
+        "id": scan_id,
+        "repo_url": normalized_url,
+        "repo_hash": "",  # Will be populated by worker
+        "branch_name": branch_name,
+        "platform": platform,
+        "scan_status": "cloning",  # Special state: clone/hash in progress
+        "current_status": "Determining repository state...",
+        "total_files": 0,
+        "total_files_to_scan": 0,
+        "quantum_safe_count": 0,
+        "quantum_vulnerable_count": 0,
+        "overall_security_score": None,
+        "overall_grade": None,
+        "quantum_readiness_percentage": 0.0,
+        "last_scanned": None,
+        "created_at": now.isoformat(),
+        "error_detail": None,
+    }
+    with _active_scan_lock:
+        _active_scans[scan_id] = scan_record
 
-    with get_db() as db:
-        try:
-            # Quick clone to get hash for cache checking
-            temp_dir = tempfile.mkdtemp()
-            subprocess.run(
-                ['git', 'clone', '--depth', '1', '--branch', branch_name, normalized_url, temp_dir],
-                check=True,
-                capture_output=True,
-                timeout=60
-            )
-
-            temp_scanner = CryptoScanner(temp_dir)
-            repo_hash = temp_scanner.get_repo_hash()
-
-            # Check cache with branch
-            cached = db_manager.get_cached_scan(db, normalized_url, repo_hash, branch_name)
-            if cached:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                details = db_manager.get_scan_details(db, cached['id'])
-                details['cached'] = True
-                details['message'] = 'Using cached scan results'
-                details['platform'] = platform
-                return details
-
-            # Not cached - create pending job
-            repo_id = db_manager.create_scan_record(db, normalized_url, repo_hash, branch_name, platform)
-
-            # Clean up temp clone
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
-            repo = db.query(Repository).filter(Repository.id == repo_id).first()
-            return ScanQueueResponse(
-                repo_id=repo.id,
-                repo_url=repo.repo_url,
-                repo_hash=repo.repo_hash,
-                branch_name=repo.branch_name,
-                platform=repo.platform,
-                scan_status=repo.scan_status,
-                current_status=repo.current_status,
-                message=f'Scan request queued successfully for {platform} branch "{branch_name}". Worker will process it shortly.',
-                created_at=repo.created_at
-            )
-
-        except subprocess.CalledProcessError as e:
-            if temp_dir:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            raw = e.stderr.decode(errors='replace') if e.stderr else ''
-            if 'did not match any remote' in raw or ('not found' in raw.lower() and 'branch' in raw.lower()):
-                error_msg = f"Branch '{branch_name}' not found in repository"
-            elif 'repository' in raw.lower() and ('not found' in raw.lower() or '404' in raw):
-                error_msg = f"Repository not found: {repo_url}"
-            elif 'could not read username' in raw.lower() or 'authentication failed' in raw.lower() or 'no such device' in raw.lower():
-                error_msg = f"Repository not found or is private: {normalized_url}"
-            elif 'fatal:' in raw.lower():
-                # Extract just the fatal message line
-                fatal_line = next((l.strip() for l in raw.splitlines() if l.strip().lower().startswith('fatal:')), None)
-                error_msg = fatal_line if fatal_line else f"Clone failed: {raw.strip()[:200]}"
-            elif raw.strip():
-                error_msg = f"Clone failed: {raw.strip()[:200]}"
-            else:
-                error_msg = f"Failed to clone repository from {platform}"
-            with get_db() as _db:
-                repo_id = db_manager.create_failed_scan_record(_db, normalized_url, branch_name, platform, error_msg)
-                failed_repo = _db.query(Repository).filter(Repository.id == repo_id).first()
-                return AllScansResponse(
-                    id=failed_repo.id,
-                    repo_url=failed_repo.repo_url,
-                    repo_hash=failed_repo.repo_hash,
-                    branch_name=failed_repo.branch_name,
-                    platform=failed_repo.platform,
-                    last_scanned=failed_repo.last_scanned,
-                    scan_status='failed',
-                    total_files=0,
-                    quantum_safe_count=0,
-                    quantum_vulnerable_count=0,
-                    current_status=error_msg,
-                    total_files_to_scan=0,
-                    error_detail=error_msg,
-                )
-        except subprocess.TimeoutExpired:
-            if temp_dir:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            error_msg = 'Repository clone timed out — repository may be too large or unreachable'
-            with get_db() as _db:
-                repo_id = db_manager.create_failed_scan_record(_db, normalized_url, branch_name, platform, error_msg)
-                failed_repo = _db.query(Repository).filter(Repository.id == repo_id).first()
-                return AllScansResponse(
-                    id=failed_repo.id,
-                    repo_url=failed_repo.repo_url,
-                    repo_hash=failed_repo.repo_hash,
-                    branch_name=failed_repo.branch_name,
-                    platform=failed_repo.platform,
-                    last_scanned=failed_repo.last_scanned,
-                    scan_status='failed',
-                    total_files=0,
-                    quantum_safe_count=0,
-                    quantum_vulnerable_count=0,
-                    current_status=error_msg,
-                    total_files_to_scan=0,
-                    error_detail=error_msg,
-                )
-        except Exception as e:
-            if temp_dir:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            raise APIError(status_code=500, error_code="internal_server_error", message=str(e))
+    # Return IMMEDIATELY — let background worker do clone/cache check
+    return ScanQueueResponse(
+        repo_id=scan_id,
+        repo_url=normalized_url,
+        repo_hash="",
+        branch_name=branch_name,
+        platform=platform,
+        scan_status='cloning',
+        current_status='Determining repository state...',
+        message=f'Scan request accepted. Analyzing repository...',
+        created_at=now,
+    )
 
 
 @app.get('/api/scans', response_model=List[AllScansResponse])
 async def get_scans(limit: int = 100, offset: int = 0):
-    """Get list of scans (paginated)"""
-    with get_db() as db:
-        scans = db_manager.get_all_scans(db, limit=limit, offset=offset)
-        return scans
+    """Get list of scans — merges active (in-memory) + completed (Elasticsearch)."""
+    # Fetch completed scans from ES
+    es_results = _get_completed_scans_from_es(size=min(limit + 200, 1000))
+    completed = [_es_to_list_item(r) for r in es_results]
+    completed_ids = {item['id'] for item in completed}
+
+    # Fetch active scans (pending / in_progress / failed) from memory
+    with _active_scan_lock:
+        active = list(_active_scans.values())
+
+    # Filter out active scans whose completed version is already in ES
+    active_filtered = [s for s in active if s['id'] not in completed_ids]
+
+    # Merge and sort by most-recent activity
+    all_scans = active_filtered + completed
+
+    def _sort_key(s):
+        return str(s.get('last_scanned') or s.get('created_at') or '')
+
+    all_scans.sort(key=_sort_key, reverse=True)
+    return all_scans[offset: offset + limit]
 
 
 @app.get('/api/scans/{scan_id}', response_model=ScanDetailsResponse)
 async def get_scan_details_endpoint(scan_id: int):
-    """Get detailed scan results"""
-    with get_db() as db:
-        try:
-            details = db_manager.get_scan_details(db, scan_id)
-            return details
-        except ValueError as e:
-            raise APIError(status_code=404, error_code="scan_not_found", message=str(e))
-        except Exception as e:
-            raise APIError(status_code=500, error_code="internal_server_error", message=f'Internal server error: {str(e)}')
+    """Get detailed scan results — checks memory first, then Elasticsearch."""
+    # Check active scans
+    with _active_scan_lock:
+        active = _active_scans.get(scan_id)
+
+    if active:
+        last_scanned_dt = None
+        if active.get("last_scanned"):
+            try:
+                last_scanned_dt = datetime.fromisoformat(active["last_scanned"])
+            except ValueError:
+                pass
+        return {
+            "repo_id": active["id"],
+            "repo_url": active["repo_url"],
+            "repo_hash": active.get("repo_hash", ""),
+            "branch_name": active["branch_name"],
+            "platform": active.get("platform", ""),
+            "last_scanned": last_scanned_dt or datetime.utcnow(),
+            "scan_status": active["scan_status"],
+            "total_files": active.get("total_files", 0),
+            "total_algorithms": 0,
+            "quantum_safe_count": active.get("quantum_safe_count", 0),
+            "quantum_vulnerable_count": active.get("quantum_vulnerable_count", 0),
+            "true_pqc_count": 0,
+            "current_status": active.get("current_status", ""),
+            "total_files_to_scan": active.get("total_files_to_scan", 0),
+            "overall_security_score": None,
+            "overall_grade": None,
+            "quantum_readiness_percentage": 0.0,
+            "algorithms": {},
+            "category_scores": None,
+            "migration_plan": None,
+            "quantum_readiness_detail": None,
+            "critical_vulnerabilities": None,
+        }
+
+    # Check Elasticsearch
+    es_result = _get_es_scan_by_source_id(scan_id)
+    if es_result:
+        return _es_to_detail(es_result, scan_id)
+
+    raise APIError(status_code=404, error_code="scan_not_found", message=f"Scan ID {scan_id} not found")
 
 
 @app.get('/api/scans/{scan_id}/algorithm/{algorithm}/findings', response_model=AlgorithmFindingsResponse)
 async def get_algorithm_findings(
-    scan_id: int, 
+    scan_id: int,
     algorithm: str,
     limit_files: int = 20,
     limit_per_file: int = 10,
     offset_files: int = 0,
-    sort_by: str = "file_path",  # NEW: file_path, occurrences, directory
-    filter_directory: Optional[str] = None  # NEW: Filter by directory
+    sort_by: str = "file_path",
+    filter_directory: Optional[str] = None
 ):
-    """Get detailed, grouped, and paginated findings for a specific algorithm in a scan."""
-    with get_db() as db:
-        try:
-            scan_result = db.query(ScanResult).filter(
-                ScanResult.repo_id == scan_id,
-                ScanResult.algorithm == algorithm
-            ).first()
+    """Get detailed, grouped, and paginated findings for a specific algorithm — reads from Elasticsearch."""
+    try:
+        es_result = _get_es_scan_by_source_id(scan_id)
+        if not es_result:
+            raise APIError(status_code=404, error_code="scan_not_found", message=f"Scan ID {scan_id} not found")
 
-            if not scan_result:
-                raise APIError(status_code=404, error_code="algorithm_not_found", message='Algorithm not found in this scan')
+        raw = es_result.get("raw") or {}
+        algorithms = raw.get("algorithms") or {}
+        algo_data = algorithms.get(algorithm)
+        if not algo_data:
+            raise APIError(status_code=404, error_code="algorithm_not_found", message='Algorithm not found in this scan')
 
-            findings_query = db.query(Finding).filter(
-                Finding.scan_result_id == scan_result.id
-            ).order_by(Finding.file_path, Finding.line_number)
-            
-            all_findings = findings_query.all()
-            
-            grouped = defaultdict(list)
-            for finding in all_findings:
-                grouped[finding.file_path].append(finding)
+        findings_list = algo_data.get("findings", [])
+        occurrences = algo_data.get("occurrences", len(findings_list))
 
-            all_findings_grouped = grouped.copy()
-            
-            directory_summary = defaultdict(int)
-            for file_path, findings_list in grouped.items():
-                directory = os.path.dirname(file_path) or "root"
-                directory_summary[directory] += len(findings_list)
-            
-            # NEW: Filter by directory if specified
-            if filter_directory:
-                grouped = {k: v for k, v in grouped.items() if os.path.dirname(k) == filter_directory}
-            
-            # NEW: Sort files
-            if sort_by == "occurrences":
-                sorted_files = sorted(grouped.keys(), key=lambda f: len(grouped[f]), reverse=True)
-            elif sort_by == "directory":
-                sorted_files = sorted(grouped.keys(), key=lambda f: (os.path.dirname(f), os.path.basename(f)))
-            else:
-                sorted_files = sorted(grouped.keys())
+        # Group by file path
+        grouped: Dict[str, list] = defaultdict(list)
+        for finding in findings_list:
+            fp = finding.get('file', '') or finding.get('file_path', '')
+            grouped[fp].append(finding)
 
-            files = []
-            paginated_files = sorted_files[offset_files : offset_files + limit_files]
+        all_grouped = dict(grouped)
 
-            for file_path in paginated_files:
-                findings_list = grouped[file_path]
-                paginated_findings = findings_list[:limit_per_file]
-                
-                files.append({
-                    "file_path": file_path,
-                    "occurrence_count": len(findings_list),
-                    "directory": os.path.dirname(file_path) or "root",
-                    "findings": [
-                        {
-                            "line_number": f.line_number,
-                            "code_snippet": f.context,
-                            "match_text": f.match_text
-                        } for f in paginated_findings
-                    ],
-                    "has_more": len(findings_list) > limit_per_file,
-                    "showing": len(paginated_findings)
-                })
-            
-            return {
-                "algorithm": algorithm,
-                "total_occurrences": scan_result.occurrences,
-                "total_files": len(grouped),
-                "total_files_all": len(all_findings_grouped),  # NEW: Before filtering
-                "files": files,
-                "directory_summary": dict(directory_summary),
-                "has_more": (offset_files + limit_files) < len(sorted_files),  # NEW
-                "current_page": offset_files // limit_files + 1  # NEW
-            }
-        except Exception as e:
-            logger.error(f"Failed to get algorithm findings: {e}", exc_info=True)
-            raise APIError(status_code=500, error_code="internal_server_error", message=f'Internal server error: {str(e)}')
+        directory_summary: Dict[str, int] = defaultdict(int)
+        for fp, flist in grouped.items():
+            directory = os.path.dirname(fp) or "root"
+            directory_summary[directory] += len(flist)
+
+        if filter_directory:
+            grouped = {k: v for k, v in grouped.items() if os.path.dirname(k) == filter_directory}
+
+        if sort_by == "occurrences":
+            sorted_files = sorted(grouped.keys(), key=lambda f: len(grouped[f]), reverse=True)
+        elif sort_by == "directory":
+            sorted_files = sorted(grouped.keys(), key=lambda f: (os.path.dirname(f), os.path.basename(f)))
+        else:
+            sorted_files = sorted(grouped.keys())
+
+        paginated_files = sorted_files[offset_files: offset_files + limit_files]
+        files = []
+        for fp in paginated_files:
+            flist = grouped[fp]
+            paginated = flist[:limit_per_file]
+            files.append({
+                "file_path": fp,
+                "occurrence_count": len(flist),
+                "directory": os.path.dirname(fp) or "root",
+                "findings": [
+                    {
+                        "line_number": f.get('line', 0),
+                        "code_snippet": (f.get('context') or '')[:200],
+                        "match_text": f.get('match', '') or f.get('match_text', ''),
+                    }
+                    for f in paginated
+                ],
+                "has_more": len(flist) > limit_per_file,
+                "showing": len(paginated),
+            })
+
+        return {
+            "algorithm": algorithm,
+            "total_occurrences": occurrences,
+            "total_files": len(grouped),
+            "total_files_all": len(all_grouped),
+            "files": files,
+            "directory_summary": dict(directory_summary),
+            "has_more": (offset_files + limit_files) < len(sorted_files),
+            "current_page": offset_files // limit_files + 1,
+        }
+    except APIError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get algorithm findings: {e}", exc_info=True)
+        raise APIError(status_code=500, error_code="internal_server_error", message=f'Internal server error: {str(e)}')
 
 
 @app.get('/api/queue/status', response_model=QueueStatusResponse)
 async def get_queue_status():
-    """Get current queue status"""
-    with get_db() as db:
-        try:
-            pending = db_manager.get_pending_scans(db)
-            in_progress_count = db.query(Repository).filter(Repository.scan_status == 'in_progress').count()
-            completed_count = db.query(Repository).filter(Repository.scan_status == 'completed').count()
-            failed_count = db.query(Repository).filter(Repository.scan_status == 'failed').count()
-            
-            return {
-                'pending_count': len(pending),
-                'in_progress_count': in_progress_count,
-                'completed_count': completed_count,
-                'failed_count': failed_count,
-                'pending_jobs': pending[:5] # Return first 5 pending jobs
-            }
-        except Exception as e:
-            raise APIError(status_code=500, error_code="internal_server_error", message=str(e))
+    """Get current queue status from in-memory active scans + ES completed count."""
+    with _active_scan_lock:
+        active = list(_active_scans.values())
+
+    pending = [s for s in active if s['scan_status'] == 'pending']
+    in_progress = [s for s in active if s['scan_status'] == 'in_progress']
+    failed_active = [s for s in active if s['scan_status'] == 'failed']
+
+    try:
+        resp = requests.get(f"{ELK_QUERY_API_URL}/api/elk/results/all?type=repo&size=1", timeout=5)
+        completed_count = resp.json().get("total", 0) if resp.ok else 0
+    except Exception:
+        completed_count = 0
+
+    return {
+        'pending_count': len(pending),
+        'in_progress_count': len(in_progress),
+        'completed_count': completed_count,
+        'failed_count': len(failed_active),
+        'pending_jobs': [
+            {'id': s['id'], 'repo_url': s['repo_url'], 'branch_name': s['branch_name']}
+            for s in pending[:5]
+        ],
+    }
 
 
 @app.delete('/api/scans/{scan_id}', status_code=status.HTTP_200_OK)
 async def delete_scan_endpoint(scan_id: int):
-    """Delete a scan and all its associated results from the database"""
-    with get_db() as db:
-        try:
-            repo = db.query(Repository).filter(Repository.id == scan_id).first()
-            if not repo:
-                raise APIError(status_code=404, error_code="scan_not_found", message=f"Scan ID {scan_id} not found")
-            
-            repo_url = repo.repo_url
-            
-            # Delete all associated results
-            db.query(Finding).filter(Finding.scan_result_id.in_(
-                db.query(ScanResult.id).filter(ScanResult.repo_id == scan_id)
-            )).delete()
-            db.query(ScanResult).filter(ScanResult.repo_id == scan_id).delete()
-            db.query(CategoryScore).filter(CategoryScore.repo_id == scan_id).delete()
-            
-            # Delete the repository record
-            db.delete(repo)
-            db.commit()
-            
-            logger.info(f"✓ Scan {scan_id} ({repo_url}) deleted successfully with all results")
-            
-            return {
-                "message": "Scan and all associated results deleted successfully",
-                "scan_id": scan_id,
-                "repo_url": repo_url
-            }
-        except APIError:
-            raise
-        except Exception as e:
-            db.rollback()
-            logger.error(f"✗ Error deleting scan {scan_id}: {e}", exc_info=True)
-            raise APIError(status_code=500, error_code="delete_failed", message=f"Failed to delete scan: {str(e)}")
+    """Delete a scan from memory and/or Elasticsearch."""
+    repo_url = None
+
+    # Remove from active scans if present
+    with _active_scan_lock:
+        active = _active_scans.pop(scan_id, None)
+    if active:
+        repo_url = active.get('repo_url')
+
+    # Delete from Elasticsearch (may not exist if still pending/failed)
+    deleted_from_es = _delete_from_elk(scan_id)
+
+    if active is None and not deleted_from_es:
+        raise APIError(status_code=404, error_code="scan_not_found", message=f"Scan ID {scan_id} not found")
+
+    logger.info(f"✓ Scan {scan_id} deleted (active={active is not None}, es={deleted_from_es})")
+    return {
+        "message": "Scan deleted successfully",
+        "scan_id": scan_id,
+        "repo_url": repo_url or f"scan_{scan_id}",
+    }
 
 
 @app.delete('/api/scans', status_code=status.HTTP_200_OK)
 async def delete_all_scans_endpoint():
-    """Delete all scans and associated data"""
-    with get_db() as db:
-        try:
-            result = db_manager.delete_all_scans(db)
-            logger.info(f"Deleted all scans: {result}")
-            return {"message": "All scans deleted successfully", "deleted": result}
-        except Exception as e:
-            db.rollback()
-            logger.error(f"✗ Error deleting all scans: {e}", exc_info=True)
-            raise APIError(status_code=500, error_code="delete_failed", message=f"Failed to delete all scans: {str(e)}")
+    """Delete all scans from memory and Elasticsearch."""
+    with _active_scan_lock:
+        count_active = len(_active_scans)
+        _active_scans.clear()
+
+    es_deleted = _delete_all_from_elk()
+    logger.info(f"Deleted all scans: {count_active} active + {es_deleted} from ES")
+    return {
+        "message": "All scans deleted successfully",
+        "active_cleared": count_active,
+        "es_deleted": es_deleted,
+    }
 
 
 @app.get("/health")
@@ -2588,8 +2415,8 @@ def health():
 
 if __name__ == '__main__':
     uvicorn.run(
-        "app:app", 
-        host='0.0.0.0', 
+        "app:app",
+        host='0.0.0.0',
         port=8001,
         log_level='info',
         reload=True

@@ -122,9 +122,13 @@ const fmtRepo = (url: string): string => {
 const InlineTLSHistory: React.FC<{ onView: (domain?: string) => void; refreshKey: number }> = ({ onView, refreshKey }) => {
   const [scans, setScans] = useState<TLSScanRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const itemsPerPage = 5;
 
-  const loadScans = () => {
-    fetch(`${ELK_QUERY_API}/api/elk/results?type=domain&size=8`)
+  const loadScans = (page: number = 1) => {
+    const offset = (page - 1) * itemsPerPage;
+    fetch(`${ELK_QUERY_API}/api/elk/results?type=domain&size=${itemsPerPage}&offset=${offset}`)
       .then(r => r.ok ? r.json() : { results: [] })
       .then(d => {
         const arr: any[] = Array.isArray(d) ? d : (d?.results ?? []);
@@ -135,7 +139,7 @@ const InlineTLSHistory: React.FC<{ onView: (domain?: string) => void; refreshKey
           if (l === 'in_progress') return 'in_progress';
           return 'pending';
         };
-        setScans(arr.slice(0, 8).map((r: any) => ({
+        setScans(arr.slice(0, itemsPerPage).map((r: any) => ({
           request_id: r.request_id || r.scan_id || String(r.id),
           url: r.url || r.asset_label,
           primary_domain: r.url || r.asset_label,
@@ -144,6 +148,12 @@ const InlineTLSHistory: React.FC<{ onView: (domain?: string) => void; refreshKey
           quantum_score: r.pqc_overall_score ?? r.raw?.pqc_analysis?.overall_score,
           quantum_grade: r.pqc_overall_grade ?? r.raw?.pqc_analysis?.overall_grade,
         })));
+        // Estimate total count
+        if (arr.length < itemsPerPage) {
+          setTotalCount((page - 1) * itemsPerPage + arr.length);
+        } else {
+          setTotalCount(page * itemsPerPage + 1);
+        }
       })
       .catch(() => setScans([]))
       .finally(() => setLoading(false));
@@ -151,16 +161,37 @@ const InlineTLSHistory: React.FC<{ onView: (domain?: string) => void; refreshKey
 
   useEffect(() => {
     setLoading(true);
-    loadScans();
+    setCurrentPage(1);
+    loadScans(1);
   }, [refreshKey]);
 
   // Auto-poll every 5s while any scan is in-progress
   useEffect(() => {
     const hasInProgress = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending');
     if (!hasInProgress) return;
-    const interval = setInterval(loadScans, 5000);
+    const interval = setInterval(() => loadScans(currentPage), 5000);
     return () => clearInterval(interval);
-  }, [scans]);
+  }, [scans, currentPage]);
+
+  const totalPages = Math.ceil(totalCount / itemsPerPage) || 1;
+  const canPrevious = currentPage > 1;
+  const canNext = currentPage < totalPages;
+
+  const handlePreviousPage = () => {
+    if (canPrevious) {
+      setLoading(true);
+      setCurrentPage(currentPage - 1);
+      loadScans(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (canNext) {
+      setLoading(true);
+      setCurrentPage(currentPage + 1);
+      loadScans(currentPage + 1);
+    }
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
@@ -172,23 +203,52 @@ const InlineTLSHistory: React.FC<{ onView: (domain?: string) => void; refreshKey
   );
 
   return (
-    <div className="space-y-1.5">
-      {scans.map(s => (
-        <div key={s.request_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:bg-muted/30 hover:border-border/70 transition-colors">
-          <StatusDot status={s.scan_status} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{s.url || s.primary_domain || "Unknown"}</p>
-            <p className="text-xs text-muted-foreground">{fmtTime(s.requested_at)} · {sLabel(s.scan_status)}</p>
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        {scans.map(s => (
+          <div key={s.request_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:bg-muted/30 hover:border-border/70 transition-colors">
+            <StatusDot status={s.scan_status} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{s.url || s.primary_domain || "Unknown"}</p>
+              <p className="text-xs text-muted-foreground">{fmtTime(s.requested_at)} · {sLabel(s.scan_status)}</p>
+            </div>
+            {s.quantum_grade && <span className={`text-sm font-bold tabular-nums shrink-0 ${gradeColor(s.quantum_grade)}`}>{s.quantum_grade}</span>}
+            {s.quantum_score != null && <span className="text-xs text-muted-foreground tabular-nums shrink-0 hidden sm:inline">{s.quantum_score.toFixed(0)}/100</span>}
+            {s.scan_status === "completed" && (
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 shrink-0" onClick={() => onView(s.url || s.primary_domain)}>
+                <Eye className="h-3 w-3" /> View
+              </Button>
+            )}
           </div>
-          {s.quantum_grade && <span className={`text-sm font-bold tabular-nums shrink-0 ${gradeColor(s.quantum_grade)}`}>{s.quantum_grade}</span>}
-          {s.quantum_score != null && <span className="text-xs text-muted-foreground tabular-nums shrink-0 hidden sm:inline">{s.quantum_score.toFixed(0)}/100</span>}
-          {s.scan_status === "completed" && (
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 shrink-0" onClick={() => onView(s.url || s.primary_domain)}>
-              <Eye className="h-3 w-3" /> View
-            </Button>
-          )}
+        ))}
+      </div>
+      
+      {/* Pagination Controls */}
+      <div className="flex items-center justify-between pt-2 border-t border-border/40">
+        <span className="text-xs text-muted-foreground">
+          Page {currentPage} of {totalPages}
+        </span>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={!canPrevious}
+            onClick={handlePreviousPage}
+          >
+            ← Prev
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={!canNext}
+            onClick={handleNextPage}
+          >
+            Next →
+          </Button>
         </div>
-      ))}
+      </div>
     </div>
   );
 };
@@ -200,27 +260,68 @@ const InlineTLSHistory: React.FC<{ onView: (domain?: string) => void; refreshKey
 const InlineRepoHistory: React.FC<{ onView: (repo?: string) => void; refreshKey: number }> = ({ onView, refreshKey }) => {
   const [scans, setScans] = useState<RepoScanRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const itemsPerPage = 5;
 
-  const loadRepoScans = () => {
-    fetch(`${REPO_SCAN_API}/api/scans?limit=8`)
+  const loadRepoScans = (page: number = 1) => {
+    const offset = (page - 1) * itemsPerPage;
+    fetch(`${REPO_SCAN_API}/api/scans?limit=${itemsPerPage}&offset=${offset}`)
       .then(r => r.ok ? r.json() : [])
-      .then(d => setScans(Array.isArray(d) ? d.slice(0, 8) : (d?.scans ?? []).slice(0, 8)))
+      .then(d => {
+        const data = Array.isArray(d) ? d : (d?.value ?? d?.scans ?? []);
+        setScans(data.slice(0, itemsPerPage));
+        // Estimate total count (for pagination): if we got fewer items than requested, we're on last page
+        if (data.length < itemsPerPage) {
+          setTotalCount((page - 1) * itemsPerPage + data.length);
+        } else {
+          // Fetch one extra to check if there's a next page
+          fetch(`${REPO_SCAN_API}/api/scans?limit=${itemsPerPage + 1}&offset=${offset}`)
+            .then(r => r.ok ? r.json() : [])
+            .then(d => {
+              const allData = Array.isArray(d) ? d : (d?.value ?? d?.scans ?? []);
+              setTotalCount(allData.length > itemsPerPage ? (page * itemsPerPage + 1) : ((page - 1) * itemsPerPage + itemsPerPage));
+            })
+            .catch(() => setTotalCount((page - 1) * itemsPerPage + itemsPerPage));
+        }
+      })
       .catch(() => setScans([]))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
     setLoading(true);
-    loadRepoScans();
+    setCurrentPage(1);
+    loadRepoScans(1);
   }, [refreshKey]);
 
   // Auto-poll every 5s while any scan is in-progress
   useEffect(() => {
-    const hasInProgress = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending');
+    const hasInProgress = scans.some(s => s.scan_status === 'in_progress' || s.scan_status === 'pending' || s.scan_status === 'cloning');
     if (!hasInProgress) return;
-    const interval = setInterval(loadRepoScans, 5000);
+    const interval = setInterval(() => loadRepoScans(currentPage), 5000);
     return () => clearInterval(interval);
-  }, [scans]);
+  }, [scans, currentPage]);
+
+  const totalPages = Math.ceil(totalCount / itemsPerPage) || 1;
+  const canPrevious = currentPage > 1;
+  const canNext = currentPage < totalPages;
+
+  const handlePreviousPage = () => {
+    if (canPrevious) {
+      setLoading(true);
+      setCurrentPage(currentPage - 1);
+      loadRepoScans(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (canNext) {
+      setLoading(true);
+      setCurrentPage(currentPage + 1);
+      loadRepoScans(currentPage + 1);
+    }
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
@@ -232,23 +333,52 @@ const InlineRepoHistory: React.FC<{ onView: (repo?: string) => void; refreshKey:
   );
 
   return (
-    <div className="space-y-1.5">
-      {scans.map(s => (
-        <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:bg-muted/30 hover:border-border/70 transition-colors">
-          <StatusDot status={s.scan_status} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{fmtRepo(s.repo_url)}</p>
-            <p className="text-xs text-muted-foreground">{s.branch_name || "main"} · {fmtTime(s.created_at)} · {sLabel(s.scan_status)}</p>
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        {scans.map(s => (
+          <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:bg-muted/30 hover:border-border/70 transition-colors">
+            <StatusDot status={s.scan_status} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{fmtRepo(s.repo_url)}</p>
+              <p className="text-xs text-muted-foreground">{s.branch_name || "main"} · {fmtTime(s.created_at)} · {sLabel(s.scan_status)}</p>
+            </div>
+            {s.overall_grade && <span className={`text-sm font-bold tabular-nums shrink-0 ${gradeColor(s.overall_grade)}`}>{s.overall_grade}</span>}
+            {s.quantum_readiness_percentage != null && <span className="text-xs text-muted-foreground tabular-nums shrink-0 hidden sm:inline">PQC {Math.round(s.quantum_readiness_percentage)}%</span>}
+            {(s.scan_status === "completed" || s.scan_status === "cached") && (
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 shrink-0" onClick={() => onView(s.repo_url)}>
+                <Eye className="h-3 w-3" /> View
+              </Button>
+            )}
           </div>
-          {s.overall_grade && <span className={`text-sm font-bold tabular-nums shrink-0 ${gradeColor(s.overall_grade)}`}>{s.overall_grade}</span>}
-          {s.quantum_readiness_percentage != null && <span className="text-xs text-muted-foreground tabular-nums shrink-0 hidden sm:inline">PQC {Math.round(s.quantum_readiness_percentage)}%</span>}
-          {(s.scan_status === "completed" || s.scan_status === "cached") && (
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 shrink-0" onClick={() => onView(s.repo_url)}>
-              <Eye className="h-3 w-3" /> View
-            </Button>
-          )}
+        ))}
+      </div>
+      
+      {/* Pagination Controls */}
+      <div className="flex items-center justify-between pt-2 border-t border-border/40">
+        <span className="text-xs text-muted-foreground">
+          Page {currentPage} of {totalPages}
+        </span>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={!canPrevious}
+            onClick={handlePreviousPage}
+          >
+            ← Prev
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={!canNext}
+            onClick={handleNextPage}
+          >
+            Next →
+          </Button>
         </div>
-      ))}
+      </div>
     </div>
   );
 };
@@ -263,20 +393,49 @@ const InlineAgentHistory: React.FC<{ onView: () => void; refreshKey: number }> =
   const [agents,   setAgents]   = useState<AgentRow[]>([]);
   const [tasks,    setTasks]    = useState<AgentTaskRow[]>([]);
   const [loading,  setLoading]  = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalAgents, setTotalAgents] = useState(0);
+  const itemsPerPage = 5;
 
-  useEffect(() => {
+  const loadAgents = (page: number = 1) => {
     setLoading(true);
+    const offset = (page - 1) * itemsPerPage;
     Promise.all([
       fetch(`${SYSTEM_SCAN_API}/api/v1/admin/agents`).then(r => r.ok ? r.json() : { agents: [] }),
       fetch(`${SYSTEM_SCAN_API}/api/v1/admin/tasks`).then(r => r.ok ? r.json() : { tasks: [] }),
     ])
       .then(([agentsData, tasksData]) => {
-        setAgents((agentsData?.agents ?? []).slice(0, 8));
+        const allAgents = agentsData?.agents ?? [];
+        setTotalAgents(allAgents.length);
+        setAgents(allAgents.slice(offset, offset + itemsPerPage));
         setTasks(tasksData?.tasks ?? []);
       })
       .catch(() => { setAgents([]); setTasks([]); })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+    loadAgents(1);
   }, [refreshKey]);
+
+  const totalPages = Math.ceil(totalAgents / itemsPerPage) || 1;
+  const canPrevious = currentPage > 1;
+  const canNext = currentPage < totalPages;
+
+  const handlePreviousPage = () => {
+    if (canPrevious) {
+      setCurrentPage(currentPage - 1);
+      loadAgents(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (canNext) {
+      setCurrentPage(currentPage + 1);
+      loadAgents(currentPage + 1);
+    }
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
@@ -288,34 +447,63 @@ const InlineAgentHistory: React.FC<{ onView: () => void; refreshKey: number }> =
   );
 
   return (
-    <div className="space-y-1.5">
-      {agents.map(a => {
-        const agentTasks  = tasks.filter(t => t.agent_id === a.agent_id);
-        const pending     = agentTasks.filter(t => t.status === "pending" || t.status === "in_progress").length;
-        const completed   = agentTasks.filter(t => t.status === "completed").length;
-        const isActive    = a.status === "active";
-        return (
-          <div key={a.agent_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:bg-muted/30 hover:border-border/70 transition-colors">
-            <span className={cn("h-2 w-2 rounded-full shrink-0", isActive ? "bg-emerald-500" : "bg-muted-foreground/40")} />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{a.hostname || a.ip_address}</p>
-              <p className="text-xs text-muted-foreground">
-                {a.ip_address}{a.last_seen ? ` · seen ${fmtTime(a.last_seen)}` : ""}
-                {pending > 0 ? ` · ${pending} pending` : ""}
-                {completed > 0 ? ` · ${completed} done` : ""}
-              </p>
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        {agents.map(a => {
+          const agentTasks  = tasks.filter(t => t.agent_id === a.agent_id);
+          const pending     = agentTasks.filter(t => t.status === "pending" || t.status === "in_progress").length;
+          const completed   = agentTasks.filter(t => t.status === "completed").length;
+          const isActive    = a.status === "active";
+          return (
+            <div key={a.agent_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:bg-muted/30 hover:border-border/70 transition-colors">
+              <span className={cn("h-2 w-2 rounded-full shrink-0", isActive ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{a.hostname || a.ip_address}</p>
+                <p className="text-xs text-muted-foreground">
+                  {a.ip_address}{a.last_seen ? ` · seen ${fmtTime(a.last_seen)}` : ""}
+                  {pending > 0 ? ` · ${pending} pending` : ""}
+                  {completed > 0 ? ` · ${completed} done` : ""}
+                </p>
+              </div>
+              <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium shrink-0", isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>
+                {isActive ? "Active" : "Inactive"}
+              </span>
+              {completed > 0 && (
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 shrink-0" onClick={onView}>
+                  <Eye className="h-3 w-3" /> View
+                </Button>
+              )}
             </div>
-            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium shrink-0", isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>
-              {isActive ? "Active" : "Inactive"}
-            </span>
-            {completed > 0 && (
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 shrink-0" onClick={onView}>
-                <Eye className="h-3 w-3" /> View
-              </Button>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      
+      {/* Pagination Controls */}
+      <div className="flex items-center justify-between pt-2 border-t border-border/40">
+        <span className="text-xs text-muted-foreground">
+          Page {currentPage} of {totalPages}
+        </span>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={!canPrevious}
+            onClick={handlePreviousPage}
+          >
+            ← Prev
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={!canNext}
+            onClick={handleNextPage}
+          >
+            Next →
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };

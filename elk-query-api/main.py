@@ -246,12 +246,14 @@ def dashboard():
 def latest_results(
     type: str = Query("all", description="domain | repo | asset | all"),
     size: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ):
     index = TYPE_TO_INDEX.get(type)
     if not index:
         raise HTTPException(status_code=400, detail=f"Invalid type: {type}")
 
     body = {
+        "from": offset,
         "size": size,
         "sort": [{"scanned_at": {"order": "desc"}}],
         "collapse": {"field": "asset_id"},
@@ -273,6 +275,7 @@ def latest_results(
 def all_results(
     type: str = Query("all"),
     size: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     asset_id: Optional[str] = None,
 ):
     index = TYPE_TO_INDEX.get(type)
@@ -280,6 +283,7 @@ def all_results(
         raise HTTPException(status_code=400, detail=f"Invalid type: {type}")
 
     body: Dict[str, Any] = {
+        "from": offset,
         "size": size,
         "sort": [{"scanned_at": {"order": "desc"}}],
     }

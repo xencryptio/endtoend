@@ -548,6 +548,40 @@ def index_repo(payload: RepoScanIngest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/index/repo/{source_id}")
+def delete_repo_scan(source_id: str):
+    """Delete a repo scan from Elasticsearch by source_id."""
+    try:
+        result = es.delete_by_query(
+            index=INDEX_REPO,
+            body={"query": {"term": {"source_id": source_id}}},
+            refresh=True,
+        )
+        deleted = result.get("deleted", 0)
+        logger.info(f"Deleted repo scan with source_id={source_id}: {deleted} docs removed")
+        return {"success": True, "deleted": deleted, "source_id": source_id}
+    except Exception as e:
+        logger.exception(f"Failed to delete repo scan source_id={source_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/index/repo")
+def delete_all_repo_scans():
+    """Delete all repo scan documents from Elasticsearch."""
+    try:
+        result = es.delete_by_query(
+            index=INDEX_REPO,
+            body={"query": {"match_all": {}}},
+            refresh=True,
+        )
+        deleted = result.get("deleted", 0)
+        logger.info(f"Deleted all repo scans: {deleted} docs removed")
+        return {"success": True, "deleted": deleted}
+    except Exception as e:
+        logger.exception("Failed to delete all repo scans")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/index/asset")
 def index_asset(payload: AssetScanIngest):
     """Index a system/asset scan result with FULL parity to Postgres.
