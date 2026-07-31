@@ -24,6 +24,7 @@ import {
   Layers,
   Cpu,
   Lock,
+  KeyRound,
 } from "lucide-react";
 import {
   BarChart,
@@ -82,6 +83,23 @@ const fmt = (b: { key: string | number | boolean }): string =>
   b.key === true || b.key === "true" ? "Enabled"
   : b.key === false || b.key === "false" ? "Disabled"
   : String(b.key);
+
+// ES boolean terms aggregations return keys as 0/1 (or "true"/"false"), so match
+// all forms when tallying enabled vs disabled counts.
+const isTrueKey = (k: string | number | boolean): boolean =>
+  k === true || k === 1 || k === "1" || k === "true";
+
+const boolCounts = (
+  buckets: Array<{ key: string | number | boolean; count: number }>,
+): { enabled: number; disabled: number; total: number } => {
+  let enabled = 0;
+  let disabled = 0;
+  for (const b of buckets ?? []) {
+    if (isTrueKey(b.key)) enabled += b.count;
+    else disabled += b.count;
+  }
+  return { enabled, disabled, total: enabled + disabled };
+};
 
 // ---------------------------------------------------------------------------
 // Reusable UI components
@@ -596,44 +614,71 @@ const PqcAnalystDashboard: React.FC = () => {
         {activeTab === "domains" && (
           <motion.div key="domains" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }} className="space-y-4">
+            {/* KPI row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {(() => {
+                const pfs = boolCounts(domains.ephemeral_key_exchange);
+                const pfsEnabled = pfs.enabled;
+                const pfsTotal = pfs.total;
+                const pfsRate = pfsTotal > 0 ? Math.round((pfsEnabled / pfsTotal) * 100) : 0;
+                const pqcOcc = domains.pqc_by_occurrence.reduce((s, b) => s + b.count, 0);
+                return [
+                  { label: "Domains scanned", value: domains.scanned.toLocaleString(),
+                    icon: <Globe className="h-4 w-4 text-blue-600" />, bg: "bg-blue-50 dark:bg-blue-950/40" },
+                  { label: "Avg PQC score", value: domains.avg_score.toFixed(1),
+                    hint: "Across all domains",
+                    icon: <BarChart3 className="h-4 w-4 text-violet-600" />, bg: "bg-violet-50 dark:bg-violet-950/40" },
+                  { label: "PQC KEX adoption", value: `${domains.avg_kex_pqc.toFixed(0)}%`,
+                    hint: "Hybrid key exchange (e.g. X25519MLKEM768)",
+                    icon: <Sparkles className="h-4 w-4 text-emerald-600" />, bg: "bg-emerald-50 dark:bg-emerald-950/40" },
+                  { label: "Forward secrecy", value: `${pfsRate}%`,
+                    hint: `${pfsEnabled}/${pfsTotal} domains · ${pqcOcc} PQC algo uses`,
+                    icon: <ShieldCheck className="h-4 w-4 text-teal-600" />, bg: "bg-teal-50 dark:bg-teal-950/40" },
+                ].map((k, i) => (
+                  <Kpi key={i} label={k.label} value={k.value} hint={(k as any).hint} icon={k.icon} iconBg={k.bg} />
+                ));
+              })()}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <Card title="Primary cipher suites" icon={<Lock className="h-4 w-4" />}>
-                <SimpleBar data={domains.cipher_suites} color={CATEGORY_COLORS[0]} />
+              <Card title="Primary cipher suites" subtitle="Negotiated per domain" icon={<Lock className="h-4 w-4" />}>
+                {domains.cipher_suites.length === 0 ? <Empty /> : <SimpleBar data={domains.cipher_suites} color={CATEGORY_COLORS[0]} horizontal />}
               </Card>
-              <Card title="TLS versions in use" icon={<Shield className="h-4 w-4" />}>
-                <SimpleBar data={domains.tls_versions} color={CATEGORY_COLORS[1]} />
+              <Card title="TLS versions offered" subtitle="Best protocol per domain" icon={<Shield className="h-4 w-4" />}>
+                {domains.tls_versions.length === 0 ? <Empty /> : <SimpleBar data={domains.tls_versions} color={CATEGORY_COLORS[1]} />}
               </Card>
-              <Card title="Public key algorithms" icon={<Cpu className="h-4 w-4" />}>
-                <SimplePie data={domains.public_key_algorithms} />
+              <Card title="Public key algorithms" subtitle="Leaf certificate keys" icon={<Cpu className="h-4 w-4" />}>
+                {domains.public_key_algorithms.length === 0 ? <Empty /> : <SimplePie data={domains.public_key_algorithms} />}
               </Card>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <Card title="Top certificate issuers" icon={<Award className="h-4 w-4" />}>
-                <SimpleBar data={domains.issuers} color={CATEGORY_COLORS[5]} />
+                {domains.issuers.length === 0 ? <Empty /> : <SimpleBar data={domains.issuers} color={CATEGORY_COLORS[5]} horizontal />}
               </Card>
 
               <Card title="Domain hygiene signals" subtitle="TLS best-practice adoption rates">
                 <div className="space-y-3 pt-1">
                   {[
-                    { label: "HSTS",                        data: domains.hsts },
-                    { label: "OCSP stapling",               data: domains.ocsp_stapling },
-                    { label: "Certificate Transparency",    data: domains.ct_present },
-                    { label: "Forward secrecy (eph. KEX)",  data: domains.ephemeral_key_exchange },
-                  ].map(({ label, data: d }) => {
-                    const enabled = d.find((b) => b.key === true || b.key === "true")?.count ?? 0;
-                    const disabled = d.find((b) => b.key === false || b.key === "false")?.count ?? 0;
-                    const total = enabled + disabled;
+                    { label: "HSTS",                        data: domains.hsts,                    measured: true },
+                    { label: "Certificate Transparency",    data: domains.ct_present,              measured: true },
+                    { label: "Forward secrecy (eph. KEX)",  data: domains.ephemeral_key_exchange,  measured: true },
+                    { label: "OCSP stapling",               data: domains.ocsp_stapling,           measured: false },
+                  ].map(({ label, data: d, measured }) => {
+                    const { enabled, total } = boolCounts(d);
                     const pct = total > 0 ? Math.round((enabled / total) * 100) : 0;
+                    const noData = !measured || total === 0;
                     return (
                       <div key={label} className="space-y-1">
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-medium">{label}</span>
-                          <span className="text-muted-foreground">{enabled}/{total} ({pct}%)</span>
+                          <span className="text-muted-foreground">
+                            {noData ? (measured ? "No data" : "Not measured") : `${enabled}/${total} (${pct}%)`}
+                          </span>
                         </div>
                         <ScoreBar
-                          value={pct}
-                          color={pct >= 80 ? "#10B981" : pct >= 50 ? "#F59E0B" : "#EF4444"}
+                          value={noData ? 0 : pct}
+                          color={noData ? "#475569" : pct >= 80 ? "#10B981" : pct >= 50 ? "#F59E0B" : "#EF4444"}
                         />
                       </div>
                     );
@@ -641,8 +686,53 @@ const PqcAnalystDashboard: React.FC = () => {
                 </div>
               </Card>
 
-              <Card title="Forward secrecy distribution" icon={<ShieldCheck className="h-4 w-4" />}>
-                <SimplePie data={domains.ephemeral_key_exchange} statusPalette />
+              <Card title="Certificate key sizes" subtitle="Public key strength (bits)" icon={<KeyRound className="h-4 w-4" />}>
+                {domains.key_sizes.length === 0 ? <Empty /> : (
+                  <SimpleBar
+                    data={domains.key_sizes.map((b) => ({ key: `${b.key}-bit`, count: b.count }))}
+                    color={CATEGORY_COLORS[2]}
+                  />
+                )}
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card title="Top algorithms in use" subtitle="Ranked by occurrences across TLS + certificates" icon={<BarChart3 className="h-4 w-4" />}>
+                {domains.top_algorithms_by_occurrence.length === 0 ? <Empty /> : (
+                  <SimpleBar data={domains.top_algorithms_by_occurrence} color={CATEGORY_COLORS[0]} horizontal />
+                )}
+              </Card>
+
+              <Card title="Quantum-vulnerable algorithms" subtitle="Not quantum-safe, by occurrences" icon={<AlertTriangle className="h-4 w-4" />}>
+                {domains.vulnerable_by_occurrence.length === 0 ? (
+                  <Empty msg="No quantum-vulnerable algorithms detected. 🎉" />
+                ) : (
+                  <SimpleBar data={domains.vulnerable_by_occurrence} color={CATEGORY_COLORS[3]} horizontal />
+                )}
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <Card title="Crypto category composition" subtitle="Occurrences by KEX · signature · symmetric · hash" icon={<Layers className="h-4 w-4" />}>
+                {domains.category_composition.length === 0 ? <Empty /> : (
+                  <SimpleBar data={domains.category_composition} color={CATEGORY_COLORS[5]} horizontal />
+                )}
+              </Card>
+
+              <Card title="PQC-ready algorithms" subtitle="Post-quantum / hybrid, by occurrences" icon={<Sparkles className="h-4 w-4" />}>
+                {domains.pqc_by_occurrence.length === 0 ? (
+                  <Empty msg="No PQC algorithms detected yet." />
+                ) : (
+                  <SimpleBar data={domains.pqc_by_occurrence} color="#10B981" horizontal />
+                )}
+              </Card>
+
+              <Card title="Deprecated / legacy protocols" subtitle="Should be disabled (TLS 1.0/1.1, SSL)" icon={<XCircle className="h-4 w-4" />}>
+                {domains.deprecated_protocols.length === 0 ? (
+                  <Empty msg="No deprecated protocols offered. 🎉" />
+                ) : (
+                  <SimpleBar data={domains.deprecated_protocols} color="#F97316" />
+                )}
               </Card>
             </div>
           </motion.div>
@@ -652,13 +742,39 @@ const PqcAnalystDashboard: React.FC = () => {
         {activeTab === "repos" && (
           <motion.div key="repos" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }} className="space-y-4">
+            {/* KPI row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {(() => {
+                const totalOcc =
+                  repos.composition.quantum_safe + repos.composition.quantum_vulnerable;
+                const pqcRate = repos.top_algorithms_by_occurrence.length
+                  ? (repos.composition.true_pqc / Math.max(1, repos.composition.quantum_safe)) * 100
+                  : 0;
+                const totalFindings = repos.findings_by_repo.reduce((s, r) => s + r.findings, 0);
+                return [
+                  { label: "Repositories scanned", value: repos.findings_by_repo.length.toLocaleString(),
+                    icon: <GitBranch className="h-4 w-4 text-blue-600" />, bg: "bg-blue-50 dark:bg-blue-950/40" },
+                  { label: "Total findings", value: totalFindings.toLocaleString(),
+                    icon: <BarChart3 className="h-4 w-4 text-violet-600" />, bg: "bg-violet-50 dark:bg-violet-950/40" },
+                  { label: "Deprecated occurrences", value: repos.deprecated_total_occurrences.toLocaleString(),
+                    hint: "MD5 · SHA-1 · DES · RC4 …",
+                    icon: <AlertTriangle className="h-4 w-4 text-red-600" />, bg: "bg-red-50 dark:bg-red-950/40" },
+                  { label: "PQC-safe occurrences", value: repos.composition.true_pqc.toLocaleString(),
+                    hint: `${pqcRate.toFixed(0)}% of quantum-safe`,
+                    icon: <ShieldCheck className="h-4 w-4 text-emerald-600" />, bg: "bg-emerald-50 dark:bg-emerald-950/40" },
+                ].map((k, i) => (
+                  <Kpi key={i} label={k.label} value={k.value} hint={(k as any).hint} icon={k.icon} iconBg={k.bg} />
+                ));
+              })()}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <Card title="Algorithm composition" subtitle="Summed across all repos" icon={<Layers className="h-4 w-4" />}>
+              <Card title="Algorithm composition" subtitle="By code occurrences" icon={<Layers className="h-4 w-4" />}>
                 {(() => {
                   const c = repos.composition;
-                  const total = c.true_pqc + c.quantum_safe + c.quantum_vulnerable;
+                  // quantum_safe already includes PQC; total = safe + vulnerable (no double count)
+                  const total = c.quantum_safe + c.quantum_vulnerable;
                   const rows = [
-                    { name: "True PQC",          value: c.true_pqc,            color: "#6D28D9" },
                     { name: "Quantum safe",       value: c.quantum_safe,        color: "#10B981" },
                     { name: "Quantum vulnerable", value: c.quantum_vulnerable,  color: "#EF4444" },
                   ];
@@ -676,8 +792,16 @@ const PqcAnalystDashboard: React.FC = () => {
                           <ScoreBar value={total > 0 ? (r.value / total) * 100 : 0} color={r.color} />
                         </div>
                       ))}
-                      <p className="text-xs text-muted-foreground pt-1 text-right">
-                        {total.toLocaleString()} total algorithms
+                      <div className="flex items-center justify-between text-xs pt-1 border-t mt-2">
+                        <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-400 font-medium">
+                          <Sparkles className="h-3 w-3" /> True PQC
+                        </span>
+                        <span className="text-muted-foreground">
+                          {c.true_pqc.toLocaleString()} (subset of quantum-safe)
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground text-right">
+                        {total.toLocaleString()} total algorithm instances
                       </p>
                     </div>
                   );
@@ -688,14 +812,28 @@ const PqcAnalystDashboard: React.FC = () => {
                 <SimplePie data={repos.platforms} />
               </Card>
 
-              <Card title="Top vulnerable algorithms" icon={<AlertTriangle className="h-4 w-4" />}>
-                <SimpleBar data={repos.vulnerable_algorithms} color={CATEGORY_COLORS[3]} />
+              <Card title="Category composition" subtitle="Occurrences by crypto category" icon={<Layers className="h-4 w-4" />}>
+                <SimpleBar data={repos.category_composition} color={CATEGORY_COLORS[5]} horizontal />
               </Card>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card title="All algorithm names" subtitle="Most frequently found across repos">
-                <SimpleBar data={repos.algorithm_names} color={CATEGORY_COLORS[4]} />
+              <Card title="Top algorithms by usage" subtitle="Ranked by real code occurrences" icon={<BarChart3 className="h-4 w-4" />}>
+                <SimpleBar data={repos.top_algorithms_by_occurrence} color={CATEGORY_COLORS[0]} horizontal />
+              </Card>
+
+              <Card title="Top vulnerable algorithms" subtitle="Quantum-vulnerable, by occurrences" icon={<AlertTriangle className="h-4 w-4" />}>
+                <SimpleBar data={repos.vulnerable_by_occurrence} color={CATEGORY_COLORS[3]} horizontal />
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card title="Deprecated algorithm usage" subtitle="Immediate migration targets (MD5, SHA-1, DES, RC4…)" icon={<XCircle className="h-4 w-4" />}>
+                {repos.deprecated_usage.length === 0 ? (
+                  <Empty msg="No deprecated algorithms detected. 🎉" />
+                ) : (
+                  <SimpleBar data={repos.deprecated_usage} color="#F97316" horizontal />
+                )}
               </Card>
 
               <Card title="Findings per repository" subtitle="Top 15 by finding count">
@@ -727,17 +865,36 @@ const PqcAnalystDashboard: React.FC = () => {
         {activeTab === "endpoints" && (
           <motion.div key="endpoints" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }} className="space-y-4">
+            {/* KPI row */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {[
-                { label: "Total cert stores",  value: endpoints.total_certificate_stores.toLocaleString(), icon: <Database className="h-4 w-4 text-blue-600" />,    bg: "bg-blue-50 dark:bg-blue-950/40" },
-                { label: "Weak providers",     value: endpoints.total_weak_providers.toLocaleString(),     icon: <AlertTriangle className="h-4 w-4 text-red-600" />, bg: "bg-red-50 dark:bg-red-950/40" },
-                { label: "Weak ciphers",       value: endpoints.total_weak_ciphers.toLocaleString(),       icon: <XCircle className="h-4 w-4 text-orange-600" />,    bg: "bg-orange-50 dark:bg-orange-950/40" },
-                { label: "FIPS-enabled hosts", value: `${endpoints.fips.find((b) => b.key === true || b.key === "true")?.count ?? 0}`, icon: <ShieldCheck className="h-4 w-4 text-emerald-600" />, bg: "bg-emerald-50 dark:bg-emerald-950/40" },
-              ].map((k, i) => (
-                <Kpi key={i} label={k.label} value={k.value} icon={k.icon} iconBg={k.bg} />
-              ))}
+              {(() => {
+                const hosts = endpoints.by_host.length;
+                const fipsOn = endpoints.fips.find((b) => b.key === true || b.key === "true")?.count ?? 0;
+                const totalCph = endpoints.total_strong_ciphers + endpoints.total_weak_ciphers;
+                const strongPct = totalCph ? (endpoints.total_strong_ciphers / totalCph) * 100 : 0;
+                return [
+                  { label: "Endpoints scanned", value: hosts.toLocaleString(),
+                    hint: `avg score ${endpoints.avg_score.toFixed(0)}/100`,
+                    icon: <Server className="h-4 w-4 text-blue-600" />, bg: "bg-blue-50 dark:bg-blue-950/40",
+                    progress: endpoints.avg_score, progressColor: scoreColor(endpoints.avg_score) },
+                  { label: "FIPS-enabled", value: `${fipsOn}/${hosts}`,
+                    hint: "Hosts in FIPS mode",
+                    icon: <ShieldCheck className="h-4 w-4 text-emerald-600" />, bg: "bg-emerald-50 dark:bg-emerald-950/40" },
+                  { label: "Deprecated instances", value: endpoints.deprecated_total_occurrences.toLocaleString(),
+                    hint: "SHA-1 · MD5 · RSA-1024 …",
+                    icon: <AlertTriangle className="h-4 w-4 text-red-600" />, bg: "bg-red-50 dark:bg-red-950/40" },
+                  { label: "Strong cipher ratio", value: `${strongPct.toFixed(0)}%`,
+                    hint: `${endpoints.total_weak_ciphers} weak · ${endpoints.total_strong_ciphers} strong`,
+                    icon: <Lock className="h-4 w-4 text-violet-600" />, bg: "bg-violet-50 dark:bg-violet-950/40",
+                    progress: strongPct, progressColor: "#8B5CF6" },
+                ].map((k, i) => (
+                  <Kpi key={i} label={k.label} value={k.value} hint={(k as any).hint} icon={k.icon} iconBg={k.bg}
+                       progress={(k as any).progress} progressColor={(k as any).progressColor} />
+                ));
+              })()}
             </div>
 
+            {/* Posture pies */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <Card title="Operating systems" icon={<Server className="h-4 w-4" />}>
                 <SimplePie data={endpoints.os} />
@@ -745,52 +902,111 @@ const PqcAnalystDashboard: React.FC = () => {
               <Card title="Architectures" icon={<Cpu className="h-4 w-4" />}>
                 <SimplePie data={endpoints.architectures} />
               </Card>
-              <Card title="FIPS mode distribution">
+              <Card title="FIPS mode" subtitle="Federal crypto compliance">
                 <SimplePie data={endpoints.fips} statusPalette />
               </Card>
             </div>
 
+            {/* Algorithm analytics (occurrence-weighted) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card title="Weak providers by host" subtitle="Hosts with most legacy crypto providers">
-                {endpoints.weak_providers_by_host.length === 0 ? <Empty /> : (
-                  <div className="space-y-2 pt-1">
-                    {endpoints.weak_providers_by_host.map((r, i) => (
-                      <div key={i} className="space-y-0.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-medium truncate max-w-[65%]" title={r.host}>{r.host}</span>
-                          <span className="text-muted-foreground">{r.weak_providers} weak</span>
-                        </div>
-                        <ScoreBar
-                          value={r.weak_providers}
-                          max={endpoints.weak_providers_by_host[0].weak_providers}
-                          color="#EF4444"
-                        />
-                      </div>
-                    ))}
-                  </div>
+              <Card title="Top algorithms in use" subtitle="Across providers, ciphers & certificates" icon={<BarChart3 className="h-4 w-4" />}>
+                <SimpleBar data={endpoints.top_algorithms_by_occurrence} color={CATEGORY_COLORS[0]} horizontal />
+              </Card>
+              <Card title="Category composition" subtitle="Hash · signature · key-exchange …" icon={<Layers className="h-4 w-4" />}>
+                <SimpleBar data={endpoints.category_composition} color={CATEGORY_COLORS[5]} horizontal />
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card title="Quantum-vulnerable algorithms" subtitle="By occurrences on endpoints" icon={<AlertTriangle className="h-4 w-4" />}>
+                <SimpleBar data={endpoints.vulnerable_by_occurrence} color={CATEGORY_COLORS[3]} horizontal />
+              </Card>
+              <Card title="Deprecated / broken algorithms" subtitle="Immediate remediation targets" icon={<XCircle className="h-4 w-4" />}>
+                {endpoints.deprecated_usage.length === 0 ? (
+                  <Empty msg="No deprecated algorithms detected. 🎉" />
+                ) : (
+                  <SimpleBar data={endpoints.deprecated_usage} color="#F97316" horizontal />
                 )}
               </Card>
+            </div>
 
-              <Card title="Weak ciphers by host" subtitle="Hosts with most deprecated cipher suites">
-                {endpoints.weak_ciphers_by_host.length === 0 ? <Empty /> : (
-                  <div className="space-y-2 pt-1">
-                    {endpoints.weak_ciphers_by_host.map((r, i) => (
-                      <div key={i} className="space-y-0.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-medium truncate max-w-[65%]" title={r.host}>{r.host}</span>
-                          <span className="text-muted-foreground">{r.weak_ciphers} ciphers</span>
-                        </div>
-                        <ScoreBar
-                          value={r.weak_ciphers}
-                          max={endpoints.weak_ciphers_by_host[0].weak_ciphers}
-                          color="#F97316"
-                        />
+            {/* Inventory */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <Card title="Crypto providers" subtitle="CryptoAPI / CNG inventory" icon={<Cpu className="h-4 w-4" />}>
+                <SimpleBar data={endpoints.providers} color={CATEGORY_COLORS[4]} horizontal />
+              </Card>
+              <Card title="Cipher hash algorithms" subtitle="Used by TLS cipher suites" icon={<Lock className="h-4 w-4" />}>
+                <SimpleBar data={endpoints.cipher_hash_algorithms} color={CATEGORY_COLORS[1]} horizontal />
+              </Card>
+              <Card title="Installed crypto software" icon={<Database className="h-4 w-4" />}>
+                {endpoints.installed_software.length === 0 ? (
+                  <Empty msg="No crypto software inventoried." />
+                ) : (
+                  <div className="space-y-1.5 pt-1">
+                    {endpoints.installed_software.map((s, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-xs border-b last:border-0 py-1">
+                        <span className="truncate" title={String(s.key)}>{String(s.key)}</span>
+                        <span className="text-muted-foreground shrink-0">{s.count}</span>
                       </div>
                     ))}
                   </div>
                 )}
               </Card>
             </div>
+
+            {/* Per-host posture table */}
+            <Card title="Endpoint posture" subtitle="Per-host PQC score, grade & weak crypto — worst first" icon={<Shield className="h-4 w-4" />}>
+              {endpoints.by_host.length === 0 ? <Empty /> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted-foreground border-b">
+                        <th className="py-2 pr-3 font-medium">Host</th>
+                        <th className="py-2 px-2 font-medium">OS</th>
+                        <th className="py-2 px-2 font-medium text-center">FIPS</th>
+                        <th className="py-2 px-2 font-medium text-center">Grade</th>
+                        <th className="py-2 px-2 font-medium w-40">PQC score</th>
+                        <th className="py-2 px-2 font-medium text-right">Weak ciphers</th>
+                        <th className="py-2 pl-2 font-medium text-right">Vulns</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {endpoints.by_host.map((h, i) => {
+                        const gs = h.grade ? GRADE_STYLES[h.grade] : undefined;
+                        const fipsOn = h.fips === true || h.fips === "true";
+                        return (
+                          <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
+                            <td className="py-2 pr-3 font-medium truncate max-w-[160px]" title={h.host}>{h.host}</td>
+                            <td className="py-2 px-2 text-xs text-muted-foreground truncate max-w-[180px]" title={h.os ?? ""}>{h.os ?? "—"}</td>
+                            <td className="py-2 px-2 text-center">
+                              {fipsOn
+                                ? <CheckCircle2 className="h-4 w-4 text-emerald-600 inline" />
+                                : <XCircle className="h-4 w-4 text-muted-foreground inline" />}
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <span className={`inline-flex items-center justify-center min-w-[28px] px-1.5 py-0.5 rounded text-xs font-bold ${gs?.bg ?? "bg-muted"} ${gs?.text ?? "text-muted-foreground"}`}>
+                                {h.grade ?? "—"}
+                              </span>
+                            </td>
+                            <td className="py-2 px-2"><ScoreBar value={h.avg_score} /></td>
+                            <td className="py-2 px-2 text-right tabular-nums">
+                              {h.weak_ciphers > 0
+                                ? <span className="text-orange-600 font-medium">{h.weak_ciphers}</span>
+                                : <span className="text-muted-foreground">0</span>}
+                            </td>
+                            <td className="py-2 pl-2 text-right tabular-nums">
+                              {h.vulnerabilities > 0
+                                ? <span className="text-red-600 font-medium">{h.vulnerabilities}</span>
+                                : <span className="text-muted-foreground">0</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
           </motion.div>
         )}
       </AnimatePresence>

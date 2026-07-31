@@ -145,9 +145,18 @@ INDEX_MAPPINGS = {
                 # TLS
                 "tls_version": {"type": "keyword"},
                 "supported_protocols": {"type": "keyword"},
+                "deprecated_protocols": {"type": "keyword"},
                 "primary_cipher_suite": {"type": "keyword"},
                 "kex_score": {"type": "float"},
                 "kex_grade": {"type": "keyword"},
+                "kex_best_algorithm": {"type": "keyword"},
+                "kex_pqc_percentage": {"type": "float"},
+                "symmetric_score": {"type": "float"},
+                "symmetric_grade": {"type": "keyword"},
+                "signature_score": {"type": "float"},
+                "signature_grade": {"type": "keyword"},
+                "hash_score": {"type": "float"},
+                "hash_grade": {"type": "keyword"},
                 # Certificate
                 "cert_pqc_score": {"type": "float"},
                 "cert_pqc_grade": {"type": "keyword"},
@@ -168,6 +177,29 @@ INDEX_MAPPINGS = {
                 "ocsp_stapling_active": {"type": "boolean"},
                 "ct_present": {"type": "boolean"},
                 "error_message": {"type": "text"},
+                # Searchable algorithm lists + per-algorithm rollup for
+                # occurrence-weighted / category / deprecated aggregations.
+                "algorithm_names": {"type": "keyword"},
+                "vulnerable_algorithms": {"type": "keyword"},
+                "vulnerabilities_count": {"type": "integer"},
+                "algorithm_stats": {
+                    "type": "nested",
+                    "properties": {
+                        "name": {"type": "keyword"},
+                        "category": {"type": "keyword"},
+                        "algorithm_type": {"type": "keyword"},
+                        "quantum_resistance_type": {"type": "keyword"},
+                        "source_type": {"type": "keyword"},
+                        "security_level": {"type": "keyword"},
+                        "occurrences": {"type": "integer"},
+                        "quantum_safe": {"type": "boolean"},
+                        "is_pqc": {"type": "boolean"},
+                        "is_hybrid": {"type": "boolean"},
+                        "deprecated": {"type": "boolean"},
+                        "grade": {"type": "keyword"},
+                        "avg_score": {"type": "float"},
+                    },
+                },
             }
         }
     },
@@ -199,6 +231,21 @@ INDEX_MAPPINGS = {
                 "vulnerable_algorithms": {"type": "keyword"},
                 "findings_count": {"type": "integer"},
                 "files_with_findings": {"type": "keyword"},
+                # Per-algorithm rollup for occurrence-weighted aggregations
+                "algorithm_stats": {
+                    "type": "nested",
+                    "properties": {
+                        "name": {"type": "keyword"},
+                        "category": {"type": "keyword"},
+                        "quantum_resistance_type": {"type": "keyword"},
+                        "occurrences": {"type": "integer"},
+                        "findings": {"type": "integer"},
+                        "quantum_safe": {"type": "boolean"},
+                        "is_pqc": {"type": "boolean"},
+                        "deprecated": {"type": "boolean"},
+                        "grade": {"type": "keyword"},
+                    },
+                },
             }
         }
     },
@@ -236,9 +283,38 @@ INDEX_MAPPINGS = {
                 "fips_mode_enabled": {"type": "boolean"},
                 "weak_providers_count": {"type": "integer"},
                 "weak_ciphers_count": {"type": "integer"},
+                "strong_ciphers_count": {"type": "integer"},
+                "cipher_suites_total": {"type": "integer"},
                 "tls_protocols_enabled": {"type": "keyword"},
                 "installed_crypto_software": {"type": "keyword"},
+                "installed_crypto_software_count": {"type": "integer"},
                 "certificate_stores_count": {"type": "integer"},
+                # Full crypto inventory captured from the agent audit
+                "crypto_providers": {"type": "keyword"},
+                "crypto_providers_count": {"type": "integer"},
+                "cipher_hash_algorithms": {"type": "keyword"},
+                "cipher_key_exchanges": {"type": "keyword"},
+                "registered_oid_algorithms_count": {"type": "integer"},
+                # Per-algorithm scoring breakdown (from pqc_score.algorithms),
+                # mirrors the repo index so the dashboard can do occurrence-weighted,
+                # category and deprecated aggregations for endpoints too.
+                "algorithm_stats": {
+                    "type": "nested",
+                    "properties": {
+                        "name": {"type": "keyword"},
+                        "category": {"type": "keyword"},
+                        "algorithm_type": {"type": "keyword"},
+                        "quantum_resistance_type": {"type": "keyword"},
+                        "source_type": {"type": "keyword"},
+                        "security_level": {"type": "keyword"},
+                        "occurrences": {"type": "integer"},
+                        "quantum_safe": {"type": "boolean"},
+                        "is_pqc": {"type": "boolean"},
+                        "deprecated": {"type": "boolean"},
+                        "grade": {"type": "keyword"},
+                        "avg_score": {"type": "float"},
+                    },
+                },
             }
         }
     },
@@ -345,6 +421,108 @@ def _extract_audit_vulns(audit_results: Dict[str, Any]) -> int:
     return count
 
 
+def _kv_field(text: Any, key: str) -> Optional[str]:
+    """Extract a value from PowerShell-hashtable-style strings the TLS scanner
+    emits, e.g. "@{name=TLS_AES_256_GCM_SHA384; encryption=AES-256-GCM; ...}".
+    Returns the value for ``key`` (case-insensitive) or None."""
+    if not isinstance(text, str):
+        return None
+    import re
+    m = re.search(rf"{re.escape(key)}\s*=\s*([^;}}]+)", text, re.IGNORECASE)
+    return m.group(1).strip() if m else None
+
+
+def _dn_org(dn: Any) -> Optional[str]:
+    """Pull a human-friendly issuer/subject name out of a distinguished name.
+    Prefers the O= (organization); falls back to CN=; else the raw string.
+    e.g. "CN=WR2,O=Google Trust Services,C=US" -> "Google Trust Services"."""
+    if not isinstance(dn, str) or not dn.strip():
+        return None
+    org = _kv_field(dn.replace(",", ";"), "O")
+    if org:
+        return org
+    cn = _kv_field(dn.replace(",", ";"), "CN")
+    return cn or dn.strip()
+
+
+def _best_tls_version(protocols: Any) -> Optional[str]:
+    """Given a list of supported protocols, return the strongest one."""
+    order = ["TLS 1.3", "TLS 1.2", "TLS 1.1", "TLS 1.0", "SSL 3.0", "SSL 2.0"]
+    if not isinstance(protocols, list):
+        return None
+    present = {str(p).strip() for p in protocols}
+    for v in order:
+        if v in present:
+            return v
+    return next(iter(present), None) if present else None
+
+
+def _first_cipher_name(tls_cfg: Dict[str, Any]) -> Optional[str]:
+    """Return the primary cipher-suite name, preferring TLS 1.3 then TLS 1.2."""
+    if not isinstance(tls_cfg, dict):
+        return None
+    for key in ("tls_1.3_cipher_suites", "tls_1.2_cipher_suites"):
+        block = tls_cfg.get(key)
+        suites = (block or {}).get("suites") if isinstance(block, dict) else None
+        if isinstance(suites, list) and suites:
+            first = suites[0]
+            name = _kv_field(first, "name") if isinstance(first, str) else (
+                first.get("name") if isinstance(first, dict) else None
+            )
+            if name:
+                return name
+    return None
+
+
+def _build_domain_algorithm_stats(algorithm_scores: Any) -> List[Dict[str, Any]]:
+    """Aggregate pqc_analysis.algorithm_scores (flat list with repeats) into a
+    nested per-algorithm rollup, mirroring the repo/asset indices so the
+    dashboard can do occurrence-weighted / category / deprecated aggregations."""
+    agg: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(algorithm_scores, list):
+        return []
+    for a in algorithm_scores:
+        if not isinstance(a, dict):
+            continue
+        aname = (a.get("algorithm") or a.get("name") or "").strip()
+        if not aname:
+            continue
+        ctx = a.get("context") if isinstance(a.get("context"), dict) else {}
+        entry = agg.get(aname)
+        if entry is None:
+            entry = {
+                "name": aname,
+                "category": a.get("category") or a.get("algorithm_type"),
+                "algorithm_type": a.get("algorithm_type"),
+                "quantum_resistance_type": a.get("quantum_safety_reason") or a.get("resistance"),
+                "source_type": ctx.get("source"),
+                "security_level": a.get("security_level"),
+                "occurrences": 0,
+                "quantum_safe": bool(a.get("quantum_safe", False)),
+                "is_pqc": bool(a.get("is_pqc", False)),
+                "is_hybrid": bool(a.get("is_hybrid", False)),
+                "deprecated": bool(a.get("deprecated", False)),
+                "grade": a.get("grade"),
+                "_score_sum": 0.0,
+            }
+            agg[aname] = entry
+        entry["occurrences"] += 1
+        try:
+            entry["_score_sum"] += float(a.get("final_score") or 0.0)
+        except (TypeError, ValueError):
+            pass
+        entry["deprecated"] = entry["deprecated"] or bool(a.get("deprecated", False))
+        entry["is_pqc"] = entry["is_pqc"] or bool(a.get("is_pqc", False))
+    out: List[Dict[str, Any]] = []
+    for entry in agg.values():
+        occ = entry.pop("occurrences")
+        score_sum = entry.pop("_score_sum")
+        entry["occurrences"] = occ
+        entry["avg_score"] = round(score_sum / occ, 2) if occ else 0.0
+        out.append(entry)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -383,6 +561,52 @@ def index_domain(payload: DomainScanIngest):
         pqc_score = float(scan.get("pqc_overall_score") or 0)
         quantum_ready = bool(scan.get("pqc_quantum_ready") or scan.get("quantum_ready") or False)
 
+        # ---- Deep extraction from raw_response ---------------------------------
+        # The scan-service produces a rich `raw_response`, but the top-level
+        # shortcut fields (primary_cipher_suite, cert_issuer, public_key_algorithm,
+        # hsts_enabled, ...) come through empty. Pull the real values from the
+        # nested payload so the domain dashboard has data to aggregate.
+        rr = scan.get("raw_response") if isinstance(scan.get("raw_response"), dict) else {}
+        tls_cfg = rr.get("tls_configuration") if isinstance(rr.get("tls_configuration"), dict) else {}
+        cert_chain = rr.get("certificate_chain") if isinstance(rr.get("certificate_chain"), dict) else {}
+        leaf = cert_chain.get("leaf_certificate") if isinstance(cert_chain.get("leaf_certificate"), dict) else {}
+        pa = rr.get("pqc_analysis") if isinstance(rr.get("pqc_analysis"), dict) else {}
+        sec = pa.get("security_features") if isinstance(pa.get("security_features"), dict) else {}
+        proto = pa.get("protocol_analysis") if isinstance(pa.get("protocol_analysis"), dict) else {}
+        comps = pa.get("components") if isinstance(pa.get("components"), dict) else {}
+
+        supported_protocols = (
+            tls_cfg.get("supported_protocols")
+            or proto.get("supported_versions")
+            or scan.get("supported_protocols")
+        )
+        deprecated_protocols = proto.get("deprecated_versions") or []
+        tls_version = scan.get("tls_version") or _best_tls_version(supported_protocols)
+        primary_cipher_suite = scan.get("primary_cipher_suite") or _first_cipher_name(tls_cfg)
+        cert_issuer = _dn_org(leaf.get("issuer")) or scan.get("cert_issuer")
+        cert_subject = leaf.get("subject") or scan.get("cert_subject")
+        public_key_algorithm = leaf.get("public_key_algorithm") or scan.get("public_key_algorithm")
+        public_key_size_bits = leaf.get("public_key_size") or scan.get("public_key_size_bits")
+        ct_present = leaf.get("certificate_transparency")
+        if ct_present is None:
+            ct_present = scan.get("ct_present")
+        pfs = sec.get("pfs_supported")
+        if pfs is None:
+            pfs = scan.get("ephemeral_key_exchange")
+        hsts_enabled = sec.get("hsts_enabled")
+        if hsts_enabled is None:
+            hsts_enabled = scan.get("hsts_enabled")
+
+        def _comp(name: str, key: str, default=None):
+            c = comps.get(name) if isinstance(comps.get(name), dict) else {}
+            return c.get(key, default)
+
+        algorithm_stats = _build_domain_algorithm_stats(pa.get("algorithm_scores"))
+        pqc_algorithm_names = sorted({s["name"] for s in algorithm_stats})
+        vulnerable_algorithms = sorted({
+            s["name"] for s in algorithm_stats if s.get("deprecated") or (s.get("avg_score") or 0) < 40
+        })
+
         doc = {
             # Common
             "scan_id": scan_id,
@@ -404,46 +628,59 @@ def index_domain(payload: DomainScanIngest):
             "completed_at": to_ist_iso(scan.get("completed_at")),
             "execution_time_seconds": scan.get("execution_time_seconds"),
             # PQC scoring
-            "pqc_overall_grade": scan.get("pqc_overall_grade"),
-            "pqc_overall_score": scan.get("pqc_overall_score"),
-            "pqc_security_level": scan.get("pqc_security_level"),
-            "pqc_quantum_ready": scan.get("pqc_quantum_ready"),
-            "pqc_hybrid_ready": scan.get("pqc_hybrid_ready"),
+            "pqc_overall_grade": scan.get("pqc_overall_grade") or pa.get("overall_grade"),
+            "pqc_overall_score": scan.get("pqc_overall_score") if scan.get("pqc_overall_score") is not None else pa.get("overall_score"),
+            "pqc_security_level": scan.get("pqc_security_level") or pa.get("security_level"),
+            "pqc_quantum_ready": scan.get("pqc_quantum_ready") if scan.get("pqc_quantum_ready") is not None else pa.get("quantum_ready"),
+            "pqc_hybrid_ready": scan.get("pqc_hybrid_ready") if scan.get("pqc_hybrid_ready") is not None else pa.get("hybrid_ready"),
             "original_pqc_score": scan.get("original_pqc_score"),
             "original_pqc_grade": scan.get("original_pqc_grade"),
-            "overall_grade": scan.get("pqc_overall_grade"),
-            "overall_score": pqc_score,
-            "quantum_ready": quantum_ready,
-            "quantum_readiness_percentage": pqc_score,
+            "overall_grade": scan.get("pqc_overall_grade") or pa.get("overall_grade"),
+            "overall_score": pqc_score or float(pa.get("overall_score") or 0),
+            "quantum_ready": quantum_ready or bool(pa.get("quantum_ready") or False),
+            "quantum_readiness_percentage": pqc_score or float(pa.get("overall_score") or 0),
             # TLS
-            "tls_version": scan.get("tls_version"),
-            "supported_protocols": scan.get("supported_protocols"),
-            "primary_cipher_suite": scan.get("primary_cipher_suite"),
-            "kex_score": scan.get("kex_score"),
-            "kex_grade": scan.get("kex_grade"),
+            "tls_version": tls_version,
+            "supported_protocols": supported_protocols,
+            "deprecated_protocols": deprecated_protocols,
+            "primary_cipher_suite": primary_cipher_suite,
+            "kex_score": scan.get("kex_score") if scan.get("kex_score") is not None else _comp("kex", "score"),
+            "kex_grade": scan.get("kex_grade") or _comp("kex", "grade"),
+            "kex_best_algorithm": _comp("kex", "best_algorithm"),
+            "kex_pqc_percentage": _comp("kex", "pqc_percentage"),
+            "symmetric_score": _comp("symmetric", "score"),
+            "symmetric_grade": _comp("symmetric", "grade"),
+            "signature_score": _comp("signature", "score"),
+            "signature_grade": _comp("signature", "grade"),
+            "hash_score": _comp("hash", "score"),
+            "hash_grade": _comp("hash", "grade"),
             # Certificate
             "cert_pqc_score": scan.get("cert_pqc_score"),
             "cert_pqc_grade": scan.get("cert_pqc_grade"),
             "cert_is_pqc": scan.get("cert_is_pqc"),
-            "cert_transparency": scan.get("cert_transparency"),
-            "cert_subject": scan.get("cert_subject"),
-            "cert_issuer": scan.get("cert_issuer"),
+            "cert_transparency": ct_present,
+            "cert_subject": cert_subject,
+            "cert_issuer": cert_issuer,
             "cert_serial_number": scan.get("cert_serial_number"),
-            "cert_not_before": to_ist_iso(scan.get("cert_not_before")),
-            "cert_not_after": to_ist_iso(scan.get("cert_not_after")),
-            "primary_signature_algorithm": scan.get("primary_signature_algorithm"),
-            "primary_hash_algorithm": scan.get("primary_hash_algorithm"),
-            "public_key_algorithm": scan.get("public_key_algorithm"),
-            "public_key_size_bits": scan.get("public_key_size_bits"),
+            "cert_not_before": to_ist_iso(leaf.get("valid_from") or scan.get("cert_not_before")),
+            "cert_not_after": to_ist_iso(leaf.get("valid_until") or scan.get("cert_not_after")),
+            "primary_signature_algorithm": scan.get("primary_signature_algorithm") or _comp("signature", "best_algorithm"),
+            "primary_hash_algorithm": scan.get("primary_hash_algorithm") or _comp("hash", "best_algorithm"),
+            "public_key_algorithm": public_key_algorithm,
+            "public_key_size_bits": public_key_size_bits,
             # Server hygiene
-            "ephemeral_key_exchange": scan.get("ephemeral_key_exchange"),
-            "hsts_enabled": scan.get("hsts_enabled"),
+            "ephemeral_key_exchange": pfs,
+            "hsts_enabled": hsts_enabled,
             "ocsp_stapling_active": scan.get("ocsp_stapling_active"),
-            "ct_present": scan.get("ct_present"),
+            "ct_present": ct_present,
+            # Per-algorithm rollup for occurrence-weighted dashboards
+            "algorithm_stats": algorithm_stats,
+            "algorithm_names": pqc_algorithm_names,
+            "vulnerable_algorithms": vulnerable_algorithms,
             # Errors
             "error_message": scan.get("error_message"),
-            # Vuln tally (simple heuristic for dashboards)
-            "vulnerabilities_count": 0 if quantum_ready else 1,
+            # Vuln tally (deprecated protocols + weak/deprecated algorithms)
+            "vulnerabilities_count": len(deprecated_protocols) + len(vulnerable_algorithms),
             # Full source
             "raw": scan,
         }
@@ -484,20 +721,35 @@ def index_repo(payload: RepoScanIngest):
         algorithms = scan.get("algorithms") or {}
         algorithm_names: List[str] = []
         vulnerable_algorithms: List[str] = []
+        algorithm_stats: List[Dict[str, Any]] = []
         findings_count = 0
         files_set = set()
         for algo_name, algo_data in (algorithms.items() if isinstance(algorithms, dict) else []):
             if not isinstance(algo_data, dict):
                 continue
             algorithm_names.append(algo_name)
-            if not algo_data.get("quantum_safe", False):
+            quantum_safe = bool(algo_data.get("quantum_safe", False))
+            if not quantum_safe:
                 vulnerable_algorithms.append(algo_name)
             algo_findings = algo_data.get("findings") or []
             findings_count += len(algo_findings)
             for f in algo_findings:
-                fp = f.get("file_path") if isinstance(f, dict) else None
+                fp = (f.get("file_path") or f.get("file")) if isinstance(f, dict) else None
                 if fp:
                     files_set.add(fp)
+            occ = int(algo_data.get("occurrences") or len(algo_findings) or 0)
+            resistance = algo_data.get("quantum_resistance_type") or algo_data.get("resistance")
+            algorithm_stats.append({
+                "name": algo_name,
+                "category": algo_data.get("category"),
+                "quantum_resistance_type": resistance,
+                "occurrences": occ,
+                "findings": len(algo_findings),
+                "quantum_safe": quantum_safe,
+                "is_pqc": bool(algo_data.get("is_pqc", False)),
+                "deprecated": bool(algo_data.get("deprecated", False)) or resistance == "deprecated",
+                "grade": algo_data.get("grade"),
+            })
 
         doc = {
             # Common
@@ -534,6 +786,7 @@ def index_repo(payload: RepoScanIngest):
             # Aggregates for KQL / Kibana visualisations
             "algorithm_names": algorithm_names,
             "vulnerable_algorithms": vulnerable_algorithms,
+            "algorithm_stats": algorithm_stats,
             "findings_count": findings_count,
             "files_with_findings": sorted(files_set)[:500],  # cap to avoid huge keyword arrays
             "vulnerabilities_count": int(scan.get("quantum_vulnerable_count") or len(vulnerable_algorithms)),
@@ -618,35 +871,68 @@ def index_asset(payload: AssetScanIngest):
 
         # Weak providers / ciphers counts
         weak_providers = 0
+        provider_names = []
         try:
             providers = (crypto_api.get("cryptographic_providers", {}) or {}).get("providers", []) or []
             for p in providers if isinstance(providers, list) else []:
                 name = (p if isinstance(p, str) else p.get("provider_name", "")) or ""
+                if not name:
+                    continue
+                provider_names.append(name)
                 if any(w in name for w in ("RSA", "MD5", "SHA1")) and "RSA-PSS" not in name:
                     weak_providers += 1
         except Exception:
             pass
 
         weak_ciphers = 0
+        strong_ciphers = 0
+        cipher_hash_algos = set()
+        cipher_kex = set()
         tls_protocols = []
         try:
             ciphers = (tls_cfg.get("cipher_suites", {}) or {}).get("cipher_details", []) or []
             for c in ciphers if isinstance(ciphers, list) else []:
                 cname = (c.get("name") if isinstance(c, dict) else c) or ""
-                if any(w in cname for w in ("DES", "RC4", "NULL", "EXPORT")):
+                if isinstance(c, dict):
+                    if c.get("hash_algorithm"):
+                        cipher_hash_algos.add(c.get("hash_algorithm"))
+                    if c.get("key_exchange"):
+                        cipher_kex.add(c.get("key_exchange"))
+                if any(w in cname.upper() for w in ("DES", "RC4", "NULL", "EXPORT", "ANON", "MD5")):
                     weak_ciphers += 1
+                elif cname:
+                    strong_ciphers += 1
             schannel = tls_cfg.get("schannel", {}) or {}
             for proto, settings in (schannel.items() if isinstance(schannel, dict) else []):
                 if isinstance(settings, dict) and settings.get("enabled"):
+                    tls_protocols.append(proto)
+            # Also derive enabled protocols from protocol_configurations
+            for pc in (tls_cfg.get("protocol_configurations", []) or []):
+                if not isinstance(pc, dict):
+                    continue
+                proto = pc.get("protocol")
+                client = str(pc.get("client_status", "")) or ""
+                server = str(pc.get("server_status", "")) or ""
+                if proto and (client.startswith("1") or server.startswith("1")):
                     tls_protocols.append(proto)
         except Exception:
             pass
 
         installed_names = []
         try:
-            for item in (installed.get("products", []) or installed.get("items", []) or []):
+            # The audit section is double-nested: installed_crypto_software.installed_crypto_software.software
+            inner = installed.get("installed_crypto_software", installed) if isinstance(installed, dict) else {}
+            if not isinstance(inner, dict):
+                inner = {}
+            items = (
+                inner.get("software")
+                or inner.get("products")
+                or inner.get("items")
+                or []
+            )
+            for item in items:
                 if isinstance(item, dict):
-                    installed_names.append(item.get("name") or item.get("product_name"))
+                    installed_names.append(item.get("name") or item.get("product_name") or item.get("DisplayName"))
                 elif isinstance(item, str):
                     installed_names.append(item)
         except Exception:
@@ -661,6 +947,58 @@ def index_asset(payload: AssetScanIngest):
                 )
         except Exception:
             pass
+
+        oid_algo_count = 0
+        try:
+            oid_algo_count = int((crypto_api.get("registered_oid_algorithms", {}) or {}).get("count", 0) or 0)
+        except Exception:
+            pass
+
+        # Per-algorithm scoring breakdown from pqc_score.algorithms (flat list with
+        # repeats) — aggregate by algorithm name into nested algorithm_stats.
+        algorithm_stats = []
+        try:
+            pqc = audit.get("pqc_score") if isinstance(audit.get("pqc_score"), dict) else {}
+            scored_algos = pqc.get("algorithm_scores") or pqc.get("algorithms") or []
+            agg: Dict[str, Dict[str, Any]] = {}
+            for a in scored_algos if isinstance(scored_algos, list) else []:
+                if not isinstance(a, dict):
+                    continue
+                aname = (a.get("algorithm") or a.get("name") or "").strip()
+                if not aname:
+                    continue
+                ctx = a.get("context") if isinstance(a.get("context"), dict) else {}
+                entry = agg.get(aname)
+                if entry is None:
+                    entry = {
+                        "name": aname,
+                        "category": a.get("category"),
+                        "algorithm_type": a.get("algorithm_type"),
+                        "quantum_resistance_type": a.get("quantum_resistance_type") or a.get("resistance"),
+                        "source_type": ctx.get("source_type"),
+                        "security_level": a.get("security_level"),
+                        "occurrences": 0,
+                        "quantum_safe": bool(a.get("quantum_safe", False)),
+                        "is_pqc": bool(a.get("is_pqc", False)),
+                        "deprecated": bool(a.get("deprecated", False)),
+                        "grade": a.get("grade"),
+                        "_score_sum": 0.0,
+                    }
+                    agg[aname] = entry
+                entry["occurrences"] += 1
+                try:
+                    entry["_score_sum"] += float(a.get("final_score") or 0.0)
+                except (TypeError, ValueError):
+                    pass
+                entry["deprecated"] = entry["deprecated"] or bool(a.get("deprecated", False))
+            for entry in agg.values():
+                occ = entry.pop("occurrences")
+                score_sum = entry.pop("_score_sum")
+                entry["occurrences"] = occ
+                entry["avg_score"] = round(score_sum / occ, 2) if occ else 0.0
+                algorithm_stats.append(entry)
+        except Exception:
+            logger.exception("Failed to build endpoint algorithm_stats")
 
         pqc_score_raw = (audit.get("pqc_score") or {}).get("overall_score") if isinstance(audit.get("pqc_score"), dict) else None
         try:
@@ -715,9 +1053,19 @@ def index_asset(payload: AssetScanIngest):
             "fips_mode_enabled": bool(crypto_api.get("fips_mode_enabled", False)),
             "weak_providers_count": weak_providers,
             "weak_ciphers_count": weak_ciphers,
-            "tls_protocols_enabled": [p for p in tls_protocols if p],
+            "strong_ciphers_count": strong_ciphers,
+            "cipher_suites_total": weak_ciphers + strong_ciphers,
+            "tls_protocols_enabled": sorted({p for p in tls_protocols if p}),
             "installed_crypto_software": [n for n in installed_names if n][:200],
+            "installed_crypto_software_count": len([n for n in installed_names if n]),
             "certificate_stores_count": cert_stores_count,
+            # Full crypto inventory
+            "crypto_providers": [n for n in provider_names if n][:200],
+            "crypto_providers_count": len([n for n in provider_names if n]),
+            "cipher_hash_algorithms": sorted({h for h in cipher_hash_algos if h}),
+            "cipher_key_exchanges": sorted({k for k in cipher_kex if k}),
+            "registered_oid_algorithms_count": oid_algo_count,
+            "algorithm_stats": algorithm_stats,
             # Scoring
             "overall_score": pqc_score,
             "quantum_readiness_percentage": pqc_score,

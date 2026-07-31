@@ -123,14 +123,27 @@ export interface ElkAnalystDashboard {
     }>;
   }>;
   domains: {
+    scanned: number;
     cipher_suites: ElkTermBucket[];
     public_key_algorithms: ElkTermBucket[];
     issuers: ElkTermBucket[];
     tls_versions: ElkTermBucket[];
+    supported_protocols: ElkTermBucket[];
+    deprecated_protocols: ElkTermBucket[];
+    key_sizes: ElkTermBucket[];
+    signature_algorithms: ElkTermBucket[];
     hsts: ElkTermBucket[];
     ocsp_stapling: ElkTermBucket[];
     ct_present: ElkTermBucket[];
     ephemeral_key_exchange: ElkTermBucket[];
+    quantum_ready: ElkTermBucket[];
+    hybrid_ready: ElkTermBucket[];
+    avg_score: number;
+    avg_kex_pqc: number;
+    top_algorithms_by_occurrence: ElkTermBucket[];
+    category_composition: ElkTermBucket[];
+    vulnerable_by_occurrence: ElkTermBucket[];
+    pqc_by_occurrence: ElkTermBucket[];
   };
   repos: {
     vulnerable_algorithms: ElkTermBucket[];
@@ -148,24 +161,40 @@ export interface ElkAnalystDashboard {
       quantum_safe: number;
       quantum_vulnerable: number;
     };
+    top_algorithms_by_occurrence: ElkTermBucket[];
+    vulnerable_by_occurrence: ElkTermBucket[];
+    category_composition: ElkTermBucket[];
+    deprecated_usage: ElkTermBucket[];
+    deprecated_total_occurrences: number;
   };
   endpoints: {
     fips: ElkTermBucket[];
     os: ElkTermBucket[];
     architectures: ElkTermBucket[];
-    weak_providers_by_host: Array<{
+    providers: ElkTermBucket[];
+    installed_software: ElkTermBucket[];
+    cipher_hash_algorithms: ElkTermBucket[];
+    by_host: Array<{
       host: string;
       scans: number;
+      avg_score: number;
+      grade: string | null;
+      os: string | null;
+      fips: string | boolean | null;
+      vulnerabilities: number;
+      weak_ciphers: number;
       weak_providers: number;
     }>;
-    weak_ciphers_by_host: Array<{
-      host: string;
-      scans: number;
-      weak_ciphers: number;
-    }>;
+    top_algorithms_by_occurrence: ElkTermBucket[];
+    category_composition: ElkTermBucket[];
+    vulnerable_by_occurrence: ElkTermBucket[];
+    deprecated_usage: ElkTermBucket[];
+    deprecated_total_occurrences: number;
     total_certificate_stores: number;
     total_weak_providers: number;
     total_weak_ciphers: number;
+    total_strong_ciphers: number;
+    avg_score: number;
   };
   at_risk: Array<{
     label: string;

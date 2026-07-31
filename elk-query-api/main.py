@@ -576,6 +576,49 @@ def analyst_dashboard(
                     "ct_present":      {"terms": {"field": "ct_present", "size": 2}},
                     "pfs":             {"terms": {"field": "ephemeral_key_exchange", "size": 2}},
                     "tls_versions":    {"terms": {"field": "tls_version", "size": 10}},
+                    "supported_protocols": {"terms": {"field": "supported_protocols", "size": 10}},
+                    "deprecated_protocols": {"terms": {"field": "deprecated_protocols", "size": 10}},
+                    "key_sizes":       {"terms": {"field": "public_key_size_bits", "size": 12}},
+                    "signature_algos": {"terms": {"field": "primary_signature_algorithm", "size": 10}},
+                    "avg_score":       {"avg": {"field": "overall_score"}},
+                    "avg_kex_pqc":     {"avg": {"field": "kex_pqc_percentage"}},
+                    "quantum_ready":   {"terms": {"field": "pqc_quantum_ready", "size": 2}},
+                    "hybrid_ready":    {"terms": {"field": "pqc_hybrid_ready", "size": 2}},
+                    # Occurrence-weighted rollups via nested algorithm_stats
+                    "algo_stats": {
+                        "nested": {"path": "algorithm_stats"},
+                        "aggs": {
+                            "top_by_occurrence": {
+                                "terms": {"field": "algorithm_stats.name", "size": 15,
+                                          "order": {"occ": "desc"}},
+                                "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                            },
+                            "by_category": {
+                                "terms": {"field": "algorithm_stats.category", "size": 15},
+                                "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                            },
+                            "vulnerable": {
+                                "filter": {"term": {"algorithm_stats.quantum_safe": False}},
+                                "aggs": {
+                                    "top": {
+                                        "terms": {"field": "algorithm_stats.name", "size": 15,
+                                                  "order": {"occ": "desc"}},
+                                        "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                                    },
+                                },
+                            },
+                            "pqc": {
+                                "filter": {"term": {"algorithm_stats.is_pqc": True}},
+                                "aggs": {
+                                    "top": {
+                                        "terms": {"field": "algorithm_stats.name", "size": 15,
+                                                  "order": {"occ": "desc"}},
+                                        "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                                    },
+                                },
+                            },
+                        },
+                    },
                 },
             },
             "repos": {
@@ -595,6 +638,42 @@ def analyst_dashboard(
                     "sum_true_pqc":            {"sum": {"field": "true_pqc_count"}},
                     "sum_quantum_safe":        {"sum": {"field": "quantum_safe_count"}},
                     "sum_quantum_vulnerable":  {"sum": {"field": "quantum_vulnerable_count"}},
+                    # Occurrence-weighted rollups via nested algorithm_stats
+                    "algo_stats": {
+                        "nested": {"path": "algorithm_stats"},
+                        "aggs": {
+                            "top_by_occurrence": {
+                                "terms": {"field": "algorithm_stats.name", "size": 15,
+                                          "order": {"occ": "desc"}},
+                                "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                            },
+                            "by_category": {
+                                "terms": {"field": "algorithm_stats.category", "size": 15},
+                                "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                            },
+                            "vulnerable": {
+                                "filter": {"term": {"algorithm_stats.quantum_safe": False}},
+                                "aggs": {
+                                    "top": {
+                                        "terms": {"field": "algorithm_stats.name", "size": 15,
+                                                  "order": {"occ": "desc"}},
+                                        "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                                    },
+                                },
+                            },
+                            "deprecated": {
+                                "filter": {"term": {"algorithm_stats.deprecated": True}},
+                                "aggs": {
+                                    "top": {
+                                        "terms": {"field": "algorithm_stats.name", "size": 15,
+                                                  "order": {"occ": "desc"}},
+                                        "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                                    },
+                                    "total_occ": {"sum": {"field": "algorithm_stats.occurrences"}},
+                                },
+                            },
+                        },
+                    },
                 },
             },
             "endpoints": {
@@ -603,17 +682,63 @@ def analyst_dashboard(
                     "fips":            {"terms": {"field": "fips_mode_enabled", "size": 2}},
                     "os":              {"terms": {"field": "os_info", "size": 10}},
                     "architectures":   {"terms": {"field": "architecture", "size": 10}},
-                    "weak_prov_by_host": {
-                        "terms": {"field": "hostname", "size": 15, "order": {"sum_w": "desc"}},
-                        "aggs": {"sum_w": {"sum": {"field": "weak_providers_count"}}},
-                    },
-                    "weak_cph_by_host": {
-                        "terms": {"field": "hostname", "size": 15, "order": {"sum_c": "desc"}},
-                        "aggs": {"sum_c": {"sum": {"field": "weak_ciphers_count"}}},
-                    },
+                    "providers":       {"terms": {"field": "crypto_providers", "size": 20}},
+                    "installed_software": {"terms": {"field": "installed_crypto_software", "size": 20}},
+                    "cipher_hashes":   {"terms": {"field": "cipher_hash_algorithms", "size": 15}},
                     "cert_stores":     {"sum": {"field": "certificate_stores_count"}},
                     "total_weak_prov": {"sum": {"field": "weak_providers_count"}},
                     "total_weak_cph":  {"sum": {"field": "weak_ciphers_count"}},
+                    "total_strong_cph": {"sum": {"field": "strong_ciphers_count"}},
+                    "avg_score":       {"avg": {"field": "overall_score"}},
+                    "by_host": {
+                        "terms": {"field": "hostname", "size": 25, "order": {"avg_score": "asc"}},
+                        "aggs": {
+                            "avg_score":     {"avg": {"field": "overall_score"}},
+                            "total_vulns":   {"max": {"field": "vulnerabilities_count"}},
+                            "weak_ciphers":  {"max": {"field": "weak_ciphers_count"}},
+                            "weak_providers": {"max": {"field": "weak_providers_count"}},
+                            "top_grade":     {"terms": {"field": "overall_grade", "size": 1}},
+                            "top_os":        {"terms": {"field": "os_info", "size": 1}},
+                            "top_fips":      {"terms": {"field": "fips_mode_enabled", "size": 1}},
+                        },
+                    },
+                    "algo_stats": {
+                        "nested": {"path": "algorithm_stats"},
+                        "aggs": {
+                            "top_by_occurrence": {
+                                "terms": {"field": "algorithm_stats.name", "size": 15,
+                                          "order": {"occ": "desc"}},
+                                "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                            },
+                            "by_category": {
+                                "terms": {"field": "algorithm_stats.category", "size": 15,
+                                          "order": {"occ": "desc"}},
+                                "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                            },
+                            "vulnerable": {
+                                "filter": {"term": {"algorithm_stats.quantum_safe": False}},
+                                "aggs": {
+                                    "top": {
+                                        "terms": {"field": "algorithm_stats.name", "size": 15,
+                                                  "order": {"occ": "desc"}},
+                                        "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                                    },
+                                    "total_occ": {"sum": {"field": "algorithm_stats.occurrences"}},
+                                },
+                            },
+                            "deprecated": {
+                                "filter": {"term": {"algorithm_stats.deprecated": True}},
+                                "aggs": {
+                                    "top": {
+                                        "terms": {"field": "algorithm_stats.name", "size": 15,
+                                                  "order": {"occ": "desc"}},
+                                        "aggs": {"occ": {"sum": {"field": "algorithm_stats.occurrences"}}},
+                                    },
+                                    "total_occ": {"sum": {"field": "algorithm_stats.occurrences"}},
+                                },
+                            },
+                        },
+                    },
                 },
             },
             "at_risk": {
@@ -699,18 +824,42 @@ def analyst_dashboard(
     # Domain
     dom = aggs.get("domains", {}) or {}
     domains = {
+        "scanned":                int(dom.get("doc_count") or 0),
         "cipher_suites":          _terms_list(dom.get("cipher_suites")),
         "public_key_algorithms":  _terms_list(dom.get("public_key_algos")),
         "issuers":                _terms_list(dom.get("issuers")),
         "tls_versions":           _terms_list(dom.get("tls_versions")),
+        "supported_protocols":    _terms_list(dom.get("supported_protocols")),
+        "deprecated_protocols":   _terms_list(dom.get("deprecated_protocols")),
+        "key_sizes":              _terms_list(dom.get("key_sizes")),
+        "signature_algorithms":   _terms_list(dom.get("signature_algos")),
         "hsts":                   _terms_list(dom.get("hsts")),
         "ocsp_stapling":          _terms_list(dom.get("ocsp")),
         "ct_present":             _terms_list(dom.get("ct_present")),
         "ephemeral_key_exchange": _terms_list(dom.get("pfs")),
+        "quantum_ready":          _terms_list(dom.get("quantum_ready")),
+        "hybrid_ready":           _terms_list(dom.get("hybrid_ready")),
+        "avg_score":              round(num(dom.get("avg_score")), 1),
+        "avg_kex_pqc":            round(num(dom.get("avg_kex_pqc")), 1),
     }
 
     # Repos
     rep = aggs.get("repos", {}) or {}
+    _astats = rep.get("algo_stats", {}) or {}
+
+    def _occ_buckets(agg: Dict[str, Any]) -> List[Dict[str, Any]]:
+        return [
+            {"key": b["key"], "count": int(num(b.get("occ")))}
+            for b in (agg or {}).get("buckets", [])
+        ]
+
+    # Domain occurrence-weighted algorithm rollups (nested algorithm_stats)
+    _dom_astats = dom.get("algo_stats", {}) or {}
+    domains["top_algorithms_by_occurrence"] = _occ_buckets(_dom_astats.get("top_by_occurrence"))
+    domains["category_composition"] = _occ_buckets(_dom_astats.get("by_category"))
+    domains["vulnerable_by_occurrence"] = _occ_buckets((_dom_astats.get("vulnerable") or {}).get("top"))
+    domains["pqc_by_occurrence"] = _occ_buckets((_dom_astats.get("pqc") or {}).get("top"))
+
     repos = {
         "vulnerable_algorithms": _terms_list(rep.get("vulnerable_algorithms")),
         "algorithm_names":       _terms_list(rep.get("algorithm_names")),
@@ -730,27 +879,50 @@ def analyst_dashboard(
             "quantum_safe": int(num(rep.get("sum_quantum_safe"))),
             "quantum_vulnerable": int(num(rep.get("sum_quantum_vulnerable"))),
         },
+        # Occurrence-weighted (how often each algorithm actually appears in code)
+        "top_algorithms_by_occurrence": _occ_buckets(_astats.get("top_by_occurrence")),
+        "vulnerable_by_occurrence": _occ_buckets(
+            (_astats.get("vulnerable") or {}).get("top")),
+        "category_composition": _occ_buckets(_astats.get("by_category")),
+        "deprecated_usage": _occ_buckets((_astats.get("deprecated") or {}).get("top")),
+        "deprecated_total_occurrences": int(num((_astats.get("deprecated") or {}).get("total_occ"))),
     }
 
     # Endpoints
     ep = aggs.get("endpoints", {}) or {}
+    _ep_astats = ep.get("algo_stats", {}) or {}
     endpoints = {
         "fips":           _terms_list(ep.get("fips")),
         "os":             _terms_list(ep.get("os")),
         "architectures":  _terms_list(ep.get("architectures")),
-        "weak_providers_by_host": [
-            {"host": b["key"], "scans": b["doc_count"],
-             "weak_providers": int(num(b.get("sum_w")))}
-            for b in ep.get("weak_prov_by_host", {}).get("buckets", [])
+        "providers":      _terms_list(ep.get("providers")),
+        "installed_software": _terms_list(ep.get("installed_software")),
+        "cipher_hash_algorithms": _terms_list(ep.get("cipher_hashes")),
+        "by_host": [
+            {
+                "host": b["key"],
+                "scans": b["doc_count"],
+                "avg_score": num(b.get("avg_score")),
+                "grade": _top_bucket_key(b.get("top_grade")),
+                "os": _top_bucket_key(b.get("top_os")),
+                "fips": _top_bucket_key(b.get("top_fips")),
+                "vulnerabilities": int(num(b.get("total_vulns"))),
+                "weak_ciphers": int(num(b.get("weak_ciphers"))),
+                "weak_providers": int(num(b.get("weak_providers"))),
+            }
+            for b in ep.get("by_host", {}).get("buckets", [])
         ],
-        "weak_ciphers_by_host": [
-            {"host": b["key"], "scans": b["doc_count"],
-             "weak_ciphers": int(num(b.get("sum_c")))}
-            for b in ep.get("weak_cph_by_host", {}).get("buckets", [])
-        ],
+        # Occurrence-weighted algorithm analytics (parity with repos)
+        "top_algorithms_by_occurrence": _occ_buckets(_ep_astats.get("top_by_occurrence")),
+        "category_composition":         _occ_buckets(_ep_astats.get("by_category")),
+        "vulnerable_by_occurrence":     _occ_buckets((_ep_astats.get("vulnerable") or {}).get("top")),
+        "deprecated_usage":             _occ_buckets((_ep_astats.get("deprecated") or {}).get("top")),
+        "deprecated_total_occurrences": int(num((_ep_astats.get("deprecated") or {}).get("total_occ"))),
         "total_certificate_stores": int(num(ep.get("cert_stores"))),
         "total_weak_providers":     int(num(ep.get("total_weak_prov"))),
         "total_weak_ciphers":       int(num(ep.get("total_weak_cph"))),
+        "total_strong_ciphers":     int(num(ep.get("total_strong_cph"))),
+        "avg_score":                num(ep.get("avg_score")),
     }
 
     # At-risk table
@@ -979,15 +1151,15 @@ def elk_vulnerabilities(
                 for f in algo_findings:
                     if not isinstance(f, dict):
                         continue
-                    fp = f.get("file_path")
+                    fp = f.get("file_path") or f.get("file")
                     if fp and fp not in files_seen:
                         files_seen.append(fp)
                     if len(samples) < 10:
                         samples.append({
                             "file_path": fp,
-                            "line_number": f.get("line_number"),
-                            "code_snippet": (f.get("code_snippet") or "")[:240],
-                            "match_text": f.get("match_text"),
+                            "line_number": f.get("line_number") or f.get("line"),
+                            "code_snippet": (f.get("code_snippet") or f.get("context") or "")[:240],
+                            "match_text": f.get("match_text") or f.get("match"),
                         })
 
                 evidence = {
@@ -2458,4 +2630,302 @@ def elk_application_detail(app_id: str):
         "suborganization": {"suborg_id": target_so["suborg_id"], "suborganization_name": target_so["suborganization_name"]},
         "application": enriched,
     }
+
+
+# ===========================================================================
+# /api/repo-patterns/* — Repo scanner regex pattern management
+# Separate index from crypto-algorithm-scores so domain scanning is unaffected.
+# ===========================================================================
+REPO_PATTERNS_INDEX = "crypto-repo-patterns"
+
+_SEED_DATA = [
+    {"algorithm": "AES", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bAES[-_]?(128|192|256)\b", r"\bAES[-_]?(GCM|CBC|CTR|CCM|ECB|CFB|OFB|XTS|SIV)\b", r"\bCipher\.AES\b", r"\bEVP_aes_", r"\bcrypto[./]aes\b", r"\bAES\.new\b", r"\bjavax\.crypto.*AES\b", r"\bAes\.(Create|Encrypt|Decrypt)\b"]},
+    {"algorithm": "ChaCha20", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bChaCha20\b(?![-_]?Poly)", r"\bchacha20\b(?![-_]?poly)", r"\bEVP_chacha20\b"]},
+    {"algorithm": "ChaCha20-Poly1305", "category": "Authenticated Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bChaCha20[-_]?Poly1305\b", r"\bchacha20[-_]?poly1305\b"]},
+    {"algorithm": "Salsa20", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSalsa20\b", r"\bsalsa20\b"]},
+    {"algorithm": "Twofish", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bTwofish\b", r"\btwofish\b"]},
+    {"algorithm": "Blowfish", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bBlowfish\b", r"\bblowfish\b", r"\bBF_"]},
+    {"algorithm": "Camellia", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bCamellia\b", r"\bcamellia\b"]},
+    {"algorithm": "ARIA", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bARIA[-_]?(128|192|256)\b", r"\bARIA[-_]?(CBC|GCM|CTR|ECB|CFB)\b"]},
+    {"algorithm": "Serpent", "category": "Symmetric Encryption", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSerpent\b"]},
+    {"algorithm": "3DES", "category": "Symmetric Encryption", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\b3DES\b", r"\bDES3\b", r"\bTripleDES\b", r"DES_EDE", r"EVP_des_ede"]},
+    {"algorithm": "DES", "category": "Symmetric Encryption", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bDES[-_]encrypt\b", r"\bEVP_des_\w+", r"\bDES[-_]?(CBC|ECB|CFB|OFB)\b", r"\bDES\.new\b", r"\bDESKeySpec\b"]},
+    {"algorithm": "RC4", "category": "Stream Cipher", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bRC4\b", r"\brc4\b", r"\bARC4\b", r"\bARCFOUR\b"]},
+    {"algorithm": "RC2", "category": "Symmetric Encryption", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bRC2\b"]},
+    {"algorithm": "IDEA", "category": "Symmetric Encryption", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bIDEA\b"]},
+    {"algorithm": "CAST5", "category": "Symmetric Encryption", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bCAST5\b", r"\bCAST[-_]128\b"]},
+    {"algorithm": "GCM", "category": "Cipher Mode", "quantum_resistance_type": "mode", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"[-_]GCM\b", r"\bGCM[-_]", r"\bGalois[/\s]*Counter[/\s]*Mode\b"]},
+    {"algorithm": "CBC", "category": "Cipher Mode", "quantum_resistance_type": "mode", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"[-_]CBC\b", r"\bmode[=:\s]+[\"']?CBC\b"]},
+    {"algorithm": "ECB", "category": "Cipher Mode", "quantum_resistance_type": "mode", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"[-_]ECB\b", r"\bmode[=:\s]+[\"']?ECB\b"]},
+    {"algorithm": "CTR", "category": "Cipher Mode", "quantum_resistance_type": "mode", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"[-_]CTR\b", r"\bmode[=:\s]+[\"']?CTR\b"]},
+    {"algorithm": "CCM", "category": "Cipher Mode", "quantum_resistance_type": "mode", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"[-_]CCM\b", r"\bmode[=:\s]+[\"']?CCM\b"]},
+    {"algorithm": "SHA-256", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHA256\b", r"\bsha256\b", r"SHA-256", r"EVP_sha256"]},
+    {"algorithm": "SHA-384", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHA384\b", r"\bsha384\b", r"SHA-384", r"EVP_sha384"]},
+    {"algorithm": "SHA-512", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHA512\b", r"\bsha512\b", r"SHA-512", r"EVP_sha512"]},
+    {"algorithm": "SHA-224", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHA224\b", r"\bsha224\b", r"SHA-224"]},
+    {"algorithm": "SHA3-256", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHA3[-_]256\b", r"\bsha3[-_]256\b"]},
+    {"algorithm": "SHA3-384", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHA3[-_]384\b", r"\bsha3[-_]384\b"]},
+    {"algorithm": "SHA3-512", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHA3[-_]512\b", r"\bsha3[-_]512\b"]},
+    {"algorithm": "BLAKE2", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bBLAKE2\b", r"\bblake2[bs]\b"]},
+    {"algorithm": "BLAKE3", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bBLAKE3\b", r"\bblake3\b"]},
+    {"algorithm": "Keccak", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bKeccak\b", r"\bkeccak\b"]},
+    {"algorithm": "SHAKE128", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHAKE[-_]?128\b", r"\bshake128\b"]},
+    {"algorithm": "SHAKE256", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bSHAKE[-_]?256\b", r"\bshake256\b"]},
+    {"algorithm": "RIPEMD-160", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bRIPEMD[-_]?160\b", r"\bripemd160\b"]},
+    {"algorithm": "Whirlpool", "category": "Hash Function", "quantum_resistance_type": "grover_resistant", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bWhirlpool\b", r"\bwhirlpool\b"]},
+    {"algorithm": "MD5", "category": "Hash Function", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bMD5\b", r"\bmd5\b", r"EVP_md5"]},
+    {"algorithm": "MD4", "category": "Hash Function", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bMD4\b", r"\bmd4\b"]},
+    {"algorithm": "SHA-1", "category": "Hash Function", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bSHA1\b", r"\bsha1\b", r"SHA-1", r"EVP_sha1"]},
+    {"algorithm": "HMAC", "category": "Message Authentication Code", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bHMAC\b", r"\bhmac\b", r"HMAC_"]},
+    {"algorithm": "CMAC", "category": "Message Authentication Code", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bCMAC\b", r"\bcmac\b"]},
+    {"algorithm": "Poly1305", "category": "Message Authentication Code", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bPoly1305\b", r"\bpoly1305\b"]},
+    {"algorithm": "PBKDF2", "category": "Key Derivation Function", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bPBKDF2\b", r"\bpbkdf2\b"]},
+    {"algorithm": "scrypt", "category": "Key Derivation Function", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bscrypt\b", r"\bSCRYPT\b"]},
+    {"algorithm": "Argon2", "category": "Key Derivation Function", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bArgon2\b", r"\bargon2[id]?\b"]},
+    {"algorithm": "bcrypt", "category": "Password Hashing", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bbcrypt\b", r"\bBCRYPT\b"]},
+    {"algorithm": "HKDF", "category": "Key Derivation Function", "quantum_resistance_type": "construction", "quantum_safe": True, "is_pqc": False,
+     "patterns": [r"\bHKDF\b", r"\bhkdf\b"]},
+    {"algorithm": "RSA", "category": "Asymmetric Encryption", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bRSA\b", r"\brsa[-_]?(1024|2048|3072|4096)\b", r"RSA_", r"PKCS1", r"EVP_PKEY_RSA"]},
+    {"algorithm": "ECDSA", "category": "Digital Signature", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bECDSA\b", r"\becdsa\b", r"EC_DSA", r"secp256[kr]1", r"prime256v1"]},
+    {"algorithm": "ECDH", "category": "Key Exchange", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bECDH\b", r"\becdh\b", r"EC_DH", r"ECDHE"]},
+    {"algorithm": "DSA", "category": "Digital Signature", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bDSA[-_](sign|verify|key|param)\b", r"\bDigital[\s_]Signature[\s_]Algorithm\b", r"\bEVP_PKEY_DSA\b"]},
+    {"algorithm": "DH", "category": "Key Exchange", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bDiffie[-_]?Hellman\b", r"\bDHE[-_]", r"\bEVP_PKEY_DH\b", r"\bDH[-_](param|key|gen)\b"]},
+    {"algorithm": "ElGamal", "category": "Asymmetric Encryption", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bElGamal\b", r"\belgamal\b"]},
+    {"algorithm": "Ed25519", "category": "Digital Signature", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bEd25519\b", r"\bed25519\b", r"EdDSA"]},
+    {"algorithm": "Ed448", "category": "Digital Signature", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bEd448\b", r"\bed448\b"]},
+    {"algorithm": "Curve25519", "category": "Key Exchange", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bCurve25519\b", r"\bcurve25519\b", r"X25519"]},
+    {"algorithm": "Curve448", "category": "Key Exchange", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bCurve448\b", r"\bcurve448\b", r"X448"]},
+    {"algorithm": "P-256", "category": "Elliptic Curve", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bP-256\b", r"\bsecp256r1\b", r"prime256v1"]},
+    {"algorithm": "P-384", "category": "Elliptic Curve", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bP-384\b", r"\bsecp384r1\b"]},
+    {"algorithm": "P-521", "category": "Elliptic Curve", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bP-521\b", r"\bsecp521r1\b"]},
+    {"algorithm": "secp256k1", "category": "Elliptic Curve", "quantum_resistance_type": "vulnerable", "quantum_safe": False, "is_pqc": False,
+     "patterns": [r"\bsecp256k1\b"]},
+    {"algorithm": "Kyber", "category": "PQC Key Encapsulation", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bKyber\b", r"\bkyber\b", r"ML-KEM", r"CRYSTALS-Kyber"]},
+    {"algorithm": "Dilithium", "category": "PQC Digital Signature", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bDilithium\b", r"\bdilithium\b", r"ML-DSA", r"CRYSTALS-Dilithium"]},
+    {"algorithm": "SPHINCS+", "category": "PQC Digital Signature", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bSPHINCS\+?\b", r"\bsphincs\b", r"SLH-DSA"]},
+    {"algorithm": "NTRU", "category": "PQC Encryption", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bNTRU\b", r"\bntru\b", r"NTRUEncrypt"]},
+    {"algorithm": "Falcon", "category": "PQC Digital Signature", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bFalcon[-_]?(512|1024)\b", r"\bFalcon\b(?![-_]?(?:[Bb]ird|[Hh]eavy))"]},
+    {"algorithm": "SABER", "category": "PQC Key Encapsulation", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bSABER\b(?!tooth)", r"\bLightSaber\b", r"\bFireSaber\b"]},
+    {"algorithm": "FrodoKEM", "category": "PQC Key Encapsulation", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bFrodoKEM\b", r"\bFrodo\b"]},
+    {"algorithm": "BIKE", "category": "PQC Key Encapsulation", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bBIKE[-_]?(L[135])\b"]},
+    {"algorithm": "HQC", "category": "PQC Key Encapsulation", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bHQC[-_]?(128|192|256)\b"]},
+    {"algorithm": "McEliece", "category": "PQC Key Encapsulation", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bMcEliece\b", r"\bClassic[-_]?McEliece\b"]},
+    {"algorithm": "XMSS", "category": "PQC Digital Signature", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bXMSS\b", r"\bxmss\b"]},
+    {"algorithm": "LMS", "category": "PQC Digital Signature", "quantum_resistance_type": "fully_resistant", "quantum_safe": True, "is_pqc": True,
+     "patterns": [r"\bLMS[-_]?(sign|verify|key)\b", r"\bHSS[-_]?LMS\b"]},
+    {"algorithm": "SIKE", "category": "PQC Key Encapsulation", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": True,
+     "patterns": [r"\bSIKE\b", r"\bSIDH\b"]},
+    {"algorithm": "Rainbow", "category": "PQC Digital Signature", "quantum_resistance_type": "deprecated", "quantum_safe": False, "is_pqc": True,
+     "patterns": [r"\bRainbow\b(?!.*color)"]},
+]
+
+
+class RepoPatternCreate(BaseModel):
+    algorithm: str
+    patterns: List[str]
+    category: str = "Unknown"
+    quantum_resistance_type: str = "unknown"
+    quantum_safe: bool = False
+    is_pqc: bool = False
+    description: str = ""
+    active: bool = True
+
+
+class RepoPatternUpdate(BaseModel):
+    patterns: Optional[List[str]] = None
+    category: Optional[str] = None
+    quantum_resistance_type: Optional[str] = None
+    quantum_safe: Optional[bool] = None
+    is_pqc: Optional[bool] = None
+    description: Optional[str] = None
+    active: Optional[bool] = None
+
+
+@app.get("/api/repo-patterns")
+def list_repo_patterns(
+    active: bool = Query(True),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+):
+    filters: List[Dict] = [{"term": {"active": active}}]
+    if search:
+        filters.append({"wildcard": {"algorithm": {"value": f"*{search.upper()}*"}}})
+    body = {
+        "query": {"bool": {"must": filters}},
+        "size": page_size,
+        "from": (page - 1) * page_size,
+        "sort": [{"algorithm.keyword": {"order": "asc"}}],
+    }
+    try:
+        result = es.search(index=REPO_PATTERNS_INDEX, body=body)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    hits = result["hits"]["hits"]
+    return {
+        "total": result["hits"]["total"]["value"],
+        "page": page,
+        "page_size": page_size,
+        "patterns": [{"id": h["_id"], **h["_source"]} for h in hits],
+    }
+
+
+@app.get("/api/repo-patterns/{name}")
+def get_repo_pattern(name: str):
+    result = _safe_search(REPO_PATTERNS_INDEX, {"query": {"term": {"algorithm.keyword": name.upper()}}})
+    if not result["hits"]["hits"]:
+        raise HTTPException(status_code=404, detail=f"Pattern '{name}' not found")
+    h = result["hits"]["hits"][0]
+    return {"id": h["_id"], **h["_source"]}
+
+
+@app.post("/api/repo-patterns")
+def create_repo_pattern(body: RepoPatternCreate):
+    name = body.algorithm.upper()
+    existing = _safe_search(REPO_PATTERNS_INDEX, {"query": {"term": {"algorithm.keyword": name}}})
+    if existing["hits"]["hits"]:
+        raise HTTPException(status_code=409, detail=f"Pattern '{name}' already exists")
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    doc = {**body.dict(), "algorithm": name, "created_at": now, "updated_at": now}
+    result = es.index(index=REPO_PATTERNS_INDEX, document=doc, refresh=True)
+    return {"id": result["_id"], "algorithm": name, "status": "created"}
+
+
+@app.put("/api/repo-patterns/{name}")
+def update_repo_pattern(name: str, body: RepoPatternUpdate):
+    existing = _safe_search(REPO_PATTERNS_INDEX, {"query": {"term": {"algorithm.keyword": name.upper()}}})
+    if not existing["hits"]["hits"]:
+        raise HTTPException(status_code=404, detail=f"Pattern '{name}' not found")
+    h = existing["hits"]["hits"][0]
+    doc = h["_source"]
+    for field, val in body.dict(exclude_none=True).items():
+        doc[field] = val
+    doc["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
+    es.index(index=REPO_PATTERNS_INDEX, id=h["_id"], document=doc, refresh=True)
+    return {"algorithm": name.upper(), "status": "updated"}
+
+
+@app.delete("/api/repo-patterns/{name}")
+def delete_repo_pattern(name: str):
+    existing = _safe_search(REPO_PATTERNS_INDEX, {"query": {"term": {"algorithm.keyword": name.upper()}}})
+    if not existing["hits"]["hits"]:
+        raise HTTPException(status_code=404, detail=f"Pattern '{name}' not found")
+    h = existing["hits"]["hits"][0]
+    doc = h["_source"]
+    doc["active"] = False
+    doc["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
+    es.index(index=REPO_PATTERNS_INDEX, id=h["_id"], document=doc, refresh=True)
+    return {"algorithm": name.upper(), "status": "deactivated"}
+
+
+@app.post("/api/repo-patterns/_seed")
+def seed_repo_patterns(overwrite: bool = Query(False, description="Overwrite existing patterns")):
+    """Populate crypto-repo-patterns with all built-in regex patterns."""
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    created, skipped, updated = 0, 0, 0
+    for entry in _SEED_DATA:
+        name = entry["algorithm"].upper()
+        existing = _safe_search(REPO_PATTERNS_INDEX, {"query": {"term": {"algorithm.keyword": name}}})
+        if existing["hits"]["hits"]:
+            if overwrite:
+                h = existing["hits"]["hits"][0]
+                doc = {**entry, "algorithm": name, "updated_at": now, "active": True}
+                es.index(index=REPO_PATTERNS_INDEX, id=h["_id"], document=doc)
+                updated += 1
+            else:
+                skipped += 1
+            continue
+        doc = {**entry, "algorithm": name, "created_at": now, "updated_at": now, "active": True}
+        es.index(index=REPO_PATTERNS_INDEX, document=doc)
+        created += 1
+    es.indices.refresh(index=REPO_PATTERNS_INDEX)
+    return {
+        "status": "ok",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "total_seed_entries": len(_SEED_DATA),
+        "message": f"Seeded {created} new, updated {updated}, skipped {skipped} existing patterns.",
+    }
+
+
+@app.post("/api/repo-patterns/_refresh-cache")
+async def refresh_repo_patterns_cache():
+    """Tell repo-scanner to reload its pattern cache."""
+    import httpx
+    repo_url = os.getenv("REPO_SCANNER_URL", "http://repo-scanner:8001")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(f"{repo_url}/patterns/refresh")
+            return {"status": "ok", "repo_scanner_response": r.json()}
+    except Exception as e:
+        return {"status": "warning", "message": f"Cache refresh call failed: {e}"}
 

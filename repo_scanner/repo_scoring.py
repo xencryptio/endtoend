@@ -154,6 +154,7 @@ class RepoScoringEngine:
             import os
             from elasticsearch import Elasticsearch
             es_url = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+            # Use elasticsearch 8.x client (compatible with ES 8.13.4)
             es = Elasticsearch([es_url], request_timeout=3)
             doc = es.get(index="crypto-config", id="algorithm-scores-version")
             return float(doc["_source"].get("last_modified", 0.0))
@@ -167,6 +168,7 @@ class RepoScoringEngine:
         print(f"[REPO_SCORING] Loading algorithms from ES at {es_url}")
         try:
             from elasticsearch import Elasticsearch
+            # Use elasticsearch 8.x client (compatible with ES 8.13.4)
             es = Elasticsearch([es_url], request_timeout=5)
             result = es.search(
                 index="crypto-algorithm-scores",

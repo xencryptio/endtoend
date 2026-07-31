@@ -31,6 +31,7 @@ from logging_config import setup_logging
 from exceptions import APIError
 from logging_middleware import correlation_middleware
 from repo_scoring import RepoScoringEngine
+from crypto_patterns_loader import get_crypto_patterns, verify_patterns_in_es, refresh_patterns_cache
 
 # --- Logging Setup ---
 setup_logging("REPO-SCANNER", logging.DEBUG)
@@ -148,6 +149,7 @@ def _es_to_list_item(r: dict) -> dict:
         "last_scanned": r.get("last_scanned") or r.get("scanned_at"),
         "scan_status": r.get("scan_status", "completed"),
         "total_files": r.get("total_files") or raw.get("total_files", 0),
+        "total_algorithms": r.get("total_algorithms") or raw.get("total_algorithms", 0),
         "quantum_safe_count": r.get("quantum_safe_count", 0),
         "quantum_vulnerable_count": r.get("quantum_vulnerable_count", 0),
         "current_status": r.get("current_status") or raw.get("current_status", "Scan completed"),
@@ -240,550 +242,49 @@ async def score_repository_remote(algorithms_dict: Dict) -> Dict:
         return {"error": str(e)}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CRYPTO_PATTERNS — Industry-ready cryptographic algorithm detection
+# CRYPTO_PATTERNS — Loaded from Elasticsearch (Single Source of Truth)
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# Design principles for FALSE POSITIVE elimination:
-# 1. Use \b word boundaries on ALL patterns
-# 2. Negative lookaheads to exclude variable names, URLs, CSS classes etc.
-# 3. Require cryptographic CONTEXT (API calls, imports, config) not just keywords
-# 4. DES pattern excludes DESCRIBE, DESKTOP, DESIGN, DESTROY, etc.
-# 5. DH pattern excludes DHCP, DHT (BitTorrent), etc.
-# 6. LMS/HQC patterns require uppercase or crypto-context to avoid natural language
-# 7. Falcon excludes bird references, SABER excludes "Sabertooth", etc.
+# IMPORTANT: Algorithm detection patterns are now loaded from Elasticsearch
+# at startup, shared with domain scanning service. This ensures:
 #
-CRYPTO_PATTERNS = {
-    # ── Symmetric Encryption ──────────────────────────────────────────────
-    'AES': {
-        'patterns': [
-            r'\bAES[-_]?(128|192|256)\b',      # AES-256, AES_128, etc.
-            r'\bAES[-_]?(GCM|CBC|CTR|CCM|ECB|CFB|OFB|XTS|SIV)\b',  # AES with mode
-            r'\bCipher\.AES\b',                  # PyCryptodome
-            r'\bEVP_aes_',                        # OpenSSL C API
-            r'\bcrypto[./]aes\b',                 # Go/Node crypto packages
-            r'\bAES\.new\b',                      # PyCrypto/PyCryptodome
-            r'\bjavax\.crypto.*AES\b',            # Java JCA
-            r'\bAes\.(Create|Encrypt|Decrypt)\b', # .NET
-            r'\bAES\b(?![-_]?[a-z]{3,})',         # Bare AES with negative lookahead for non-crypto words
-        ],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    'ChaCha20': {
-        'patterns': [
-            r'\bChaCha20\b(?![-_]?Poly)',         # ChaCha20 alone (not ChaCha20-Poly1305)
-            r'\bchacha20\b(?![-_]?poly)',
-            r'\bCHACHA20\b(?![-_]?POLY)',
-            r'\bEVP_chacha20\b',
-        ],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    'ChaCha20-Poly1305': {
-        'patterns': [r'\bChaCha20[-_]?Poly1305\b', r'\bchacha20[-_]?poly1305\b', r'\bCHACHA20[-_]?POLY1305\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Authenticated Encryption'
-    },
-    'Salsa20': {
-        'patterns': [r'\bSalsa20\b', r'\bsalsa20\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    'Twofish': {
-        'patterns': [r'\bTwofish\b', r'\btwofish\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    'Blowfish': {
-        'patterns': [r'\bBlowfish\b', r'\bblowfish\b', r'\bBF_'],  # \bBF_ prevents matching ctbf_, tbf_ (NTT butterfly ops)
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    'Camellia': {
-        'patterns': [r'\bCamellia\b', r'\bcamellia\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    'ARIA': {
-        'patterns': [
-            r'\bARIA[-_]?(128|192|256)\b',         # ARIA-128, ARIA-256
-            r'\bARIA[-_]?(CBC|GCM|CTR|ECB|CFB)\b', # ARIA with mode
-            r'\bARIA\b(?![-_]?[Ll]abel|[-_]?[Hh]idden|[-_]?[Ll]ive|[-_]?[Rr]ole|[-_]?[Dd]escrib)',  # Exclude HTML aria-*
-        ],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    '3DES': {
-        'patterns': [r'\b3DES\b', r'\bDES3\b', r'\bTripleDES\b', r'DES_EDE', r'EVP_des_ede'],
-        'quantum_resistance_type': 'deprecated',  # Weak even classically
-        'min_quantum_safe_keysize': None,
-        'category': 'Symmetric Encryption (Weak)'
-    },
-    'DES': {
-        'patterns': [
-            r'\bDES[-_]encrypt\b',                # OpenSSL API
-            r'\bEVP_des_\w+',                      # OpenSSL EVP
-            r'\bDES[-_]?(CBC|ECB|CFB|OFB)\b',      # DES with mode
-            r'\bDES\.new\b',                       # PyCrypto
-            r'\bCipher\.DES\b',                    # PyCryptodome
-            r'\bDESKeySpec\b',                     # Java
-            r'(?<![A-Za-z])DES(?![A-Za-z]|CRIB|CRIPT|IGN|TINY|TROY|KTOP|K_)',  # Bare DES, excluding DESCRIBE/DESIGN/DESKTOP/DESTROY
-        ],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Symmetric Encryption (Broken)'
-    },
-    'RC4': {
-        'patterns': [r'\bRC4\b', r'\brc4\b', r'\bARC4\b', r'\bARCFOUR\b'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Stream Cipher (Broken)'
-    },
-    'GCM': {
-        'patterns': [
-            r'[-_]GCM\b',                          # AES-GCM, AES_GCM
-            r'\bGCM[-_]',                           # GCM-SHA256 etc.
-            r'\bGalois[/\s]*Counter[/\s]*Mode\b',
-            r'\bmode[=:\s]+["\']?GCM\b',           # mode=GCM, mode: GCM
-        ],
-        'quantum_resistance_type': 'mode',
-        'min_quantum_safe_keysize': None,
-        'category': 'Cipher Mode (AEAD)'
-    },
-    'CBC': {
-        'patterns': [
-            r'[-_]CBC\b',                           # AES-CBC, DES_CBC
-            r'\bCBC[-_]',                           # CBC-MAC etc.
-            r'\bmode[=:\s]+["\']?CBC\b',           # mode=CBC
-            r'\bCipher[./]Block[./]Chaining\b',
-        ],
-        'quantum_resistance_type': 'mode',
-        'min_quantum_safe_keysize': None,
-        'category': 'Cipher Mode'
-    },
-    'CTR': {
-        'patterns': [
-            r'[-_]CTR\b',                           # AES-CTR
-            r'\bmode[=:\s]+["\']?CTR\b',
-            r'\bCounter[/\s]*Mode\b',
-        ],
-        'quantum_resistance_type': 'mode',
-        'min_quantum_safe_keysize': None,
-        'category': 'Cipher Mode'
-    },
-    'CCM': {
-        'patterns': [
-            r'[-_]CCM\b',                           # AES-CCM
-            r'\bmode[=:\s]+["\']?CCM\b',
-        ],
-        'quantum_resistance_type': 'mode',
-        'min_quantum_safe_keysize': None,
-        'category': 'Cipher Mode (AEAD)'
-    },
-    'ECB': {
-        'patterns': [
-            r'[-_]ECB\b',                           # AES-ECB
-            r'\bmode[=:\s]+["\']?ECB\b',
-            r'\bElectronic[/\s]*Codebook\b',
-        ],
-        'quantum_resistance_type': 'mode',
-        'min_quantum_safe_keysize': None,
-        'category': 'Cipher Mode (Insecure)'
-    },
-    'SHA-256': {
-        'patterns': [r'\bSHA256\b', r'\bsha256\b', r'SHA-256', r'sha_256', r'EVP_sha256'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,  # Need 384+ bits output for quantum safety
-        'category': 'Hash Function'
-    },
-    'SHA-384': {
-        'patterns': [r'\bSHA384\b', r'\bsha384\b', r'SHA-384', r'EVP_sha384'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'SHA-512': {
-        'patterns': [r'\bSHA512\b', r'\bsha512\b', r'SHA-512', r'EVP_sha512'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'SHA-224': {
-        'patterns': [r'\bSHA224\b', r'\bsha224\b', r'SHA-224'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'SHA3-256': {
-        'patterns': [r'\bSHA3[-_]256\b', r'\bsha3[-_]256\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'SHA3-384': {
-        'patterns': [r'\bSHA3[-_]384\b', r'\bsha3[-_]384\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'SHA3-512': {
-        'patterns': [r'\bSHA3[-_]512\b', r'\bsha3[-_]512\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'BLAKE2': {
-        'patterns': [r'\bBLAKE2\b', r'\bblake2[bs]\b', r'BLAKE2b', r'BLAKE2s'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'BLAKE3': {
-        'patterns': [r'\bBLAKE3\b', r'\bblake3\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'Keccak': {
-        'patterns': [r'\bKeccak\b', r'\bkeccak\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'RIPEMD-160': {
-        'patterns': [r'\bRIPEMD[-_]?160\b', r'\bripemd160\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'Whirlpool': {
-        'patterns': [r'\bWhirlpool\b', r'\bwhirlpool\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 384,
-        'category': 'Hash Function'
-    },
-    'MD5': {
-        'patterns': [r'\bMD5\b', r'\bmd5\b', r'EVP_md5'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Hash Function (Broken)'
-    },
-    'MD4': {
-        'patterns': [r'\bMD4\b', r'\bmd4\b'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Hash Function (Broken)'
-    },
-    'SHA-1': {
-        'patterns': [r'\bSHA1\b', r'\bsha1\b', r'SHA-1', r'EVP_sha1'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Hash Function (Weak)'
-    },
-    'HMAC': {
-        'patterns': [r'\bHMAC\b', r'\bhmac\b', r'HMAC_'],
-        'quantum_resistance_type': 'construction',  # Safety depends on underlying hash
-        'min_quantum_safe_keysize': None,
-        'category': 'Message Authentication Code'
-    },
-    'CMAC': {
-        'patterns': [r'\bCMAC\b', r'\bcmac\b'],
-        'quantum_resistance_type': 'construction',
-        'min_quantum_safe_keysize': None,
-        'category': 'Message Authentication Code'
-    },
-    'Poly1305': {
-        'patterns': [r'\bPoly1305\b', r'\bpoly1305\b'],
-        'quantum_resistance_type': 'construction',
-        'min_quantum_safe_keysize': None,
-        'category': 'Message Authentication Code'
-    },
-    'PBKDF2': {
-        'patterns': [r'\bPBKDF2\b', r'\bpbkdf2\b'],
-        'quantum_resistance_type': 'construction',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Derivation Function'
-    },
-    'scrypt': {
-        'patterns': [r'\bscrypt\b', r'\bSCRYPT\b'],
-        'quantum_resistance_type': 'construction',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Derivation Function'
-    },
-    'Argon2': {
-        'patterns': [r'\bArgon2\b', r'\bargon2[id]?\b'],
-        'quantum_resistance_type': 'construction',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Derivation Function'
-    },
-    'bcrypt': {
-        'patterns': [r'\bbcrypt\b', r'\bBCRYPT\b'],
-        'quantum_resistance_type': 'construction',
-        'min_quantum_safe_keysize': None,
-        'category': 'Password Hashing'
-    },
-    'HKDF': {
-        'patterns': [r'\bHKDF\b', r'\bhkdf\b'],
-        'quantum_resistance_type': 'construction',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Derivation Function'
-    },
-    'RSA': {
-        'patterns': [r'\bRSA\b', r'\brsa[-_]?(1024|2048|3072|4096)\b', r'RSA_', r'PKCS1', r'EVP_PKEY_RSA'],
-        'quantum_resistance_type': 'vulnerable',  # Broken by Shor's algorithm
-        'min_quantum_safe_keysize': None,
-        'category': 'Asymmetric Encryption'
-    },
-    'ECDSA': {
-        'patterns': [r'\bECDSA\b', r'\becdsa\b', r'EC_DSA', r'secp256[kr]1', r'prime256v1'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Digital Signature'
-    },
-    'ECDH': {
-        'patterns': [r'\bECDH\b', r'\becdh\b', r'EC_DH', r'ECDHE'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Exchange'
-    },
-    'DSA': {
-        'patterns': [
-            r'\bDSA[-_](sign|verify|key|param)\b',  # Crypto API context
-            r'\bDSA\b(?![-_]?[a-z])',                # Bare DSA, not part of ECDSA
-            r'\bDigital[\s_]Signature[\s_]Algorithm\b',
-            r'\bEVP_PKEY_DSA\b',
-        ],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Digital Signature'
-    },
-    'DH': {
-        'patterns': [
-            r'\bDiffie[-_]?Hellman\b',
-            r'\bDHE[-_]',                            # DHE-RSA, DHE-PSK etc.
-            r'\bEVP_PKEY_DH\b',
-            r'\bDH[-_](param|key|gen)\b',            # DH API context
-            r'\bDH\b(?!CP|T\b|tml|ttp)',             # Bare DH, excluding DHCP, DHT, etc.
-        ],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Exchange'
-    },
-    'ElGamal': {
-        'patterns': [r'\bElGamal\b', r'\belgamal\b'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Asymmetric Encryption'
-    },
-    'Ed25519': {
-        'patterns': [r'\bEd25519\b', r'\bed25519\b', r'EdDSA'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Digital Signature'
-    },
-    'Ed448': {
-        'patterns': [r'\bEd448\b', r'\bed448\b'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Digital Signature'
-    },
-    'Curve25519': {
-        'patterns': [r'\bCurve25519\b', r'\bcurve25519\b', r'X25519'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Exchange'
-    },
-    'Curve448': {
-        'patterns': [r'\bCurve448\b', r'\bcurve448\b', r'X448'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Key Exchange'
-    },
-    'P-256': {
-        'patterns': [r'\bP-256\b', r'\bsecp256r1\b', r'prime256v1'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Elliptic Curve'
-    },
-    'P-384': {
-        'patterns': [r'\bP-384\b', r'\bsecp384r1\b'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Elliptic Curve'
-    },
-    'P-521': {
-        'patterns': [r'\bP-521\b', r'\bsecp521r1\b'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Elliptic Curve'
-    },
-    'secp256k1': {
-        'patterns': [r'\bsecp256k1\b'],
-        'quantum_resistance_type': 'vulnerable',
-        'min_quantum_safe_keysize': None,
-        'category': 'Elliptic Curve (Bitcoin)'
-    },
-    'Kyber': {
-        'patterns': [r'\bKyber\b', r'\bkyber\b', r'ML-KEM', r'CRYSTALS-Kyber'],
-        'quantum_resistance_type': 'fully_resistant',  # TRUE PQC
-        'min_quantum_safe_keysize': None,  # PQC algorithms don't use traditional key sizes
-        'category': 'PQC Key Encapsulation',
-        'is_pqc': True
-    },
-    'Dilithium': {
-        'patterns': [r'\bDilithium\b', r'\bdilithium\b', r'ML-DSA', r'CRYSTALS-Dilithium'],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Digital Signature',
-        'is_pqc': True
-    },
-    'SPHINCS+': {
-        'patterns': [r'\bSPHINCS\+?\b', r'\bsphincs\b', r'SLH-DSA'],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Digital Signature',
-        'is_pqc': True
-    },
-    'NTRU': {
-        'patterns': [r'\bNTRU\b', r'\bntru\b', r'NTRUEncrypt'],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Encryption',
-        'is_pqc': True
-    },
-    'Falcon': {
-        'patterns': [
-            r'\bFalcon[-_]?(512|1024)\b',           # Falcon with parameter
-            r'\bFalcon\b(?![-_]?(?:[Bb]ird|[Hh]eavy|[Ss]peed|[Cc]rest|[Ee]ye))',  # Falcon not bird
-        ],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Digital Signature',
-        'is_pqc': True
-    },
-    'SABER': {
-        'patterns': [
-            r'\bSABER\b(?!tooth)',
-            r'\bLightSaber\b(?![-_]?(?:[Ss]word|[Ff]ight))',
-            r'\bFireSaber\b',
-        ],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Key Encapsulation',
-        'is_pqc': True
-    },
-    'FrodoKEM': {
-        'patterns': [r'\bFrodoKEM\b', r'\bFrodo\b'],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Key Encapsulation',
-        'is_pqc': True
-    },
-    'BIKE': {
-        'patterns': [
-            r'\bBIKE[-_]?(L[135])\b',              # BIKE-L1, BIKE-L3, BIKE-L5
-            r'\bBIKE\b(?![-_]?(?:[Ss]hare|[Rr]ack|[Ll]ane|[Rr]ide|[Ss]hop))',  # BIKE not bicycle
-        ],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Key Encapsulation',
-        'is_pqc': True
-    },
-    'HQC': {
-        'patterns': [
-            r'\bHQC[-_]?(128|192|256)\b',           # HQC with parameter
-            r'\bHQC\b(?=.*(?:[Kk]EM|[Ee]ncap|[Dd]ecap|[Cc]rypto|[Pp]ost[-_]?[Qq]uantum))',  # HQC in crypto context
-        ],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Key Encapsulation',
-        'is_pqc': True
-    },
-    'Rainbow': {
-        'patterns': [r'\bRainbow\b(?!.*color)'],
-        'quantum_resistance_type': 'deprecated',  # Broken PQC
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Digital Signature (Broken)',
-        'is_pqc': True
-    },
-    'XMSS': {
-        'patterns': [r'\bXMSS\b', r'\bxmss\b'],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Digital Signature',
-        'is_pqc': True
-    },
-    'LMS': {
-        'patterns': [
-            r'\bLMS[-_]?(sign|verify|key)\b',       # LMS in crypto context
-            r'\bHSS[-_]?LMS\b',                     # HSS/LMS hierarchical scheme
-            r'\bLMS\b(?=.*(?:[Ss]ignature|[Hh]ash[-_]?[Bb]ased|[Pp]ost[-_]?[Qq]uantum|NIST))',  # LMS with crypto context
-        ],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Digital Signature',
-        'is_pqc': True
-    },
-    # ── Additional PQC & Hybrid algorithms ────────────────────────────────
-    'McEliece': {
-        'patterns': [r'\bMcEliece\b', r'\bClassic[-_]?McEliece\b', r'\bmceliece\b'],
-        'quantum_resistance_type': 'fully_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Key Encapsulation',
-        'is_pqc': True
-    },
-    'SIKE': {
-        'patterns': [r'\bSIKE\b', r'\bSIDH\b'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'PQC Key Encapsulation (Broken)',
-        'is_pqc': True
-    },
-    'SHAKE128': {
-        'patterns': [r'\bSHAKE[-_]?128\b', r'\bshake128\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'Hash Function (XOF)'
-    },
-    'SHAKE256': {
-        'patterns': [r'\bSHAKE[-_]?256\b', r'\bshake256\b'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': None,
-        'category': 'Hash Function (XOF)'
-    },
-    'Serpent': {
-        'patterns': [r'\bSerpent\b(?=.*(?:[Cc]ipher|[Ee]ncrypt|[Dd]ecrypt|[Kk]ey|AES))'],
-        'quantum_resistance_type': 'grover_resistant',
-        'min_quantum_safe_keysize': 256,
-        'category': 'Symmetric Encryption'
-    },
-    'IDEA': {
-        'patterns': [r'\bIDEA\b(?=.*(?:[Cc]ipher|[Ee]ncrypt|[Dd]ecrypt|[Kk]ey|[Cc]rypto))'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Symmetric Encryption (Weak)'
-    },
-    'CAST5': {
-        'patterns': [r'\bCAST5\b', r'\bCAST[-_]128\b'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Symmetric Encryption (Weak)'
-    },
-    'RC2': {
-        'patterns': [r'\bRC2\b(?=.*(?:[Cc]ipher|[Ee]ncrypt|[Dd]ecrypt|[Kk]ey|[Cc]rypto))'],
-        'quantum_resistance_type': 'deprecated',
-        'min_quantum_safe_keysize': None,
-        'category': 'Symmetric Encryption (Broken)'
-    },
-}
+# 1. Single source of truth - admins manage patterns in ELK Algorithm Scorer UI
+# 2. No code deployment needed to add/update algorithms
+# 3. Case-insensitive matching to prevent false negatives
+# 4. Real-time pattern updates across all scanners
+#
+# Loading strategy:
+# 1. Try to load from ES index: crypto-algorithm-scores
+# 2. Fall back to minimal hardcoded patterns if ES unavailable
+# 3. Cache patterns for 10 minutes for performance
+# 4. Support case-insensitive matching on algorithm names
+
+def _load_crypto_patterns() -> Dict[str, Dict]:
+    """Load cryptographic algorithm patterns from Elasticsearch."""
+    logger.info("Loading cryptographic algorithm patterns from Elasticsearch...")
+    patterns = get_crypto_patterns(use_cache=True)
+    
+    # Verify we have patterns
+    if not patterns:
+        logger.warning("No patterns loaded from ES, this may indicate ES is unavailable or unconfigured")
+    else:
+        logger.info(f"✅ Successfully loaded {len(patterns)} algorithm patterns from ES")
+    
+    return patterns
+
+
+# Initialize CRYPTO_PATTERNS at startup
+# This will be populated from ES on first use
+_CRYPTO_PATTERNS_CACHE: Optional[Dict[str, Dict]] = None
+
+
+def get_cached_crypto_patterns() -> Dict[str, Dict]:
+    """Get cached crypto patterns, loading from ES if needed."""
+    global _CRYPTO_PATTERNS_CACHE
+    if _CRYPTO_PATTERNS_CACHE is None:
+        _CRYPTO_PATTERNS_CACHE = _load_crypto_patterns()
+    return _CRYPTO_PATTERNS_CACHE
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILE TYPE CLASSIFICATION - Prevents False Positives
@@ -1173,13 +674,39 @@ class CryptoScanner:
         self.file_count = 0
     
     def _compile_patterns(self) -> Dict[str, List[Tuple[re.Pattern, str]]]:
-        """Compile all regex patterns for efficiency"""
+        """Compile all regex patterns from ES for efficiency with case-insensitive matching"""
         compiled = {}
-        for algo, info in CRYPTO_PATTERNS.items():
-            compiled[algo] = [
-                (re.compile(pattern, re.IGNORECASE), pattern) 
-                for pattern in info['patterns']
-            ]
+        
+        # Load patterns from Elasticsearch (single source of truth)
+        try:
+            crypto_patterns = get_cached_crypto_patterns()
+            logger.info(f"[CryptoScanner] Loaded {len(crypto_patterns)} algorithms from ES for pattern compilation")
+        except Exception as e:
+            logger.error(f"[CryptoScanner] Failed to load patterns from ES: {e}. Patterns will be empty.")
+            crypto_patterns = {}
+        
+        for algo, info in crypto_patterns.items():
+            # Get patterns list - handle both 'patterns' array and 'pattern' single string
+            patterns_list = info.get('patterns', [])
+            if isinstance(patterns_list, str):
+                patterns_list = [patterns_list]
+            
+            if not patterns_list:
+                logger.warning(f"Algorithm {algo} has no patterns defined")
+                continue
+            
+            compiled[algo] = []
+            for pattern in patterns_list:
+                try:
+                    # IMPORTANT: Use re.IGNORECASE to match across case variations
+                    # This prevents missing matches like 'aes', 'AES', 'Aes', 'aeS'
+                    compiled_pattern = re.compile(pattern, re.IGNORECASE)
+                    compiled[algo].append((compiled_pattern, pattern))
+                except re.error as e:
+                    logger.warning(f"Invalid regex pattern for {algo}: {pattern} - {e}")
+                    continue
+        
+        logger.info(f"[CryptoScanner] Compiled {len(compiled)} algorithms with {sum(len(v) for v in compiled.values())} total regex patterns")
         return compiled
     
     def get_repo_hash(self) -> str:
@@ -1399,8 +926,13 @@ class CryptoScanner:
         """Get structured scan results"""
         algorithms_data = {}
         
+        # Load algorithm metadata from ES (same source as pattern compilation)
+        crypto_patterns = get_cached_crypto_patterns()
+        
         for algo in self.findings.keys():
-            info = CRYPTO_PATTERNS.get(algo, {})
+            # Use uppercase key for lookup (algorithm names stored uppercase in ES)
+            algo_upper = algo.upper()
+            info = crypto_patterns.get(algo_upper, crypto_patterns.get(algo, {}))
             occurrences = self.findings[algo]
 
             # ── Split commented vs. real (active-code) occurrences ──────────
@@ -1770,6 +1302,7 @@ class AllScansResponse(BaseModel):
     last_scanned: Optional[datetime] = None  # null for failed scans that never started
     scan_status: str
     total_files: Optional[int] = 0
+    total_algorithms: Optional[int] = 0
     quantum_safe_count: Optional[int] = 0
     quantum_vulnerable_count: Optional[int] = 0
     current_status: Optional[str] = None
@@ -1802,6 +1335,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    """Verify patterns are loaded from Elasticsearch on startup"""
+    logger.info("=" * 80)
+    logger.info("🚀 REPO SCANNER STARTUP - Verifying Cryptographic Algorithm Patterns")
+    logger.info("=" * 80)
+    
+    # Verify patterns are in ES
+    success, message = verify_patterns_in_es()
+    logger.info(message)
+    
+    if not success:
+        logger.warning("⚠️  No algorithm patterns found in Elasticsearch!")
+        logger.warning("   Admin must add algorithms via ELK Algorithm Scorer UI at: /elk/scorer")
+        logger.warning("   Repo scanner will use fallback patterns (limited functionality)")
+    
+    # Pre-load patterns into cache
+    try:
+        patterns = get_cached_crypto_patterns()
+        logger.info(f"✅ Pre-loaded {len(patterns)} algorithms into memory cache")
+    except Exception as e:
+        logger.error(f"Failed to pre-load patterns: {e}")
+    
+    logger.info("=" * 80)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -2048,7 +1606,7 @@ def _process_pending_scans_worker():
                     temp_dir = tempfile.mkdtemp()
                     subprocess.run(
                         ['git', 'clone', '--depth', '1', '--branch', branch_name, normalized_url, temp_dir],
-                        check=True, capture_output=True, timeout=60,
+                        check=True, capture_output=True, timeout=300,
                     )
                     temp_scanner = CryptoScanner(temp_dir)
                     repo_hash = temp_scanner.get_repo_hash()
@@ -2311,9 +1869,9 @@ async def get_algorithm_findings(
                 "directory": os.path.dirname(fp) or "root",
                 "findings": [
                     {
-                        "line_number": f.get('line', 0),
-                        "code_snippet": (f.get('context') or '')[:200],
-                        "match_text": f.get('match', '') or f.get('match_text', ''),
+                        "line_number": f.get('line') or f.get('line_number') or 0,
+                        "code_snippet": (f.get('context') or f.get('code_snippet') or '')[:200],
+                        "match_text": f.get('match') or f.get('match_text') or '',
                     }
                     for f in paginated
                 ],
@@ -2411,6 +1969,49 @@ async def delete_all_scans_endpoint():
 def health():
     logger.debug("Health check called")
     return {"status": "ok"}
+
+
+@app.get("/patterns/status")
+def patterns_status():
+    """Check status of cryptographic algorithm patterns from Elasticsearch"""
+    try:
+        patterns = get_cached_crypto_patterns()
+        success, message = verify_patterns_in_es()
+        
+        return {
+            "status": "ok" if success else "warning",
+            "patterns_loaded": len(patterns),
+            "es_message": message,
+            "es_index": "crypto-algorithm-scores",
+            "shared_with": "domain-scanner, tls-scanner",
+            "cache_ttl_seconds": 600,
+            "note": "Patterns are loaded from Elasticsearch (single source of truth)"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "es_index": "crypto-algorithm-scores"
+        }
+
+
+@app.post("/patterns/refresh")
+def refresh_patterns():
+    """Force refresh algorithm patterns from Elasticsearch"""
+    try:
+        refresh_patterns_cache()
+        patterns = get_cached_crypto_patterns()
+        return {
+            "status": "ok",
+            "message": f"Refreshed {len(patterns)} algorithms from Elasticsearch",
+            "patterns_count": len(patterns)
+        }
+    except Exception as e:
+        logger.error(f"Failed to refresh patterns: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to refresh patterns: {e}"
+        }
 
 
 if __name__ == '__main__':

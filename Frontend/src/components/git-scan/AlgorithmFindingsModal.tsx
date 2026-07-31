@@ -220,60 +220,68 @@ const FileView: React.FC<{ file: FileFinding, scanDetail: ScanDetail | null }> =
                 </div>
             }
         >
-            <div className="pl-6 border-l-2 border-primary/20 ml-2 mt-1 space-y-2 py-2">
+            <div className="pl-6 border-l-2 border-primary/20 ml-2 mt-1 space-y-3 py-2">
                 {file.findings.map((finding, index) => (
-                <div key={index} className="my-2">
-                  <div className="p-3 bg-muted/50 rounded-lg border">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-2 flex-wrap gap-2">
-                            <div className="flex items-center gap-2">
-                                <Code className="h-3 w-3" />
-                                <span className="font-mono">Line {finding.line_number}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 text-xs"
-                                    onClick={() => {
-                                        if (scanDetail) {
-                                            const githubUrl = `${scanDetail.repo_url.replace('.git', '')}/blob/${scanDetail.branch_name}/${file.file_path}#L${finding.line_number}`;
-                                            window.open(githubUrl, '_blank');
-                                        }
-                                    }}
-                                >
-                                    <ExternalLink className="h-3 w-3 mr-1" />
-                                    View on GitHub
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 text-xs"
-                                    onClick={() => navigator.clipboard.writeText(finding.code_snippet || '')}
-                                >
-                                    Copy
-                                </Button>
-                            </div>
+                <div key={index} className="group rounded-lg border bg-card overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-muted/40 border-b">
+                        <div className="flex items-center gap-2 text-xs">
+                            <span className="inline-flex items-center gap-1 font-mono font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                                <Code className="h-3 w-3" /> Line {finding.line_number}
+                            </span>
+                            {finding.match_text && (
+                                <span className="font-mono text-[11px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                    {finding.match_text}
+                                </span>
+                            )}
                         </div>
-                        {/* FIXED: Added proper overflow containment and word breaking */}
+                        <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-xs"
+                                onClick={() => {
+                                    if (scanDetail) {
+                                        const githubUrl = `${scanDetail.repo_url.replace('.git', '')}/blob/${scanDetail.branch_name}/${file.file_path}#L${finding.line_number}`;
+                                        window.open(githubUrl, '_blank');
+                                    }
+                                }}
+                            >
+                                <ExternalLink className="h-3 w-3 mr-1" />
+                                GitHub
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-xs"
+                                onClick={() => navigator.clipboard.writeText(finding.code_snippet || '')}
+                            >
+                                Copy
+                            </Button>
+                        </div>
+                    </div>
+                    <div className="flex items-stretch">
+                        <div className="shrink-0 select-none px-3 py-2 text-right font-mono text-xs text-muted-foreground bg-muted/20 border-r min-w-[3rem]">
+                            {finding.line_number}
+                        </div>
                         <div className="overflow-x-auto w-full">
-                          <pre className="text-xs !bg-background p-3 rounded !m-0 max-w-full overflow-x-auto">
-                              <code
-                                  className={`language-${getLanguage(file.file_path)} !whitespace-pre-wrap break-words`}
-                                  style={{ 
-                                    wordBreak: 'break-word',
-                                    overflowWrap: 'anywhere',
-                                    display: 'block',
-                                    maxWidth: '100%'
-                                  }}
-                                  dangerouslySetInnerHTML={{
-                                      __html: Prism.highlight(
-                                          finding.code_snippet || '',
-                                          Prism.languages[getLanguage(file.file_path)] || Prism.languages.clike,
-                                          getLanguage(file.file_path)
-                                      )
-                                  }} 
-                               />
-                          </pre>
+                            <pre className="text-xs !bg-transparent p-2 !m-0 max-w-full overflow-x-auto">
+                                <code
+                                    className={`language-${getLanguage(file.file_path)} !whitespace-pre-wrap break-words`}
+                                    style={{
+                                      wordBreak: 'break-word',
+                                      overflowWrap: 'anywhere',
+                                      display: 'block',
+                                      maxWidth: '100%'
+                                    }}
+                                    dangerouslySetInnerHTML={{
+                                        __html: Prism.highlight(
+                                            finding.code_snippet || '',
+                                            Prism.languages[getLanguage(file.file_path)] || Prism.languages.clike,
+                                            getLanguage(file.file_path)
+                                        )
+                                    }}
+                                 />
+                            </pre>
                         </div>
                     </div>
                 </div>

@@ -25,6 +25,7 @@ import ResultsELK from "./pages/ResultsELK";
 import ScanHistoryELK from "./pages/ScanHistoryELK";
 import PqcAnalystDashboard from "./pages/PqcAnalystDashboard";
 import ELKScorerDashboard from "./pages/ELKScorerDashboard";
+import ELKScorerRepo from "./pages/ELKScorerRepo";
 import ELKVulnerabilities from "./pages/ELKVulnerabilities";
 import OnboardingELK from "./pages/OnboardingELK";
 import ApplicationsELK from "./pages/ApplicationsELK";
@@ -60,6 +61,7 @@ const AnimatedRoutes = () => {
         <Route path="/elk/history"         element={<ProtectedRoute><ScanHistoryELK /></ProtectedRoute>} />
         <Route path="/elk/analyst"         element={<ProtectedRoute><PqcAnalystDashboard /></ProtectedRoute>} />
         <Route path="/elk/scorer"          element={<ProtectedRoute><ELKScorerDashboard /></ProtectedRoute>} />
+        <Route path="/elk/scorer-repo"     element={<ProtectedRoute><ELKScorerRepo /></ProtectedRoute>} />
         <Route path="/elk/vulnerabilities" element={<ProtectedRoute><ELKVulnerabilities /></ProtectedRoute>} />
         <Route path="/elk/onboarding"      element={<ProtectedRoute><OnboardingELK /></ProtectedRoute>} />
         <Route path="/elk/applications"    element={<ProtectedRoute><ApplicationsELK /></ProtectedRoute>} />

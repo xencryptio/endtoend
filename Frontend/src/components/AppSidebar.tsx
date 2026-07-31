@@ -47,6 +47,7 @@ const menuItems = [
   { title: "Scan Results", url: "/elk/results", icon: Database },
   { title: "Scan History", url: "/elk/history", icon: History },
   { title: "Algorithm Scorer", url: "/elk/scorer", icon: Activity },
+  { title: "Repo Pattern Scorer", url: "/elk/scorer-repo", icon: Activity },
   { title: "Readiness Assessment", url: "/Readinessanalysis", icon: ClipboardCheck },
   { title: "Migration Assist", url: "/migrationAssist", icon: ArrowRightLeft },
   { title: "Integration", url: "/integration", icon: Link2 },
