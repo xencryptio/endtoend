@@ -663,7 +663,7 @@ const PqcAnalystDashboard: React.FC = () => {
                     { label: "HSTS",                        data: domains.hsts,                    measured: true },
                     { label: "Certificate Transparency",    data: domains.ct_present,              measured: true },
                     { label: "Forward secrecy (eph. KEX)",  data: domains.ephemeral_key_exchange,  measured: true },
-                    { label: "OCSP stapling",               data: domains.ocsp_stapling,           measured: false },
+                    { label: "OCSP stapling",               data: domains.ocsp_stapling,           measured: true },
                   ].map(({ label, data: d, measured }) => {
                     const { enabled, total } = boolCounts(d);
                     const pct = total > 0 ? Math.round((enabled / total) * 100) : 0;

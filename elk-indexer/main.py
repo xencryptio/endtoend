@@ -174,6 +174,7 @@ INDEX_MAPPINGS = {
                 # Server hygiene
                 "ephemeral_key_exchange": {"type": "boolean"},
                 "hsts_enabled": {"type": "boolean"},
+                "hsts_max_age": {"type": "integer"},
                 "ocsp_stapling_active": {"type": "boolean"},
                 "ct_present": {"type": "boolean"},
                 "error_message": {"type": "text"},
@@ -474,6 +475,33 @@ def _first_cipher_name(tls_cfg: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _extract_hsts_ocsp(rr: Dict[str, Any]):
+    """HSTS + OCSP-stapling are collected by the scanner but land in
+    ``scanner_report.endpoints[].details`` (SSL-Labs shape), not in the
+    ``security_features`` block the scorer reads — so they always defaulted to
+    False. Pull the real signals straight from the scanner report.
+    Returns (hsts_enabled, hsts_max_age, ocsp_stapling_active)."""
+    report = rr.get("scanner_report") if isinstance(rr.get("scanner_report"), dict) else {}
+    endpoints = report.get("endpoints") if isinstance(report.get("endpoints"), list) else []
+    hsts_enabled = None
+    hsts_max_age = None
+    ocsp = None
+    for ep in endpoints:
+        details = (ep or {}).get("details") if isinstance(ep, dict) else None
+        if not isinstance(details, dict):
+            continue
+        policy = details.get("hstsPolicy") if isinstance(details.get("hstsPolicy"), dict) else {}
+        status = policy.get("status")
+        if status is not None and hsts_enabled is None:
+            hsts_enabled = str(status).lower().startswith("present")
+            hsts_max_age = policy.get("maxAge")
+        if "ocspStapling" in details and ocsp is None:
+            ocsp = bool(details.get("ocspStapling"))
+        if hsts_enabled is not None and ocsp is not None:
+            break
+    return hsts_enabled, hsts_max_age, ocsp
+
+
 def _build_domain_algorithm_stats(algorithm_scores: Any) -> List[Dict[str, Any]]:
     """Aggregate pqc_analysis.algorithm_scores (flat list with repeats) into a
     nested per-algorithm rollup, mirroring the repo/asset indices so the
@@ -593,9 +621,17 @@ def index_domain(payload: DomainScanIngest):
         pfs = sec.get("pfs_supported")
         if pfs is None:
             pfs = scan.get("ephemeral_key_exchange")
-        hsts_enabled = sec.get("hsts_enabled")
+        # HSTS + OCSP live in scanner_report.endpoints[].details (SSL-Labs shape),
+        # not in security_features — the scorer misses them, so read them here.
+        hsts_from_report, hsts_max_age, ocsp_from_report = _extract_hsts_ocsp(rr)
+        hsts_enabled = hsts_from_report
+        if hsts_enabled is None:
+            hsts_enabled = sec.get("hsts_enabled")
         if hsts_enabled is None:
             hsts_enabled = scan.get("hsts_enabled")
+        ocsp_stapling_active = ocsp_from_report
+        if ocsp_stapling_active is None:
+            ocsp_stapling_active = scan.get("ocsp_stapling_active")
 
         def _comp(name: str, key: str, default=None):
             c = comps.get(name) if isinstance(comps.get(name), dict) else {}
@@ -671,7 +707,8 @@ def index_domain(payload: DomainScanIngest):
             # Server hygiene
             "ephemeral_key_exchange": pfs,
             "hsts_enabled": hsts_enabled,
-            "ocsp_stapling_active": scan.get("ocsp_stapling_active"),
+            "hsts_max_age": hsts_max_age,
+            "ocsp_stapling_active": ocsp_stapling_active,
             "ct_present": ct_present,
             # Per-algorithm rollup for occurrence-weighted dashboards
             "algorithm_stats": algorithm_stats,
